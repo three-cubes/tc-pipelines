@@ -8,6 +8,15 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+### Added
+
+- **`github-app-token` composite action** (`.github/actions/github-app-token`) —
+  mints a short-lived GitHub App installation token for the `three-cubes-agent`
+  App by reading its App ID + private key from `kv-tc-agents` over WIF, so agents
+  authenticate as their own App identity with no GitHub-stored secret. Outputs
+  `token` / `app-slug` / `installation-id`. Prereq: the consumer's WIF identity
+  has Key Vault Secrets User on the vault (`ci-deploy-identity.bicep keyVaultName=…`).
+
 ### Changed
 
 - **`python-quality-gate.yml` now calls the fitness engine.** The reusable
