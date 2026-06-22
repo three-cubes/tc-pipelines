@@ -1,0 +1,110 @@
+name: 'GitHub App token (via Key Vault + WIF)'
+description: |
+  Mints a short-lived GitHub App installation token for an agent App, reading the
+  App ID + private key from Azure Key Vault over Workload Identity Federation — so
+  agents act as their OWN App identity (never a human's) and NO GitHub-stored secret
+  is needed. Secret-free by construction, the Three Cubes way.
+
+  Prereqs (one-time per consuming repo):
+    - The repo's WIF identity exists with Key Vault Secrets User on the vault —
+      provision via infra/bicep/ci-deploy-identity.bicep with keyVaultName=kv-tc-agents.
+    - Repo variables AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID.
+    - The agent GitHub App is installed on the repo; its App ID + private key are in
+      the vault (defaults: github-threecubes-agent-app-id / -private-key).
+    - Job permissions: id-token: write (WIF) and contents: read.
+
+  Usage (de-templated so the action.yml parser doesn't evaluate the docstring):
+    permissions: { id-token: write, contents: read }
+    steps:
+      - id: app
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@v1
+        with:
+          client-id:       {{ vars.AZURE_CLIENT_ID }}
+          tenant-id:       {{ vars.AZURE_TENANT_ID }}
+          subscription-id: {{ vars.AZURE_SUBSCRIPTION_ID }}
+      - run: gh pr create ...
+        env: { GH_TOKEN: '{{ steps.app.outputs.token }}' }
+
+inputs:
+  client-id:
+    description: WIF managed-identity client id (typically vars.AZURE_CLIENT_ID).
+    required: true
+  tenant-id:
+    description: Azure AD tenant id (typically vars.AZURE_TENANT_ID).
+    required: true
+  subscription-id:
+    description: Subscription id (typically vars.AZURE_SUBSCRIPTION_ID).
+    required: true
+  key-vault-name:
+    description: Key Vault holding the agent App credentials.
+    required: false
+    default: kv-tc-agents
+  app-id-secret:
+    description: Key Vault secret name for the agent App ID.
+    required: false
+    default: github-threecubes-agent-app-id
+  private-key-secret:
+    description: Key Vault secret name for the agent App private key (.pem).
+    required: false
+    default: github-threecubes-agent-private-key
+  owner:
+    description: Org/owner to scope the token to. Empty = the current repository's owner.
+    required: false
+    default: ''
+  repositories:
+    description: Comma/newline list of repos to scope the token to. Empty = the current repository only.
+    required: false
+    default: ''
+
+outputs:
+  token:
+    description: The GitHub App installation access token (masked).
+    value: ${{ steps.app-token.outputs.token }}
+  app-slug:
+    description: The App slug (e.g. three-cubes-agent) — use for the git author identity.
+    value: ${{ steps.app-token.outputs.app-slug }}
+  installation-id:
+    description: The installation id the token was minted for.
+    value: ${{ steps.app-token.outputs.installation-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Azure login (WIF)
+      uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@v1
+      with:
+        client-id: ${{ inputs.client-id }}
+        tenant-id: ${{ inputs.tenant-id }}
+        subscription-id: ${{ inputs.subscription-id }}
+
+    - name: Read agent App credentials from Key Vault
+      id: kv
+      shell: bash
+      env:
+        KV: ${{ inputs.key-vault-name }}
+        APP_ID_SECRET: ${{ inputs.app-id-secret }}
+        PK_SECRET: ${{ inputs.private-key-secret }}
+      run: |
+        set -euo pipefail
+        app_id="$(az keyvault secret show --vault-name "$KV" --name "$APP_ID_SECRET" --query value -o tsv)"
+        echo "::add-mask::${app_id}"
+        echo "app-id=${app_id}" >> "$GITHUB_OUTPUT"
+        pem="$(az keyvault secret show --vault-name "$KV" --name "$PK_SECRET" --query value -o tsv)"
+        # Mask every PEM line before it can surface in any later log.
+        while IFS= read -r line; do
+          [ -n "${line}" ] && echo "::add-mask::${line}"
+        done <<< "${pem}"
+        {
+          echo "private-key<<__TC_PEM_EOF__"
+          echo "${pem}"
+          echo "__TC_PEM_EOF__"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Mint installation token
+      id: app-token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        app-id: ${{ steps.kv.outputs.app-id }}
+        private-key: ${{ steps.kv.outputs.private-key }}
+        owner: ${{ inputs.owner }}
+        repositories: ${{ inputs.repositories }}

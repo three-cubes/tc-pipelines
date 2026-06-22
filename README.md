@@ -131,6 +131,32 @@ Design notes: [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) · migration: [do
 
 ---
 
+## Part 4 — Agent identity
+
+Agents act as a dedicated **GitHub App** (`three-cubes-agent`), not a human's account — so they open and prepare PRs that the gate (and, on control-plane paths, a human) then judges, with clean attribution and no shared personal credentials. The App's ID + private key live in `kv-tc-agents`; CI mints a short-lived installation token at runtime over WIF — no GitHub-stored secret.
+
+| Surface | Purpose |
+|---|---|
+| [`.github/actions/github-app-token`](.github/actions/github-app-token/action.yml) | WIF → read the agent App creds from Key Vault → mint a short-lived installation token. Outputs `token` (+ `app-slug`, `installation-id`). |
+
+```yaml
+# in a consumer repo workflow — authenticate git/gh as the agent App:
+permissions: { id-token: write, contents: read }
+steps:
+  - id: app
+    uses: three-cubes/tc-pipelines/.github/actions/github-app-token@v1
+    with:
+      client-id:       ${{ vars.AZURE_CLIENT_ID }}
+      tenant-id:       ${{ vars.AZURE_TENANT_ID }}
+      subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  - run: gh pr merge --auto --merge "$PR_URL"
+    env: { GH_TOKEN: ${{ steps.app.outputs.token }} }
+```
+
+Prereq: the repo's WIF identity needs Key Vault Secrets User on `kv-tc-agents` — provision once with `ci-deploy-identity.bicep keyVaultName=kv-tc-agents` (Part 2 quick start) and set the `AZURE_*` repo variables.
+
+---
+
 ## Principles
 
 - **One definition of the gate.** The Python gate is the `tc-fitness` binary + the consuming repo's `[tool.tc_fitness]` config. CI and local both invoke it.
