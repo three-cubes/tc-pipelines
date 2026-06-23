@@ -115,7 +115,7 @@ Each workflow's inputs, secrets, and defaults are documented in the header of th
 
 ## Part 2 — Azure-VM deploy
 
-**The main consumer is [tc-agent-zone](https://github.com/three-cubes/tc-agent-zone)'s `deploy-on-merge` pipeline** — it calls [`azure-vm-deploy.yml@v1`](.github/workflows/azure-vm-deploy.yml) to snapshot → apply → smoke `vm-openclaw` (and `vm-hermes-poc`) on every merge to `main`. Treat that connection as load-bearing: the workflow's inputs, secrets, and permissions are a **stable contract** — change it only behind a major version bump.
+**The main consumer is [tc-agent-zone](https://github.com/three-cubes/tc-agent-zone)'s `deploy-on-merge` pipeline** — it calls [`azure-vm-deploy.yml@v1`](.github/workflows/azure-vm-deploy.yml) to snapshot → apply → smoke `vm-openclaw` (and `vm-hermes-poc`) on every merge to `main`. Other repos depend on this workflow's inputs, secrets, and permissions staying the same, so do not change them in place: if you need to change them, ship the change behind a major version bump (`@v2`) and leave `@v1` working.
 
 Every Three Cubes repo that deploys to Azure VMs does it the same way: composite actions for the small steps (snapshot, WIF login, apply via run-command, smoke check), one reusable workflow for the end-to-end flow, and a Bicep module for the Azure-side identity. Consumers call these instead of re-implementing them.
 
@@ -196,3 +196,4 @@ Prereq: the repo's WIF identity needs Key Vault Secrets User on `kv-tc-agents` �
 ## Versioning
 
 Consumers pin `@v1` (the floating major) so changes roll out on the org dependency-cooldown cadence; the `v1.x.y` immutable tags mark exact baselines. Breaking changes go out only through major version bumps. This repo self-pins its own composites to `@v1`.
+
