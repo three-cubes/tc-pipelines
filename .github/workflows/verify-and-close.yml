@@ -1,0 +1,473 @@
+name: verify-and-close
+
+# Reusable (workflow_call) — the DETERMINISTIC close side of the Autonomous
+# Delivery loop (Autonomous Delivery Platform initiative · SP-C "Failure-Driven
+# Loop" · Increment-3 "Shape-as-orchestrator + enforcing hooks" · decision D5:
+# the loop lives in committed GitHub-Actions event-dispatch). SP-C-3.
+#
+# This is the automation that REPLACES a human/agent manually verifying a merge
+# and hand-marking the Linear issue Done. A consumer's on-merge-to-main workflow
+# `uses:` this reusable; it then, deterministically:
+#
+#   1. Resolves the linked Linear issue id from the merged branch name (org
+#      convention `<user>/<team>-<number>-<slug>`, e.g. `dan/sgo-156-...` =>
+#      SGO-156) or, failing that, the merged PR body.
+#   2. Runs the consumer's configurable POST-MERGE verification (`verify-command`
+#      — a smoke / E2E / deploy-verify script). This is the deterministic
+#      verification trigger; its green/red is the interim gate.
+#   3. On PASS: transitions the issue to Done via the Linear GraphQL API and
+#      posts a "verification-confirmed on <sha>" comment. This is the
+#      delivery-management **close** verb (the update -> harvest -> close model
+#      from the delivery-management MCP server, PLA-232; harvest-then-decay per
+#      PLA-241/PLA-242) expressed against Linear.
+#   4. On FAIL: moves the issue to a needs-fix state, adds a `needs-redispatch`
+#      label, and comments the failure log, so the backlog dispatcher picks it
+#      up — the failure is never silently dropped (SP-C failure-driven-next).
+#   5. Independent-verifier seam (SGO-169): a DOCUMENTED, currently-optional hook
+#      for the fresh-context verifier-agent judgment step, wired BETWEEN verify
+#      and close via `independent-verifier-verdict`. The interim gate is
+#      deterministic (verify job green); the verifier agent is the judgment
+#      upgrade. See `governance/loop/verify-and-close.md`.
+#
+# Injection-safe per the org workflow standard: every caller-supplied input and
+# every `github.event.*` field is env-bound before it reaches a shell body
+# (never interpolated into a `run:` string), so no value can break out of its
+# string context. The LINEAR_API_KEY secret is scoped to ONLY the Linear steps
+# (never the arbitrary consumer `verify-command` step).
+#
+# Part of the Autonomous Delivery Platform initiative (SP-C).
+
+on:
+  workflow_call:
+    inputs:
+      verify-command:
+        description: >-
+          The consumer's post-merge verification command (smoke / E2E /
+          deploy-verify). Run via `bash -c` with the repo checked out at the
+          merged sha. A zero exit = PASS (close the issue); non-zero = FAIL
+          (needs-fix + needs-redispatch). Env-bound, never interpolated.
+        type: string
+        required: true
+      runs-on:
+        description: "Runner label for the verify-and-close job."
+        type: string
+        default: "ubuntu-latest"
+      checkout:
+        description: >-
+          Check out the merged commit before running verify-command. Leave true
+          for smoke/E2E scripts that live in the repo; set false for a pure
+          remote deploy-verify that needs no working tree.
+        type: boolean
+        default: true
+      fetch-depth:
+        description: "Checkout fetch-depth (0 = full history)."
+        type: number
+        default: 1
+      working-directory:
+        description: "Directory verify-command runs in."
+        type: string
+        default: "."
+      merged-sha:
+        description: >-
+          The merged commit sha to verify + reference in the confirm comment.
+          Defaults to the triggering event's github.sha (the merge commit on a
+          push-to-main caller).
+        type: string
+        default: ""
+      branch-name:
+        description: >-
+          Override the merged branch used for issue resolution. Default empty =>
+          resolve the branch from the merged PR for merged-sha (works for merge,
+          squash, and rebase strategies alike, where github.ref_name is only
+          `main`).
+        type: string
+        default: ""
+      pr-body:
+        description: >-
+          Override the PR body scanned as the fallback issue-id source. Default
+          empty => read it from the merged PR for merged-sha.
+        type: string
+        default: ""
+      issue-id:
+        description: >-
+          Explicit Linear issue identifier (e.g. SGO-156) to close. Highest
+          precedence; skips branch/PR-body resolution when set.
+        type: string
+        default: ""
+      done-state:
+        description: >-
+          Linear workflow-state NAME the issue moves to on PASS. Matched
+          case-insensitively; falls back to the team's first `completed`-type
+          state if the name is absent.
+        type: string
+        default: "Done"
+      needs-fix-state:
+        description: >-
+          Linear workflow-state NAME the issue moves to on FAIL. Matched
+          case-insensitively; falls back to the team's first `unstarted` then
+          `backlog` state so the dispatcher can re-pick it.
+        type: string
+        default: "Todo"
+      needs-redispatch-label:
+        description: >-
+          Label added to the issue on FAIL so the backlog dispatcher re-queues
+          it. Created on the issue's team if it does not exist yet.
+        type: string
+        default: "needs-redispatch"
+      independent-verifier-verdict:
+        description: >-
+          SGO-169 SEAM (documented, currently-optional). The fresh-context
+          independent-verifier agent's verdict, wired BETWEEN verify and close.
+          One of pass | fail | skip. Default `pass` preserves the deterministic
+          interim gate (close on verify-green). A consumer that has adopted
+          SGO-169 runs it as an upstream job and passes its check-run conclusion
+          here; `fail` blocks the close and routes to needs-fix.
+        type: string
+        default: "pass"
+      fail-on-verify-failure:
+        description: >-
+          After the needs-fix bookkeeping, exit non-zero so the post-merge run
+          surfaces red (the deploy/smoke really did fail on main). The
+          needs-redispatch handoff happens first regardless.
+        type: boolean
+        default: true
+      linear-api-url:
+        description: "Linear GraphQL endpoint (override for testing/proxies)."
+        type: string
+        default: "https://api.linear.app/graphql"
+    secrets:
+      LINEAR_API_KEY:
+        description: >-
+          Linear API key used as the `Authorization` header for the GraphQL
+          transition + comment (a personal/workspace API key, sent verbatim with
+          NO `Bearer` prefix per the Linear API). See
+          governance/loop/verify-and-close.md for how a consumer wires it.
+        required: true
+
+# The reusable declares the least it needs; the effective grant is the
+# intersection with the caller job, so a consumer must grant at least these.
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  verify-and-close:
+    name: verify-and-close
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - name: Checkout merged commit
+        if: inputs.checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ inputs.merged-sha || github.sha }}
+          fetch-depth: ${{ inputs.fetch-depth }}
+          persist-credentials: false
+
+      - name: Resolve linked Linear issue id
+        id: resolve
+        # github.token + repository, the merged sha, and the caller overrides
+        # reach the script ONLY as env values — never interpolated into the
+        # body — injection-safe per the org standard.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MERGED_SHA: ${{ inputs.merged-sha || github.sha }}
+          ISSUE_ID_INPUT: ${{ inputs.issue-id }}
+          BRANCH_INPUT: ${{ inputs.branch-name }}
+          PR_BODY_INPUT: ${{ inputs.pr-body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          issue_id=""
+          branch=""
+          pr_body=""
+          sha="$MERGED_SHA"
+
+          # (1) explicit issue-id override wins outright.
+          if [[ -n "${ISSUE_ID_INPUT:-}" ]]; then
+            issue_id="$ISSUE_ID_INPUT"
+          fi
+
+          # (2) branch + body: caller overrides first, else resolve the merged
+          #     PR for this commit (robust across merge/squash/rebase, where the
+          #     push ref_name is only `main`).
+          [[ -n "${BRANCH_INPUT:-}" ]] && branch="$BRANCH_INPUT"
+          [[ -n "${PR_BODY_INPUT:-}" ]] && pr_body="$PR_BODY_INPUT"
+          if [[ -z "$branch" || -z "$pr_body" ]] && [[ -n "${GH_TOKEN:-}" ]]; then
+            if pr_json="$(gh api "repos/${GH_REPO}/commits/${sha}/pulls" 2>/dev/null)"; then
+              [[ -z "$branch" ]] && branch="$(jq -r '.[0].head.ref // ""' <<<"$pr_json")"
+              [[ -z "$pr_body" ]] && pr_body="$(jq -r '.[0].body // ""' <<<"$pr_json")"
+            else
+              echo "resolve: no PR found for ${sha} (or token lacks pull-requests:read)."
+            fi
+          fi
+
+          # (3) parse the issue id from the branch, org convention
+          #     <user>/<team>-<number>-<slug> => <TEAM>-<number>.
+          if [[ -z "$issue_id" && -n "$branch" ]]; then
+            rest="${branch#*/}"
+            if [[ "$rest" =~ ^([A-Za-z]+)-([0-9]+)(-|$) ]]; then
+              team="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')"
+              issue_id="${team}-${BASH_REMATCH[2]}"
+            fi
+          fi
+
+          # (4) fallback: scan the PR body for an explicit Linear identifier.
+          if [[ -z "$issue_id" && -n "$pr_body" ]]; then
+            issue_id="$(grep -oE '[A-Z]{2,}-[0-9]+' <<<"$pr_body" | head -n1 || true)"
+          fi
+
+          resolved=false
+          [[ -n "$issue_id" ]] && resolved=true
+
+          {
+            echo "issue-id=$issue_id"
+            echo "resolved=$resolved"
+            echo "branch=$branch"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+          if [[ "$resolved" == "true" ]]; then
+            echo "resolve: linked Linear issue = $issue_id (branch='$branch', sha=$sha)"
+          else
+            echo "resolve: no Linear issue id resolvable from branch='$branch' or the PR body."
+          fi
+
+      - name: Run post-merge verification
+        id: verify
+        # continue-on-error so the FAIL path can still run the needs-fix
+        # handoff; the outcome is read back via steps.verify.outcome.
+        continue-on-error: true
+        working-directory: ${{ inputs.working-directory }}
+        # The command is env-bound and executed via `bash -c "$VERIFY_COMMAND"`
+        # (the intended, deliberate execution of a caller-supplied command), so
+        # it is never spliced into this run body.
+        env:
+          VERIFY_COMMAND: ${{ inputs.verify-command }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::post-merge verification"
+          bash -c "$VERIFY_COMMAND"
+          echo "::endgroup::"
+
+      - name: Independent-verifier gate (SGO-169 seam — optional)
+        id: verifier
+        # === SGO-169 SEAM ===
+        # The interim gate is DETERMINISTIC: verify job green. This step is the
+        # explicit, documented seam where the fresh-context independent-verifier
+        # agent's judgment plugs in. Default `pass` is the interim behaviour
+        # (deterministic close-on-green). When a consumer adopts SGO-169, they
+        # run independent-verifier.yml as an upstream job and pass its check-run
+        # conclusion into `independent-verifier-verdict`; a `fail` here routes to
+        # needs-fix instead of close. Kept advisory-until-proven so a flaky
+        # REQUIRED verifier can never manufacture agent loops (gate-hardening.md
+        # Determinism).
+        env:
+          VERIFIER_VERDICT: ${{ inputs.independent-verifier-verdict }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          verdict="$(printf '%s' "${VERIFIER_VERDICT:-pass}" \
+            | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+          case "$verdict" in
+            pass|true|success|"") verdict="pass" ;;
+            fail|false|failure)   verdict="fail" ;;
+            skip|skipped|n/a)     verdict="skip" ;;
+            *)
+              echo "::error::independent-verifier-verdict='${VERIFIER_VERDICT}'" \
+                "is not one of pass | fail | skip." >&2
+              exit 1 ;;
+          esac
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "independent-verifier seam: verdict=$verdict" \
+            "(default 'pass' = deterministic interim gate; SGO-169 upgrades this" \
+            "to a fresh-context agent judgment)."
+
+      - name: Compute close/needs-fix outcome
+        id: outcome
+        env:
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          VERIFIER_VERDICT: ${{ steps.verifier.outputs.verdict }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="pass"
+          if [[ "$VERIFY_OUTCOME" != "success" ]]; then
+            result="fail"
+          elif [[ "$VERIFIER_VERDICT" == "fail" ]]; then
+            result="fail"
+          fi
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          echo "outcome: verify=$VERIFY_OUTCOME," \
+            "independent-verifier=$VERIFIER_VERDICT -> $result"
+
+      - name: Update Linear (close on pass / needs-fix on fail)
+        if: steps.resolve.outputs.resolved == 'true'
+        # LINEAR_API_KEY is scoped to THIS step only — it is never present in the
+        # environment of the arbitrary consumer verify-command above. All dynamic
+        # values are env-bound and injected into GraphQL via jq --arg (JSON-
+        # encoded), so nothing is spliced into a query string.
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_API_URL: ${{ inputs.linear-api-url }}
+          RESULT: ${{ steps.outcome.outputs.result }}
+          ISSUE_ID: ${{ steps.resolve.outputs.issue-id }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+          DONE_STATE: ${{ inputs.done-state }}
+          NEEDS_FIX_STATE: ${{ inputs.needs-fix-state }}
+          REDISPATCH_LABEL: ${{ inputs.needs-redispatch-label }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          # NOTE: the GraphQL query/mutation strings below are single-quoted ON
+          # PURPOSE — their `$id`/`$state`/`$name`/`$team`/`$body`/`$label` are
+          # GraphQL variables bound via jq --arg, NOT shell expansions. Each is
+          # marked `# shellcheck disable=SC2016` at its site.
+          set -euo pipefail
+          api="${LINEAR_API_URL:-https://api.linear.app/graphql}"
+
+          # Minimal GraphQL client. GraphQL-level errors return HTTP 200 with an
+          # `errors` array, so we check that (not just the HTTP status).
+          gql() {
+            local resp
+            resp="$(jq -n --arg q "$1" --argjson v "$2" '{query:$q,variables:$v}' \
+              | curl -sS -X POST "$api" \
+                  -H "Authorization: $LINEAR_API_KEY" \
+                  -H "Content-Type: application/json" \
+                  --data @-)"
+            if [[ -z "$resp" ]] || jq -e '.errors' >/dev/null 2>&1 <<<"$resp"; then
+              echo "::error::Linear GraphQL call failed: ${resp:-<empty response>}" >&2
+              return 1
+            fi
+            printf '%s' "$resp"
+          }
+
+          # Resolve the issue uuid + its team's states + labels in one round-trip.
+          # Linear's `issue(id:)` accepts the human identifier (e.g. SGO-156).
+          # shellcheck disable=SC2016
+          q_issue='query($id:String!){ issue(id:$id){ id identifier
+            team{ id states{ nodes{ id name type } } labels{ nodes{ id name } } }
+          } }'
+          issue_json="$(gql "$q_issue" "$(jq -n --arg id "$ISSUE_ID" '{id:$id}')")"
+          uuid="$(jq -r '.data.issue.id // empty' <<<"$issue_json")"
+          if [[ -z "$uuid" ]]; then
+            echo "::error::Linear issue '$ISSUE_ID' not found via the API." >&2
+            exit 1
+          fi
+
+          state_by_name_or_type() {
+            # $1 = wanted name; $2.. = fallback type order
+            local wanted="$1"; shift
+            local id
+            id="$(jq -r --arg n "$wanted" '
+              .data.issue.team.states.nodes
+              | (map(select(.name|ascii_downcase == ($n|ascii_downcase)))[0].id) // empty' \
+              <<<"$issue_json")"
+            if [[ -z "$id" ]]; then
+              local t
+              for t in "$@"; do
+                id="$(jq -r --arg t "$t" '
+                  .data.issue.team.states.nodes
+                  | (map(select(.type == $t))[0].id) // empty' <<<"$issue_json")"
+                [[ -n "$id" ]] && break
+              done
+            fi
+            printf '%s' "$id"
+          }
+
+          move_state() {
+            local state_id="$1"
+            # shellcheck disable=SC2016
+            local m='mutation($id:String!,$state:String!){
+              issueUpdate(id:$id, input:{stateId:$state}){ success } }'
+            gql "$m" "$(jq -n --arg id "$uuid" --arg state "$state_id" \
+              '{id:$id,state:$state}')" >/dev/null
+          }
+
+          add_comment() {
+            # shellcheck disable=SC2016
+            local m='mutation($id:String!,$body:String!){
+              commentCreate(input:{issueId:$id, body:$body}){ success } }'
+            gql "$m" "$(jq -n --arg id "$uuid" --arg body "$1" \
+              '{id:$id,body:$body}')" >/dev/null
+          }
+
+          if [[ "$RESULT" == "pass" ]]; then
+            # delivery-management CLOSE verb (update -> harvest -> close, PLA-232).
+            sid="$(state_by_name_or_type "$DONE_STATE" completed)"
+            if [[ -z "$sid" ]]; then
+              echo "::error::no '$DONE_STATE' (or completed-type) state on the issue's team." >&2
+              exit 1
+            fi
+            move_state "$sid"
+            add_comment "verification-confirmed on ${SHA}. Post-merge verification passed; delivery-management **close** applied (update -> harvest -> close, PLA-232) — Autonomous Delivery Platform / SP-C loop. Verification run: ${RUN_URL}"
+            echo "close: $ISSUE_ID -> '$DONE_STATE', confirmed on $SHA."
+          else
+            # FAIL: needs-fix state + needs-redispatch label + failure log, so the
+            # backlog dispatcher re-picks it (never silently dropped).
+            sid="$(state_by_name_or_type "$NEEDS_FIX_STATE" unstarted backlog)"
+            if [[ -z "$sid" ]]; then
+              echo "::error::no '$NEEDS_FIX_STATE' (or unstarted/backlog) state on the issue's team." >&2
+              exit 1
+            fi
+            move_state "$sid"
+
+            # Find, or create on the team, the needs-redispatch label; then add it.
+            label_id="$(jq -r --arg n "$REDISPATCH_LABEL" '
+              .data.issue.team.labels.nodes
+              | (map(select(.name|ascii_downcase == ($n|ascii_downcase)))[0].id) // empty' \
+              <<<"$issue_json")"
+            if [[ -z "$label_id" ]]; then
+              team_id="$(jq -r '.data.issue.team.id' <<<"$issue_json")"
+              # shellcheck disable=SC2016
+              create='mutation($name:String!,$team:String!){
+                issueLabelCreate(input:{name:$name, teamId:$team}){
+                  success issueLabel{ id } } }'
+              created="$(gql "$create" "$(jq -n --arg name "$REDISPATCH_LABEL" \
+                --arg team "$team_id" '{name:$name,team:$team}')")"
+              label_id="$(jq -r '.data.issueLabelCreate.issueLabel.id // empty' <<<"$created")"
+            fi
+            if [[ -n "$label_id" ]]; then
+              # shellcheck disable=SC2016
+              add='mutation($id:String!,$label:String!){
+                issueAddLabel(id:$id, labelId:$label){ success } }'
+              gql "$add" "$(jq -n --arg id "$uuid" --arg label "$label_id" \
+                '{id:$id,label:$label}')" >/dev/null
+            else
+              echo "::warning::could not resolve/create label '$REDISPATCH_LABEL'." >&2
+            fi
+
+            add_comment "post-merge verification FAILED on ${SHA}. Moved to '${NEEDS_FIX_STATE}' and labelled '${REDISPATCH_LABEL}' for the backlog dispatcher (SP-C failure-driven-next — not silently dropped). Full failure log: ${RUN_URL}"
+            echo "needs-fix: $ISSUE_ID -> '$NEEDS_FIX_STATE' + '$REDISPATCH_LABEL' (log $RUN_URL)."
+          fi
+
+      - name: Note unresolved issue (never false-close)
+        if: steps.resolve.outputs.resolved != 'true'
+        env:
+          RESULT: ${{ steps.outcome.outputs.result }}
+          BRANCH: ${{ steps.resolve.outputs.branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Deterministic no-op close side: with no resolvable Linear id we DO
+          # NOT guess an issue to touch — a false-close is worse than a skip.
+          echo "::warning::verify-and-close: no Linear issue id resolved from" \
+            "branch='${BRANCH}' or the PR body — skipping the Linear transition" \
+            "(verify result was '${RESULT}')." \
+            "fix: name the merged branch per the org convention" \
+            "<user>/<team>-<number>-<slug> (e.g. dan/sgo-156-slug), or reference" \
+            "the issue id (e.g. SGO-156) in the PR body, or pass the issue-id" \
+            "input. next: re-run this workflow once the branch/PR carries the id."
+
+      - name: Reflect verification failure
+        # Surface red AFTER the needs-fix handoff, so the post-merge run visibly
+        # fails on a real deploy/smoke failure while the redispatch still happens.
+        if: steps.outcome.outputs.result == 'fail' && inputs.fail-on-verify-failure
+        shell: bash
+        run: |
+          echo "::error::post-merge verification failed; the linked issue (if" \
+            "resolved) was moved to needs-fix + labelled for redispatch. Failing" \
+            "the run so the failure is visible on main." >&2
+          exit 1
