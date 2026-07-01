@@ -56,3 +56,17 @@ repos:
         args: [--severity-level=medium, --confidence-level=medium, --skip=B101,B603,B607]
         files: \.py$
         exclude: ^(tests/|.*test_.*\.py$)
+
+  # ── No AI/LLM self-attribution in the commit message (Autonomous Delivery D1)
+  # Runs at the commit-msg stage (needs: pre-commit install --hook-type commit-msg).
+  # Strips whole attribution lines in place, hard-rejects non-strippable residue.
+  # Single-sources detection off tc-fitness no_llm_attribution (SGO-156) so the
+  # local hook, CI reject leg (SGO-160), and the fitness gate never drift.
+  - repo: local
+    hooks:
+      - id: tc-no-attribution
+        name: strip AI/LLM self-attribution from the commit message
+        entry: governance/git-hooks/commit-msg
+        language: script
+        stages: [commit-msg]
+        always_run: true
