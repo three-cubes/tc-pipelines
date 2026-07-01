@@ -308,10 +308,30 @@ jobs:
       ref: v0.8.0
 
   # ── verify-and-close (autonomous-delivery close side — SP-C) ────────────────
-  # The deterministic close side of the delivery loop. Both shapes exercise the
-  # full workflow_call contract statically; the required LINEAR_API_KEY secret is
+  # The deterministic close side of the delivery loop. The shapes exercise the
+  # full workflow_call contract statically across BOTH key-provisioning paths:
+  # the secret-free Key Vault (WIF) path (kairix-kv, RECOMMENDED) and the
+  # fallback LINEAR_API_KEY secret path (kairix / taz). The fallback secret is
   # wired to a clearly-dummy literal so the call shape resolves without a real
   # credential (the run-for-real gate keeps it from ever authenticating).
+  verify-close-kairix-kv:
+    if: ${{ inputs.run-for-real == 'true' }}
+    uses: ./.github/workflows/verify-and-close.yml
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write # federate to Azure for the secret-free Key Vault fetch
+    with:
+      # kairix-shaped, secret-free (RECOMMENDED): fetch the Linear key from Key
+      # Vault via WIF at run time — NO `secrets:` block. The vault + WIF identity
+      # come from kairix's existing repo variables (the same ones its other WIF
+      # workflows use); linear-key-secret-name defaults to `ci-verify-and-close`.
+      verify-command: scripts/checks/check-fresh-install-smoke.sh
+      linear-key-vault: ${{ vars.KAIRIX_KV_NAME }}
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
   verify-close-kairix:
     if: ${{ inputs.run-for-real == 'true' }}
     uses: ./.github/workflows/verify-and-close.yml
@@ -319,9 +339,9 @@ jobs:
       contents: read
       pull-requests: read
     with:
-      # kairix-shaped: an in-repo smoke script over the checked-out merge commit,
-      # default Linear states + interim deterministic gate (verifier verdict
-      # defaults to pass).
+      # kairix-shaped, fallback secret path: an in-repo smoke script over the
+      # checked-out merge commit, default Linear states + interim deterministic
+      # gate (verifier verdict defaults to pass).
       verify-command: scripts/checks/check-fresh-install-smoke.sh
     secrets:
       LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
