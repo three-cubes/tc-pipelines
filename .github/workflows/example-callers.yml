@@ -306,3 +306,43 @@ jobs:
       console-script: tc-fitness
       is-alpha: true
       ref: v0.8.0
+
+  # ── verify-and-close (autonomous-delivery close side — SP-C) ────────────────
+  # The deterministic close side of the delivery loop. Both shapes exercise the
+  # full workflow_call contract statically; the required LINEAR_API_KEY secret is
+  # wired to a clearly-dummy literal so the call shape resolves without a real
+  # credential (the run-for-real gate keeps it from ever authenticating).
+  verify-close-kairix:
+    if: ${{ inputs.run-for-real == 'true' }}
+    uses: ./.github/workflows/verify-and-close.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      # kairix-shaped: an in-repo smoke script over the checked-out merge commit,
+      # default Linear states + interim deterministic gate (verifier verdict
+      # defaults to pass).
+      verify-command: scripts/checks/check-fresh-install-smoke.sh
+    secrets:
+      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
+
+  verify-close-taz:
+    if: ${{ inputs.run-for-real == 'true' }}
+    uses: ./.github/workflows/verify-and-close.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      # taz-shaped: a remote deploy-verify with no working tree (checkout off),
+      # its own state names + redispatch label, the SGO-169 verifier seam wired to
+      # a literal here (a real consumer wires an upstream job's conclusion), and
+      # keep-green-on-fail so the post-merge run does not go red.
+      verify-command: scripts/smoke/deploy-verify.sh
+      checkout: false
+      done-state: Shipped
+      needs-fix-state: "In Progress"
+      needs-redispatch-label: redispatch
+      independent-verifier-verdict: pass
+      fail-on-verify-failure: false
+    secrets:
+      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
