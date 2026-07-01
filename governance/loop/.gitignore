@@ -1,0 +1,3 @@
+# Python bytecode from running the loop guardrail harness / its tests locally.
+__pycache__/
+*.py[cod]
