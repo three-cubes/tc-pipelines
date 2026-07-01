@@ -1,0 +1,37 @@
+#!/usr/bin/env sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# commit-msg — strip AI/LLM self-attribution from the commit message.
+# Autonomous Delivery Platform decision D1 (SP-A / SGO-159): agent work is
+# authored by the accountable bot/human, never advertised as model-generated.
+#
+# This hook delegates BOTH detection and stripping to the single tc-fitness
+# detector (`no_llm_attribution --strip-file`), so the local hook, the CI
+# reject leg (SGO-160), and the fitness gate can never drift — one regex, one
+# source of truth. It drops whole attribution lines (Co-Authored-By:<model>,
+# "Generated with <tool>", robot-emoji credit lines) in place, then hard-rejects
+# the commit only if non-strippable residue remains (e.g. an emoji mid-sentence).
+#
+# Install (one of):
+#   * pre-commit:  pre-commit install --hook-type commit-msg   (uses the
+#                  `tc-no-attribution` hook wired in pre-commit-config.yaml)
+#   * git native:  git config core.hooksPath governance/git-hooks
+#
+# The engine version that carries --strip-file is pinned per repo. Prefer the
+# repo's own venv (tc-fitness is a paved-road dependency there); fall back to a
+# pinned ephemeral uvx run so the hook also works in a repo without the venv.
+set -eu
+
+MSG_FILE="$1"
+MOD="tc_fitness.core_checks.no_llm_attribution"
+# Override per repo to match the pinned engine (must be >= the release that
+# ships --strip-file). Consumers set this in the copied hook or via the env.
+: "${TC_FITNESS_REF:=v0.7.1}"
+
+if command -v uv >/dev/null 2>&1 && [ -f uv.lock ]; then
+  uv run python -m "$MOD" --strip-file "$MSG_FILE"
+elif command -v uvx >/dev/null 2>&1; then
+  uvx --from "three-cubes-fitness==${TC_FITNESS_REF#v}" python -m "$MOD" --strip-file "$MSG_FILE"
+else
+  python3 -m "$MOD" --strip-file "$MSG_FILE"
+fi
