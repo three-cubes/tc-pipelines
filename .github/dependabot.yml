@@ -1,4 +1,8 @@
-# Dependabot — Golden Path baseline (template).
+# Dependabot — tc-pipelines self-wire (SGO-189 / SGO-82).
+#
+# Instantiated from the Golden Path baseline (governance/dependabot.yml) per
+# ADR DEP-D1. This CORE control-plane repo previously shipped only the TEMPLATE
+# and never ran it on itself — so its own third-party pins went un-bumped.
 #
 # Policy: a 3-day cooldown across ALL updates (security, patch, minor, major).
 # The supply-chain attack surface (worms injected into popular packages, then
@@ -10,17 +14,25 @@
 # advisory PRs also respect this cooldown (alerts still surface independently;
 # a CISA-KEV known-exploited CVE is the operator's signal to override manually).
 #
-# Trim/extend the ecosystems + `directory` entries to match your repo. Every
-# listed directory MUST contain a parseable manifest on disk, or it silently
-# produces no PRs. Reference:
+# TARGETING (SGO-82 root cause): every listed directory MUST contain a
+# parseable manifest on disk, or it silently produces zero PRs. So:
+#   * NO npm ecosystem — this repo ships no JS/TS (no package.json anywhere).
+#   * pip points at /tools, where the only pyproject.toml lives (NOT the root).
+#   * github-actions `directory: "/"` scans ONLY .github/workflows + a root
+#     action.yml, which would MISS every composite action. The third-party SHA
+#     pins (astral-sh/setup-uv, pre-commit/action, azure/login,
+#     actions/create-github-app-token) live inside actions/* and
+#     .github/actions/*, so those are covered explicitly via a `directories`
+#     glob — the "add the real workspace" half of the targeting fix.
+# Reference:
 # https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 
 version: 2
 
 updates:
-  # ----- pip / python -----
+  # ----- pip / python (manifest: tools/pyproject.toml) -----
   - package-ecosystem: "pip"
-    directory: "/"
+    directory: "/tools"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -41,51 +53,21 @@ updates:
       prefix: "deps"
       include: "scope"
 
-  # ----- npm (drop if the repo ships no JS/TS) -----
-  - package-ecosystem: "npm"
-    directory: "/"
+  # ----- github actions (workflows + every composite action) -----
+  # directories (plural) supports the `*` glob; each match resolves to a real
+  # action.yml on disk. Limit raised vs the single-directory template so a
+  # simultaneous grouped PR per directory is never suppressed.
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/actions/*"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
       day: "monday"
       time: "07:00"
       timezone: "Australia/Sydney"
     open-pull-requests-limit: 5
-    cooldown:
-      default-days: 3
-      semver-patch-days: 3
-      semver-minor-days: 3
-      semver-major-days: 3
-    groups:
-      production-deps:
-        dependency-type: "production"
-        update-types: ["minor", "patch"]
-      production-major:
-        dependency-type: "production"
-        update-types: ["major"]
-      dev-deps:
-        dependency-type: "development"
-        update-types: ["minor", "patch"]
-      dev-major:
-        dependency-type: "development"
-        update-types: ["major"]
-    commit-message:
-      prefix: "deps"
-      prefix-development: "deps-dev"
-      include: "scope"
-
-  # ----- github actions -----
-  # `directory: "/"` scans ONLY .github/workflows + a root action.yml. A repo
-  # that ships COMPOSITE actions in subdirectories (actions/*, .github/actions/*)
-  # must list them via `directories:` (plural, supports the `*` glob) or their
-  # third-party pins silently never get bumped — the SGO-82 targeting failure.
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "07:00"
-      timezone: "Australia/Sydney"
-    open-pull-requests-limit: 2
     cooldown:
       default-days: 3
       semver-patch-days: 3
