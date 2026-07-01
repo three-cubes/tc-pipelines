@@ -47,6 +47,8 @@ Agents author PRs as a **dedicated GitHub App** (`three-cubes-agent`), never a h
 
 This model is **safe only because the gate is hard + fast** (§1–§2). Harden + verify a repo's gate before flipping it to autonomous.
 
+The **failure-driven auto-dispatch loop** that rides this model — its explicit state machine, the deterministic-glue vs judgment split, and the 5 hard guardrails that must be *proven to fire* before any lights-out flag flips — is specified in [`governance/autonomous-loop.md`](autonomous-loop.md) (decision record: [`governance/decisions/ADR-LOOP-STATE-MACHINE.md`](decisions/ADR-LOOP-STATE-MACHINE.md); validation harness: [`governance/loop/`](loop/)). **No auto-dispatch flag flips until that harness is green** (SP-C-1 / PLA-309).
+
 ## 5. The inner-loop contract — replay the gate before you push
 
 The merge model (§4) is safe **only if green-locally implies green-in-CI.** Every `main`-break this
