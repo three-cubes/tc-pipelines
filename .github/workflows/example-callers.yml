@@ -1,30 +1,60 @@
-name: example-callers (reusable self-check)
+name: example-callers (reusable self-check dispatcher)
 
-# DRY self-check for the Phase 4 reusable workflows. Every job here `uses:` one
-# of the new reusables via its LOCAL path (./.github/workflows/<x>.yml) with
-# BOTH a kairix-shaped and a taz-shaped input set. The point is STATIC call-graph
-# validation: actionlint and GitHub's reusable-workflow resolver check input
-# names, required-input presence, types, and secret shapes against the reusable's
-# `workflow_call:` contract at parse time — so an input a consumer would pass that
-# the reusable doesn't accept (or a required input a consumer omits) fails HERE,
-# in tc-pipelines' own CI, rather than later in kairix's or taz's pipeline.
+# Thin dispatcher for the DRY self-check of the Phase 4 reusable workflows.
 #
-# This workflow NEVER runs the underlying work by default:
-#   * `workflow_dispatch` only — never on push/PR, so it can't fire on a merge.
-#   * every job is gated on `if: ${{ inputs.run-for-real == 'true' }}`, whose
-#     default is 'false' — the call graph is validated statically (actionlint +
-#     the reusable-workflow resolver check inputs/secrets at parse time regardless
-#     of the gate); the bodies (which need a real Dockerfile, kairix/taz scripts, a
-#     SonarCloud token, or the release path) never execute under the default
-#     dispatch. A bare `if: false` is rejected by actionlint as a constant
-#     expression, so the gate reads a dispatch input instead. The release/docker
-#     jobs MUST stay gated: they touch the HITL release path (feedback_release_hitl
-#     / G4) and would only ever run with explicit per-action authorization + real
-#     secrets wired, which this self-check deliberately does not carry.
+# ── Why this file is thin now (parallel-dev friction fix) ────────────────────
+# This USED to be one monolith holding every reusable's example-caller jobs.
+# Every reusable's PR appended its jobs to this single file, so parallel PRs
+# collided here on every merge. The example jobs now live ONE-FILE-PER-REUSABLE
+# in `example-<reusable>.yml` (see the table below). Adding a reusable adds a NEW
+# file — it never edits a shared one — so additions no longer serialize.
 #
-# Secret-free by construction: the one required secret (sonar-scan's SONAR_TOKEN)
-# is wired to a clearly-dummy literal so the shape resolves; the gate keeps the
-# dummy from ever authenticating anything. No real credential appears.
+# The load-bearing static call-graph check runs PER FILE: actionlint (and
+# GitHub's reusable-workflow resolver) validate each `example-<reusable>.yml`'s
+# `uses:` call shapes against the real reusable's `workflow_call:` contract at
+# parse time, whether or not this dispatcher references it. So a caller mismatch
+# still fails HERE, in tc-pipelines' own CI, not in a consumer's pipeline.
+#
+# This dispatcher only aggregates the per-reusable files behind ONE
+# `workflow_dispatch` entry point and fans `run-for-real` through to them, so a
+# maintainer can still trigger the whole set from one place.
+#
+# ── Convention: adding an example for a new reusable ─────────────────────────
+#   1. Add `.github/workflows/example-<reusable>.yml` (copy an existing one; it's
+#      a `workflow_call` reusable with a `run-for-real` input, every job gated on
+#      `if: ${{ inputs.run-for-real }}`). That file alone gives you the static
+#      call-graph check — no shared file is touched, so it can't collide.
+#   2. OPTIONAL: add a one-line fan-out job below (kept alphabetical to spread out
+#      insertions and minimise conflicts) so the new file also runs from this
+#      dispatcher.
+#
+# Files live at the TOP LEVEL of `.github/workflows/` (not a subdirectory):
+# GitHub Actions does not register or run workflow files in subdirectories of
+# `.github/workflows/`, and subdirectory reusable `uses:` paths are unsupported —
+# so per-reusable files must be top-level to be dispatchable + resolvable. The
+# `example-` prefix keeps them grouped.
+#
+# ── Per-reusable example files ───────────────────────────────────────────────
+#   docker-build-publish → example-docker-build-publish.yml  (HITL — gated off)
+#   event-dispatch       → example-event-dispatch.yml
+#   fresh-install-smoke  → example-fresh-install-smoke.yml
+#   mutation-gate        → example-mutation-gate.yml
+#   publish-pypi         → example-publish-pypi.yml           (HITL — gated off)
+#   python-quality-gate  → example-python-quality-gate.yml
+#   release              → example-release.yml                (HITL — gated off)
+#   require-work-item    → example-require-work-item.yml
+#   security-scan        → example-security-scan.yml
+#   sonar-scan           → example-sonar-scan.yml
+#   verify-and-close     → example-verify-and-close.yml
+#
+# NEVER runs the underlying work by default: `workflow_dispatch` only (never on
+# push/PR) and every per-reusable job is gated on `run-for-real`, whose default
+# is false. The call graph is validated statically regardless of the gate; the
+# bodies (real Dockerfiles, kairix/taz scripts, a SonarCloud token, the release
+# path) never execute under the default dispatch. The release/docker/publish-pypi
+# jobs MUST stay gated: they touch the HITL release path (feedback_release_hitl /
+# G4) and would only ever run with explicit per-action authorization + real
+# secrets wired, which this self-check deliberately does not carry.
 #
 # Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
 
@@ -33,11 +63,12 @@ on:
     inputs:
       run-for-real:
         description: >-
-          Leave 'false' (default) for the static call-graph self-check — every
-          job stays gated off and only the input/secret SHAPES are validated.
-          Flipping to 'true' would attempt to actually run the reusables, which
-          needs real repo scripts / images / tokens and (for release + docker)
-          explicit HITL authorization; this self-check is not the place for that.
+          Leave false (default) for the static call-graph self-check — every
+          per-reusable job stays gated off and only the input/secret SHAPES are
+          validated. Flipping to true would attempt to actually run the
+          reusables, which needs real repo scripts / images / tokens and (for
+          release + docker + publish-pypi) explicit HITL authorization; this
+          self-check is not the place for that.
         type: boolean
         default: false
 
@@ -45,430 +76,60 @@ permissions:
   contents: read
 
 jobs:
-  # ── python-quality-gate ───────────────────────────────────────────────────
-  # The converged Python gate. Both shapes pass ONLY environment inputs (the
-  # gate STEPS live in each repo's [tool.tc_fitness] config, not here), so the
-  # call-graph check validates the toolchain/install/coverage/Node-half contract
-  # — the one workflow_call surface not previously exercised by a static caller.
-  quality-kairix:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/python-quality-gate.yml
+  # Fan out to every per-reusable example file. Keep ALPHABETICAL by reusable so
+  # new entries slot into distinct positions (spread-out inserts minimise merge
+  # conflicts). Each is a static call-graph check in its own right (see header).
+  docker-build-publish:
+    uses: ./.github/workflows/example-docker-build-publish.yml
     with:
-      # kairix-shaped: single-package install superset, full-history checkout for
-      # the engine's new-code/secret-scan diff, coverage handed to sonar-scan.
-      python-version: "3.12"
-      sync-args: --all-extras --all-groups
-      fetch-depth: 0
-      coverage-artifact-name: coverage-data
-      coverage-xml-path: coverage.xml
-    secrets:
-      gh-token: dummy-token-shape-check-only
+      run-for-real: ${{ inputs.run-for-real }}
 
-  quality-taz:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/python-quality-gate.yml
+  event-dispatch:
+    uses: ./.github/workflows/example-event-dispatch.yml
     with:
-      # taz-shaped: locked workspace install, the Node/TS half on (taz ships MCP
-      # packages alongside the Python gate), its own coverage artifact name.
-      sync-args: --locked --all-packages
-      # Exercise the D1 no-attribution message-scan leg's input shape statically.
-      run-no-attribution: true
-      run-node: true
-      pnpm-version: 10.27.0
-      coverage-artifact-name: taz-coverage
-      ts-coverage-command: pnpm -r --if-present test:coverage
+      run-for-real: ${{ inputs.run-for-real }}
 
-  # ── sonar-scan ────────────────────────────────────────────────────────────
-  # Required secret SONAR_TOKEN must be passed for the call shape to resolve;
-  # a clearly-dummy literal keeps the file secret-free and the run-for-real gate
-  # means it never authenticates.
-  sonar-kairix:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/sonar-scan.yml
+  fresh-install-smoke:
+    uses: ./.github/workflows/example-fresh-install-smoke.yml
     with:
-      fetch-depth: 0
-      coverage-artifact-name: coverage-data
-      test-results-artifact-name: test-results-unit-3.12
-      args: -Dsonar.verbose=false
-    secrets:
-      SONAR_TOKEN: dummy-not-a-real-token-shape-check-only
+      run-for-real: ${{ inputs.run-for-real }}
 
-  sonar-taz:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/sonar-scan.yml
+  mutation-gate:
+    uses: ./.github/workflows/example-mutation-gate.yml
     with:
-      # taz carries its projectKey in-workflow rather than properties, and runs
-      # a single coverage artifact under its own name.
-      project-key: three-cubes_taz
-      coverage-artifact-name: taz-coverage
-      test-results-artifact-name: taz-test-results
-    secrets:
-      SONAR_TOKEN: dummy-not-a-real-token-shape-check-only
+      run-for-real: ${{ inputs.run-for-real }}
 
-  # ── mutation-gate ─────────────────────────────────────────────────────────
-  mutation-kairix:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/mutation-gate.yml
+  publish-pypi:
+    uses: ./.github/workflows/example-publish-pypi.yml
     with:
-      # kairix-shaped: the working pip-editable nightly suite, tesseract apt,
-      # diff-scoped to the last release tag, python-only.
-      runner-command: python scripts/checks/mutation_parity.py
-      runner-args: --base "$BASE" --baseline "$BASELINE_PATH" --write-baseline
-      baseline-path: .architecture/baseline/mutation-survivors-files.txt
-      diff-base-strategy: last-release-tag
-      install-mode: pip
-      pip-install-args: -e .[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]
-      apt-packages: tesseract-ocr
-      language-partition: python
-      timeout-minutes: 60
-      restrict-to-main: true
+      run-for-real: ${{ inputs.run-for-real }}
 
-  mutation-taz:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/mutation-gate.yml
+  python-quality-gate:
+    uses: ./.github/workflows/example-python-quality-gate.yml
     with:
-      # taz-shaped (post-#296): uv install, both language partitions, no apt
-      # extras, previous-commit diff scope, ratchet baseline under taz's path.
-      runner-command: make mutation-check
-      runner-args: ""
-      baseline-path: .mutation/survivors.txt
-      diff-base-strategy: previous-commit
-      install-mode: uv
-      uv-sync-args: --all-extras --all-groups
-      apt-packages: ""
-      language-partition: both
-      node-version: "20"
-      pnpm-version: 10.27.0
-      timeout-minutes: 45
-      restrict-to-main: false
+      run-for-real: ${{ inputs.run-for-real }}
 
-  # ── docker-build-publish (HITL release path — stays gated off) ────────────
-  docker-kairix:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/docker-build-publish.yml
+  release:
+    uses: ./.github/workflows/example-release.yml
     with:
-      # kairix-shaped: ghcr image, event-driven kairix-release tag strategy,
-      # setuptools-scm version, KAIRIX_VERSION build arg, push.
-      image: ghcr.io/three-cubes/kairix
-      registry: ghcr.io
-      version-source: setuptools-scm
-      version-arg-name: KAIRIX_VERSION
-      tag-strategy: kairix-release
-      fetch-depth: 0
-      push: true
-    secrets:
-      registry-username: dummy-actor
-      registry-password: dummy-token-shape-check-only
+      run-for-real: ${{ inputs.run-for-real }}
 
-  docker-taz:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/docker-build-publish.yml
+  require-work-item:
+    uses: ./.github/workflows/example-require-work-item.yml
     with:
-      # taz-shaped: explicit tag list, input-derived version, no version build
-      # arg, load-only build (taz deploys via VM, doesn't push an image today),
-      # so no registry login secret is wired.
-      image: ghcr.io/three-cubes/taz
-      version-source: input
-      version-arg-name: ""
-      tag-strategy: explicit
-      tags: ghcr.io/three-cubes/taz:dry,ghcr.io/three-cubes/taz:latest
-      push: false
-      load: true
+      run-for-real: ${{ inputs.run-for-real }}
 
-  # ── fresh-install-smoke ────────────────────────────────────────────────────
-  fresh-smoke-kairix:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/fresh-install-smoke.yml
+  security-scan:
+    uses: ./.github/workflows/example-security-scan.yml
     with:
-      # kairix-shaped: ghcr image name, KAIRIX_IMAGE_TAG compose env, F81 script.
-      image-name: ghcr.io/three-cubes/kairix
-      image-tag: fresh-smoke
-      build-context: .
-      dockerfile: Dockerfile
-      smoke-script: scripts/checks/check-fresh-install-smoke.sh
-      smoke-env-var-name: KAIRIX_IMAGE_TAG
-      timeout-minutes: 45
+      run-for-real: ${{ inputs.run-for-real }}
 
-  fresh-smoke-taz:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/fresh-install-smoke.yml
+  sonar-scan:
+    uses: ./.github/workflows/example-sonar-scan.yml
     with:
-      # taz-shaped: different image name, compose env var, a nested Dockerfile
-      # path and its own smoke script.
-      image-name: ghcr.io/three-cubes/taz
-      image-tag: taz-smoke
-      build-context: deploy
-      dockerfile: docker/Dockerfile
-      smoke-script: scripts/smoke/fresh-install.sh
-      smoke-env-var-name: TAZ_IMAGE_TAG
-      timeout-minutes: 30
+      run-for-real: ${{ inputs.run-for-real }}
 
-  # ── security-scan ──────────────────────────────────────────────────────────
-  # Static call-graph validation of the gitleaks + Semgrep OSS + CodeQL
-  # reusable. Both shapes exercise the full input contract; the RUNTIME
-  # exercise lives in security-scan-self.yml (which runs on this repo's PRs).
-  security-kairix:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/security-scan.yml
+  verify-and-close:
+    uses: ./.github/workflows/example-verify-and-close.yml
     with:
-      # kairix-shaped: public repo, so CodeQL + code-scanning SARIF upload are
-      # on; full-history gitleaks with the default (Docker Hub) image, the full
-      # default Semgrep OSS config set, CodeQL over both shipped languages.
-      fetch-depth: 0
-      assume-public: true
-      codeql-languages: '["python", "javascript"]'
-
-  security-taz:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/security-scan.yml
-    with:
-      # taz-shaped: private today — assume-public stays default false, so the
-      # public signal auto-derives to false (repository.private == true);
-      # CodeQL is also explicitly off and gitleaks + Semgrep still run, handing
-      # SARIF back as build artifacts. ghcr image mirror, taz's own allowlist +
-      # detect-secrets-style baseline paths, the full default config set.
-      run-codeql: false
-      gitleaks-image: ghcr.io/gitleaks/gitleaks
-      gitleaks-version: v8.30.1
-      gitleaks-config: .gitleaks.toml
-      gitleaks-baseline: .secrets.baseline
-      semgrep-configs: "p/default p/python p/github-actions p/secrets"
-
-  # ── release (HITL release path — stays gated off) ──────────────────────────
-  release-kairix:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/release.yml
-    with:
-      # kairix-shaped: CalVer vYYYY.M.D[.N], python changelog extractor, draft
-      # for human review, default fan-out to docker-publish + publish-pypi.
-      version: v2026.5.10.6
-      changelog-label: "2026.5.10"
-      release-title: kairix $VERSION
-      tag-message: kairix $VERSION
-      draft: true
-      ref: main
-    secrets:
-      gh-token: dummy-token-shape-check-only
-
-  release-taz:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/release.yml
-    with:
-      # taz-shaped: its own calver pattern (no leading v), an awk extractor, a
-      # taz release title, and NO fan-out (empty string skips that step).
-      version: "2026.6.1"
-      calver-pattern: '^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$'
-      changelog-label: Unreleased
-      changelog-extract-command: awk '/^## /{p=0} p; $0 ~ "## \\[" ENVIRON["CHANGELOG_LABEL"] "\\]"{p=1}' CHANGELOG.md
-      release-title: taz $VERSION
-      tag-message: taz $VERSION
-      draft: true
-      ref: main
-      fan-out-command: ""
-
-  # ── publish-pypi (HITL publish path — stays gated off) ─────────────────────
-  # Publishes to PyPI via Trusted Publishing (OIDC, no stored token). The real
-  # publish touches the release path and needs a registered trusted publisher +
-  # the target GitHub environment, so it MUST stay gated off in this self-check.
-  # No secret is wired: Trusted Publishing is secret-free by construction; the
-  # caller job grants `id-token: write` (widening the file's default
-  # `contents: read`) so the OIDC exchange shape is what a real consumer wires.
-  publish-pypi-kairix:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/publish-pypi.yml
-    permissions:
-      contents: read
-      id-token: write
-    with:
-      # kairix-shaped: long PyPI dist name, short import + console name, the
-      # release/release-alpha environment pair, an explicit tag ref.
-      dist-name: kairix-agentic-knowledge-mgt
-      import-name: kairix
-      console-script: kairix
-      stable-environment: release
-      alpha-environment: release-alpha
-      is-alpha: false
-      ref: v2026.5.10.6
-      python-version: "3.12"
-
-  publish-pypi-fitness:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/publish-pypi.yml
-    permissions:
-      contents: read
-      id-token: write
-    with:
-      # tc-fitness-shaped (candidate second consumer): dist-name `tc-fitness`
-      # imports as `tc_fitness`, a dispatch-driven alpha route, and the
-      # stable/alpha environment + python-version left on kairix-shaped defaults.
-      dist-name: tc-fitness
-      import-name: tc_fitness
-      console-script: tc-fitness
-      is-alpha: true
-      ref: v0.8.0
-
-  # ── verify-and-close (autonomous-delivery close side — SP-C) ────────────────
-  # The deterministic close side of the delivery loop. The shapes exercise the
-  # full workflow_call contract statically across BOTH key-provisioning paths:
-  # the secret-free Key Vault (WIF) path (kairix-kv, RECOMMENDED) and the
-  # fallback LINEAR_API_KEY secret path (kairix / taz). The fallback secret is
-  # wired to a clearly-dummy literal so the call shape resolves without a real
-  # credential (the run-for-real gate keeps it from ever authenticating).
-  verify-close-kairix-kv:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/verify-and-close.yml
-    permissions:
-      contents: read
-      pull-requests: read
-      id-token: write # federate to Azure for the secret-free Key Vault fetch
-    with:
-      # kairix-shaped, secret-free (RECOMMENDED): fetch the Linear key from Key
-      # Vault via WIF at run time — NO `secrets:` block. The vault + WIF identity
-      # come from kairix's existing repo variables (the same ones its other WIF
-      # workflows use); linear-key-secret-name defaults to `ci-verify-and-close`.
-      verify-command: scripts/checks/check-fresh-install-smoke.sh
-      linear-key-vault: ${{ vars.KAIRIX_KV_NAME }}
-      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-  verify-close-kairix:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/verify-and-close.yml
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      # kairix-shaped, fallback secret path: an in-repo smoke script over the
-      # checked-out merge commit, default Linear states + interim deterministic
-      # gate (verifier verdict defaults to pass).
-      verify-command: scripts/checks/check-fresh-install-smoke.sh
-    secrets:
-      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
-
-  verify-close-taz:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/verify-and-close.yml
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      # taz-shaped: a remote deploy-verify with no working tree (checkout off),
-      # its own state names + redispatch label, the SGO-169 verifier seam wired to
-      # a literal here (a real consumer wires an upstream job's conclusion), and
-      # keep-green-on-fail so the post-merge run does not go red.
-      verify-command: scripts/smoke/deploy-verify.sh
-      checkout: false
-      done-state: Shipped
-      needs-fix-state: "In Progress"
-      needs-redispatch-label: redispatch
-      independent-verifier-verdict: pass
-      fail-on-verify-failure: false
-    secrets:
-      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
-
-  # ── event-dispatch (autonomous-delivery OPEN side — SP-C-2) ─────────────────
-  # The failure-driven open side of the delivery loop: a CI-red run or a PR
-  # review-comment -> annotate the linked Linear issue + EMIT the re-dispatch
-  # signal (needs-redispatch label + backlog state) for loop_dispatcher.py to
-  # re-pick. The shapes exercise the full workflow_call contract statically
-  # across BOTH key-provisioning paths and BOTH event kinds. The fallback secret
-  # is a clearly-dummy literal (the run-for-real gate keeps it from ever
-  # authenticating).
-  event-dispatch-kairix-kv:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/event-dispatch.yml
-    permissions:
-      contents: read
-      pull-requests: read
-      id-token: write # federate to Azure for the secret-free Key Vault fetch
-    with:
-      # kairix-shaped, secret-free (RECOMMENDED), CI-failure: a `workflow_run`
-      # trigger forwards the failing run's head branch + name + log url. NO
-      # `secrets:` block — the Linear key is fetched from Key Vault via WIF at
-      # run time; linear-key-secret-name defaults to `ci-verify-and-close`.
-      event-kind: ci-failure
-      branch-name: dan/pla-310-example-slug
-      failing-check: python-quality-gate
-      failure-log-url: https://github.com/three-cubes/kairix/actions/runs/1
-      linear-key-vault: ${{ vars.KAIRIX_KV_NAME }}
-      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-  event-dispatch-kairix-review:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/event-dispatch.yml
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      # kairix-shaped, fallback secret path, REVIEW-COMMENT: an `issue_comment`
-      # trigger forwards only the PR number (the branch is read from the PR) +
-      # the comment body/author/url (env-bound, injection-safe).
-      event-kind: review-comment
-      pr-number: "42"
-      comment-author: some-reviewer
-      comment-url: https://github.com/three-cubes/kairix/pull/42#issuecomment-1
-      comment-body: please guard the empty-list branch before indexing
-    secrets:
-      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
-
-  event-dispatch-taz:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/event-dispatch.yml
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      # taz-shaped, fallback secret path, CI-failure with an explicit issue-id
-      # override + a first-actionable `fix:` line and its own redispatch label.
-      event-kind: ci-failure
-      issue-id: SGO-169
-      failing-check: mutation-gate
-      failure-summary: "survivor at adapter.py:88 — add a boundary test"
-      needs-redispatch-label: redispatch
-    secrets:
-      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
-
-  # ── require-work-item (SP-C-5 fail-closed "no work without a work item") ─────
-  # The merge-side twin of verify-and-close. The shapes exercise the full
-  # workflow_call contract statically across BOTH key-provisioning paths: the
-  # secret-free Key Vault (WIF) path (kairix-kv, RECOMMENDED) and the fallback
-  # LINEAR_API_KEY secret path (taz). A real consumer triggers this on
-  # `pull_request`; here the run-for-real gate keeps it static-only (no live PR),
-  # and the fallback secret is a clearly-dummy literal so the call shape resolves
-  # without a real credential.
-  require-work-item-kairix-kv:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/require-work-item.yml
-    permissions:
-      contents: read
-      pull-requests: read
-      id-token: write # federate to Azure for the secret-free Key Vault fetch
-    with:
-      # kairix-shaped, secret-free (RECOMMENDED): fetch the Linear key from Key
-      # Vault via WIF at run time — NO `secrets:` block. Default open-state set
-      # + OWNER/MEMBER maintainer bypass + the default no-work-item escape hatch.
-      linear-key-vault: ${{ vars.KAIRIX_KV_NAME }}
-      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-  require-work-item-taz:
-    if: ${{ inputs.run-for-real == 'true' }}
-    uses: ./.github/workflows/require-work-item.yml
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      # taz-shaped, fallback secret path: require an already-started item (drop
-      # backlog/triage), trust repo collaborators as maintainers too, and let the
-      # label + rationale bypass without a code-owner approval (escape-requires-
-      # approval off).
-      allowed-state-types: "unstarted started"
-      maintainer-associations: "OWNER MEMBER COLLABORATOR"
-      no-work-item-label: hotfix-no-work-item
-      escape-requires-approval: false
-    secrets:
-      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
+      run-for-real: ${{ inputs.run-for-real }}

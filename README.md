@@ -74,7 +74,7 @@ jobs:
 | [`mutation-gate.yml`](.github/workflows/mutation-gate.yml) | Mutation/parity check scoped to the diff; keeps a survivors baseline that can only improve, never get worse. |
 | [`docker-build-publish.yml`](.github/workflows/docker-build-publish.yml) | Build and optionally push a container image. |
 | [`fresh-install-smoke.yml`](.github/workflows/fresh-install-smoke.yml) | Clean-image install smoke test via compose. |
-| [`example-callers.yml`](.github/workflows/example-callers.yml) | Static **self-check of every reusable workflow above** — `workflow_dispatch` only; a caller mismatch fails *here*, not in a consumer's pipeline. |
+| [`example-callers.yml`](.github/workflows/example-callers.yml) + `example-<reusable>.yml` | Static **self-check of every reusable workflow above** — each reusable owns one `example-<reusable>.yml` file (a `workflow_call` reusable) that statically validates its call shape; a caller mismatch fails *here*, not in a consumer's pipeline. `example-callers.yml` is a thin `workflow_dispatch` dispatcher that fans out to them. Split one-file-per-reusable so parallel PRs no longer collide on a shared file. |
 
 Each workflow's inputs, secrets, and defaults are documented in the header of the workflow file. The two main consumer surfaces:
 

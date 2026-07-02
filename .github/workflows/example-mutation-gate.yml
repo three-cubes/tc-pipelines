@@ -1,0 +1,70 @@
+name: example — mutation-gate (reusable self-check)
+
+# Static call-graph self-check for the `mutation-gate.yml` reusable. Every job
+# here `uses:` it via its LOCAL path with a real consumer's input shape, so
+# actionlint + GitHub's reusable-workflow resolver validate input names,
+# required-input presence, types, and secret shapes against the reusable's
+# `workflow_call:` contract at parse time — a mismatch fails HERE, not in a
+# consumer's pipeline.
+#
+# De-serialised layout (parallel-dev friction fix): each reusable owns its OWN
+# `example-<reusable>.yml`; `example-callers.yml` is a thin dispatcher that fans
+# out to every file here — see its header for the "add your file" convention.
+#
+# NEVER runs the underlying work by default: `workflow_call` only and every job is
+# gated on `run-for-real` (default false); the call graph is validated statically
+# regardless of the gate, the bodies never execute under the default dispatch.
+#
+# Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
+
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: >-
+          Leave false (default) for the static call-graph self-check — every job
+          stays gated off and only the input/secret SHAPES are validated. The
+          dispatcher (example-callers.yml) passes this through; flipping it true
+          would attempt a real run and is not the point of this self-check.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  mutation-kairix:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/mutation-gate.yml
+    with:
+      # kairix-shaped: the working pip-editable nightly suite, tesseract apt,
+      # diff-scoped to the last release tag, python-only.
+      runner-command: python scripts/checks/mutation_parity.py
+      runner-args: --base "$BASE" --baseline "$BASELINE_PATH" --write-baseline
+      baseline-path: .architecture/baseline/mutation-survivors-files.txt
+      diff-base-strategy: last-release-tag
+      install-mode: pip
+      pip-install-args: -e .[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]
+      apt-packages: tesseract-ocr
+      language-partition: python
+      timeout-minutes: 60
+      restrict-to-main: true
+
+  mutation-taz:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/mutation-gate.yml
+    with:
+      # taz-shaped (post-#296): uv install, both language partitions, no apt
+      # extras, previous-commit diff scope, ratchet baseline under taz's path.
+      runner-command: make mutation-check
+      runner-args: ""
+      baseline-path: .mutation/survivors.txt
+      diff-base-strategy: previous-commit
+      install-mode: uv
+      uv-sync-args: --all-extras --all-groups
+      apt-packages: ""
+      language-partition: both
+      node-version: "20"
+      pnpm-version: 10.27.0
+      timeout-minutes: 45
+      restrict-to-main: false

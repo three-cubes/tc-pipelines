@@ -12,13 +12,13 @@ name: security-scan (self)
 #     never fire here, since this workflow has no push trigger).
 #   * Semgrep runs the low-false-positive p/secrets pack over the working tree.
 #   * CodeQL is OFF here (run-codeql: false): its workflow_call contract is
-#     validated statically in example-callers.yml and exercised for real when
-#     kairix (a code-heavy public repo) adopts the reusable. Keeping it off
+#     validated statically in example-security-scan.yml and exercised for real
+#     when kairix (a code-heavy public repo) adopts the reusable. Keeping it off
 #     leaves the meta repo's PR loop lean.
 #
 # The full default Semgrep config set (p/default+p/python+p/github-actions+
 # p/secrets) and the CodeQL matrix are covered by the kairix-shaped +
-# taz-shaped static callers in example-callers.yml.
+# taz-shaped static callers in example-security-scan.yml.
 #
 # Part of the Autonomous Delivery Platform roadmap (SGO-186).
 

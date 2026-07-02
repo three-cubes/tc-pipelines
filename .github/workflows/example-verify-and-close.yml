@@ -1,0 +1,94 @@
+name: example — verify-and-close (reusable self-check)
+
+# Static call-graph self-check for the `verify-and-close.yml` reusable — the
+# deterministic close side of the autonomous-delivery loop (SP-C). Every job here
+# `uses:` it via its LOCAL path with a real consumer's input shape, so actionlint
+# + GitHub's reusable-workflow resolver validate input names, required-input
+# presence, types, and secret shapes against the reusable's `workflow_call:`
+# contract at parse time — a mismatch fails HERE, not in a consumer's pipeline.
+#
+# The shapes exercise the full workflow_call contract statically across BOTH
+# key-provisioning paths: the secret-free Key Vault (WIF) path (kairix-kv,
+# RECOMMENDED) and the fallback LINEAR_API_KEY secret path (kairix / taz). The
+# fallback secret is wired to a clearly-dummy literal so the call shape resolves
+# without a real credential (the run-for-real gate keeps it from ever
+# authenticating).
+#
+# De-serialised layout (parallel-dev friction fix): each reusable owns its OWN
+# `example-<reusable>.yml`; `example-callers.yml` is a thin dispatcher that fans
+# out to every file here — see its header for the "add your file" convention.
+#
+# NEVER runs the underlying work by default: `workflow_call` only and every job is
+# gated on `run-for-real` (default false); the call graph is validated statically
+# regardless of the gate, the bodies never execute under the default dispatch.
+#
+# Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
+
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: >-
+          Leave false (default) for the static call-graph self-check — every job
+          stays gated off and only the input/secret SHAPES are validated. The
+          dispatcher (example-callers.yml) passes this through; flipping it true
+          would attempt a real verify-and-close and is not the point here.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify-close-kairix-kv:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/verify-and-close.yml
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write # federate to Azure for the secret-free Key Vault fetch
+    with:
+      # kairix-shaped, secret-free (RECOMMENDED): fetch the Linear key from Key
+      # Vault via WIF at run time — NO `secrets:` block. The vault + WIF identity
+      # come from kairix's existing repo variables (the same ones its other WIF
+      # workflows use); linear-key-secret-name defaults to `ci-verify-and-close`.
+      verify-command: scripts/checks/check-fresh-install-smoke.sh
+      linear-key-vault: ${{ vars.KAIRIX_KV_NAME }}
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+  verify-close-kairix:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/verify-and-close.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      # kairix-shaped, fallback secret path: an in-repo smoke script over the
+      # checked-out merge commit, default Linear states + interim deterministic
+      # gate (verifier verdict defaults to pass).
+      verify-command: scripts/checks/check-fresh-install-smoke.sh
+    secrets:
+      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
+
+  verify-close-taz:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/verify-and-close.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      # taz-shaped: a remote deploy-verify with no working tree (checkout off),
+      # its own state names + redispatch label, the SGO-169 verifier seam wired to
+      # a literal here (a real consumer wires an upstream job's conclusion), and
+      # keep-green-on-fail so the post-merge run does not go red.
+      verify-command: scripts/smoke/deploy-verify.sh
+      checkout: false
+      done-state: Shipped
+      needs-fix-state: "In Progress"
+      needs-redispatch-label: redispatch
+      independent-verifier-verdict: pass
+      fail-on-verify-failure: false
+    secrets:
+      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only

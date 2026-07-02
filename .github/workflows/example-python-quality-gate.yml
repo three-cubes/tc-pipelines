@@ -1,0 +1,71 @@
+name: example — python-quality-gate (reusable self-check)
+
+# Static call-graph self-check for the `python-quality-gate.yml` reusable. Every
+# job here `uses:` it via its LOCAL path with a real consumer's input shape, so
+# actionlint + GitHub's reusable-workflow resolver validate input names,
+# required-input presence, types, and secret shapes against the reusable's
+# `workflow_call:` contract at parse time — a mismatch fails HERE, in
+# tc-pipelines' own CI, not later in a consumer's pipeline.
+#
+# De-serialised layout (parallel-dev friction fix): this used to be one giant
+# `example-callers.yml` every reusable's PR appended to (and collided on). Now
+# each reusable owns its OWN `example-<reusable>.yml` file — a new reusable adds a
+# NEW file and never edits a shared one. `example-callers.yml` is now a thin
+# dispatcher that fans out to every file here; see its header for the convention.
+#
+# NEVER runs the underlying work by default: `workflow_call` only (the dispatcher
+# is `workflow_dispatch`-gated) and every job is gated on `run-for-real`, whose
+# default is false — the call graph is validated statically regardless of the
+# gate; the bodies never execute under the default dispatch.
+#
+# Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
+
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: >-
+          Leave false (default) for the static call-graph self-check — every job
+          stays gated off and only the input/secret SHAPES are validated. The
+          dispatcher (example-callers.yml) passes this through; flipping it true
+          would attempt a real run (needs real repo scripts / images / tokens
+          and, for the release/publish paths, explicit HITL authorization) — this
+          self-check is not the place for that.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # The converged Python gate. Both shapes pass ONLY environment inputs (the
+  # gate STEPS live in each repo's [tool.tc_fitness] config, not here), so the
+  # call-graph check validates the toolchain/install/coverage/Node-half contract
+  # — the one workflow_call surface not previously exercised by a static caller.
+  quality-kairix:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/python-quality-gate.yml
+    with:
+      # kairix-shaped: single-package install superset, full-history checkout for
+      # the engine's new-code/secret-scan diff, coverage handed to sonar-scan.
+      python-version: "3.12"
+      sync-args: --all-extras --all-groups
+      fetch-depth: 0
+      coverage-artifact-name: coverage-data
+      coverage-xml-path: coverage.xml
+    secrets:
+      gh-token: dummy-token-shape-check-only
+
+  quality-taz:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/python-quality-gate.yml
+    with:
+      # taz-shaped: locked workspace install, the Node/TS half on (taz ships MCP
+      # packages alongside the Python gate), its own coverage artifact name.
+      sync-args: --locked --all-packages
+      # Exercise the D1 no-attribution message-scan leg's input shape statically.
+      run-no-attribution: true
+      run-node: true
+      pnpm-version: 10.27.0
+      coverage-artifact-name: taz-coverage
+      ts-coverage-command: pnpm -r --if-present test:coverage

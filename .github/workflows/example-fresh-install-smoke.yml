@@ -1,0 +1,61 @@
+name: example — fresh-install-smoke (reusable self-check)
+
+# Static call-graph self-check for the `fresh-install-smoke.yml` reusable. Every
+# job here `uses:` it via its LOCAL path with a real consumer's input shape, so
+# actionlint + GitHub's reusable-workflow resolver validate input names,
+# required-input presence, types, and secret shapes against the reusable's
+# `workflow_call:` contract at parse time — a mismatch fails HERE, not in a
+# consumer's pipeline.
+#
+# De-serialised layout (parallel-dev friction fix): each reusable owns its OWN
+# `example-<reusable>.yml`; `example-callers.yml` is a thin dispatcher that fans
+# out to every file here — see its header for the "add your file" convention.
+#
+# NEVER runs the underlying work by default: `workflow_call` only and every job is
+# gated on `run-for-real` (default false); the call graph is validated statically
+# regardless of the gate, the bodies never execute under the default dispatch.
+#
+# Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
+
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: >-
+          Leave false (default) for the static call-graph self-check — every job
+          stays gated off and only the input/secret SHAPES are validated. The
+          dispatcher (example-callers.yml) passes this through; flipping it true
+          would attempt a real run and is not the point of this self-check.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-smoke-kairix:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/fresh-install-smoke.yml
+    with:
+      # kairix-shaped: ghcr image name, KAIRIX_IMAGE_TAG compose env, F81 script.
+      image-name: ghcr.io/three-cubes/kairix
+      image-tag: fresh-smoke
+      build-context: .
+      dockerfile: Dockerfile
+      smoke-script: scripts/checks/check-fresh-install-smoke.sh
+      smoke-env-var-name: KAIRIX_IMAGE_TAG
+      timeout-minutes: 45
+
+  fresh-smoke-taz:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/fresh-install-smoke.yml
+    with:
+      # taz-shaped: different image name, compose env var, a nested Dockerfile
+      # path and its own smoke script.
+      image-name: ghcr.io/three-cubes/taz
+      image-tag: taz-smoke
+      build-context: deploy
+      dockerfile: docker/Dockerfile
+      smoke-script: scripts/smoke/fresh-install.sh
+      smoke-env-var-name: TAZ_IMAGE_TAG
+      timeout-minutes: 30
