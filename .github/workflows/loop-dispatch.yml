@@ -1,0 +1,161 @@
+name: loop-dispatch
+
+# The CONTINUOUS-DISPATCH DRIVER tick for the Autonomous Delivery Platform loop
+# (initiative pillar SP-C · Increment-3 "Shape-as-orchestrator + enforcing hooks"
+# · decision D5: the loop lives in committed GitHub-Actions event-dispatch). This
+# is the piece that replaces the human hand-cranking the loop: on a cadence it
+# runs `governance/loop/loop_runner.py`, which self-selects the next READY work
+# item, guardrail-gates it through the governor, and — only when ARMED and LIVE —
+# hands it to a dispatch sink.
+#
+# FAIL-SAFE BY CONSTRUCTION:
+#   * DRY-RUN by default. Every tick runs the runner in dry-run (record-only):
+#     it LOGS the selection it WOULD dispatch and dispatches NOTHING.
+#   * It may move past dry-run ONLY when the repo variable LOOP_ARMED == "true"
+#     AND the runner self-confirms the guardrail harness validates THIS tick
+#     (arm_auto_dispatch precondition). Two independent gates, both required.
+#   * Even fully armed + live, the runner CLI wires ONLY the LoggingDispatchSink
+#     (the safe default) — so it STILL only logs. The real agent-spawn seam is
+#     intentionally NOT connected here; wiring a real DispatchSink is a separate,
+#     deliberate change (see governance/loop/ARMING.md). Arming is therefore
+#     currently safe: there is no runtime that could spawn.
+#
+# KILL-SWITCH: set repo variable LOOP_ARMED to anything but "true" (or disable
+# this workflow). Takes effect on the next tick — no in-flight spawn to stop,
+# because nothing spawns yet.
+#
+# SECRET-FREE Linear read (recommended path, mirrors verify-and-close.yml): when
+# repo variable LOOP_LINEAR_KEY_VAULT names an Azure Key Vault, the job federates
+# to Azure via Workload Identity Federation (OIDC, no stored credential) and reads
+# the Linear API key from Key Vault at run time, INSIDE the runner step, masked
+# the instant it is read and never written to an output. With no vault configured
+# (bootstrap), the runner reports a documented skip and the tick stays green.
+#
+# INJECTION-SAFE per the org standard: every `vars.*` / `github.event.*` value is
+# env-bound before it reaches the shell body (never interpolated into a `run:`
+# string), and the Key Vault name + secret name reach `az keyvault secret show`
+# as env values, never spliced into the command. Third-party actions are
+# SHA-pinned. Least privilege: the job reads Linear + logs; it needs no write
+# scope on GitHub.
+#
+# Part of the Autonomous Delivery Platform initiative (SP-C).
+
+on:
+  schedule:
+    # Every 30 minutes. The cadence is deliberately modest; the governor's
+    # dispatch rate-limit (PLA-241) is the real throttle once a runtime is wired.
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: >-
+          Force dry-run (record-only) even if LOOP_ARMED=true. Default true, so a
+          MANUAL run is dry-run unless you explicitly set this false AND the repo
+          is armed. Scheduled ticks ignore this and go live only when armed.
+        type: boolean
+        default: true
+
+# Least privilege: id-token for the WIF federation (the secret-free KV read),
+# contents:read for the checkout. No write scopes — the runner only reads Linear
+# and logs; it never pushes, comments, or transitions anything.
+permissions:
+  contents: read
+  id-token: write
+
+# One tick at a time. Never cancel an in-flight tick (it is read-only + short).
+concurrency:
+  group: loop-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: loop-dispatch tick
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for the runner module + local composite actions)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Azure login for Key Vault (WIF — secret-free Linear read)
+        # Only when a vault is configured. Federates to Azure via OIDC (no stored
+        # credential) so the runner step can read the Linear key from Key Vault at
+        # run time. The azure-* coordinates are the repo's WIF identity vars.
+        if: vars.LOOP_LINEAR_KEY_VAULT != ''
+        uses: ./.github/actions/wif-azure-login
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run the loop runner (dry-run unless LOOP_ARMED=true)
+        # All dynamic values are env-bound (injection-safe); nothing is spliced
+        # into the run body. The Linear key is fetched INSIDE this step, masked,
+        # and kept a local shell variable — never a job/step output.
+        env:
+          LOOP_ARMED: ${{ vars.LOOP_ARMED }}
+          LINEAR_KEY_VAULT: ${{ vars.LOOP_LINEAR_KEY_VAULT }}
+          LINEAR_KEY_SECRET_NAME: ${{ vars.LOOP_LINEAR_KEY_SECRET_NAME || 'ci-verify-and-close' }}
+          INITIATIVE: ${{ vars.LOOP_INITIATIVE || '7e522d9b-8cb2-45d2-a8ca-4ee6f83d554d' }}
+          REQUEST_DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+          EVENT_NAME: ${{ github.event_name }}
+        working-directory: governance/loop
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # --- Arming decision (fail-safe): ONLY the exact string "true" arms. ---
+          armed=false
+          if [[ "${LOOP_ARMED:-}" == "true" ]]; then armed=true; fi
+
+          # --- Dry-run decision. A tick may go live ONLY when armed. Scheduled
+          #     ticks go live when armed; a MANUAL tick additionally honours the
+          #     dry_run input (default true), so a human must explicitly opt in. ---
+          dry_run=true
+          if [[ "$armed" == "true" ]]; then
+            if [[ "$EVENT_NAME" == "schedule" ]]; then
+              dry_run=false
+            elif [[ "${REQUEST_DRY_RUN:-true}" == "false" ]]; then
+              dry_run=false
+            fi
+          fi
+
+          # --- Secret-free Linear key: fetch from Key Vault via the WIF session,
+          #     mask it immediately, keep it local to this step. Skipped when no
+          #     vault is configured — the runner then reports a documented skip
+          #     and the tick stays green (bootstrap phase). ---
+          if [[ -n "${LINEAR_KEY_VAULT:-}" ]]; then
+            linear_key="$(az keyvault secret show \
+              --vault-name "$LINEAR_KEY_VAULT" \
+              --name "$LINEAR_KEY_SECRET_NAME" \
+              --query value -o tsv)"
+            echo "::add-mask::$linear_key"
+            export LINEAR_API_KEY="$linear_key"
+          fi
+
+          # --- Build the runner invocation. The CLI wires ONLY LoggingDispatchSink
+          #     (no real spawn seam), so even `--armed --live` ONLY LOGS — the
+          #     spawn seam is intentionally not connected until the org picks a
+          #     runtime (ARMING.md). The runner ALSO self-confirms the guardrail
+          #     harness this tick and REFUSES (non-zero) if it is red — a second,
+          #     independent gate on top of LOOP_ARMED. The runner is one-item-per-
+          #     tick by design (run_once selects a single READY item); the */30
+          #     cadence is the throttle, so there is no --limit. ---
+          args=(--json --initiative "$INITIATIVE")
+          if [[ "$armed" == "true" ]]; then
+            args+=(--armed)
+            if [[ "$dry_run" == "false" ]]; then
+              args+=(--live)
+            fi
+          fi
+
+          echo "loop-dispatch: armed=$armed dry_run=$dry_run event=${EVENT_NAME}" \
+            "(sink=LoggingDispatchSink — logs only; no runtime wired)"
+          echo "::group::loop-runner result"
+          python3 -m loop_runner "${args[@]}"
+          echo "::endgroup::"
