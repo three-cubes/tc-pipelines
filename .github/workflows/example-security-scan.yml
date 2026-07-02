@@ -1,0 +1,62 @@
+name: example — security-scan (reusable self-check)
+
+# Static call-graph self-check for the `security-scan.yml` reusable (gitleaks +
+# Semgrep OSS + CodeQL). Every job here `uses:` it via its LOCAL path with a real
+# consumer's input shape, so actionlint + GitHub's reusable-workflow resolver
+# validate input names, required-input presence, types, and secret shapes against
+# the reusable's `workflow_call:` contract at parse time — a mismatch fails HERE,
+# not in a consumer's pipeline. The RUNTIME exercise lives in
+# security-scan-self.yml (which runs on this repo's PRs).
+#
+# De-serialised layout (parallel-dev friction fix): each reusable owns its OWN
+# `example-<reusable>.yml`; `example-callers.yml` is a thin dispatcher that fans
+# out to every file here — see its header for the "add your file" convention.
+#
+# NEVER runs the underlying work by default: `workflow_call` only and every job is
+# gated on `run-for-real` (default false); the call graph is validated statically
+# regardless of the gate, the bodies never execute under the default dispatch.
+#
+# Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
+
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: >-
+          Leave false (default) for the static call-graph self-check — every job
+          stays gated off and only the input/secret SHAPES are validated. The
+          dispatcher (example-callers.yml) passes this through; flipping it true
+          would attempt a real scan and is not the point of this self-check.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  security-kairix:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/security-scan.yml
+    with:
+      # kairix-shaped: public repo, so CodeQL + code-scanning SARIF upload are
+      # on; full-history gitleaks with the default (Docker Hub) image, the full
+      # default Semgrep OSS config set, CodeQL over both shipped languages.
+      fetch-depth: 0
+      assume-public: true
+      codeql-languages: '["python", "javascript"]'
+
+  security-taz:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/security-scan.yml
+    with:
+      # taz-shaped: private today — assume-public stays default false, so the
+      # public signal auto-derives to false (repository.private == true);
+      # CodeQL is also explicitly off and gitleaks + Semgrep still run, handing
+      # SARIF back as build artifacts. ghcr image mirror, taz's own allowlist +
+      # detect-secrets-style baseline paths, the full default config set.
+      run-codeql: false
+      gitleaks-image: ghcr.io/gitleaks/gitleaks
+      gitleaks-version: v8.30.1
+      gitleaks-config: .gitleaks.toml
+      gitleaks-baseline: .secrets.baseline
+      semgrep-configs: "p/default p/python p/github-actions p/secrets"

@@ -36,6 +36,14 @@ for the consumer-facing `@vN` workflow/action references.
 
 ### Changed
 
+- **`example-callers.yml` de-serialised one-file-per-reusable (parallel-dev
+  friction fix).** The monolithic self-check every reusable's PR appended to (and
+  collided on) is split: each reusable now owns an `example-<reusable>.yml`
+  `workflow_call` file that statically validates its own call shape, and
+  `example-callers.yml` is a thin `workflow_dispatch` dispatcher that fans
+  `run-for-real` out to them. Adding a reusable adds a NEW file instead of editing
+  a shared one, so additions no longer serialize. Every existing example job and
+  the run-for-real gating are preserved; actionlint + yamllint stay green.
 - **`agent-token` CLI + `github-app-token` action are per-agent-parametrised
   (SGO-163).** The CLI gains `--agent builder|shape|consultant|growth` (resolving
   the `github-app-<agent>-{id,key}` vault secrets and discovering the installation

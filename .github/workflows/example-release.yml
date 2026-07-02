@@ -1,0 +1,70 @@
+name: example — release (reusable self-check)
+
+# Static call-graph self-check for the `release.yml` reusable. Every job here
+# `uses:` it via its LOCAL path with a real consumer's input shape, so actionlint
+# + GitHub's reusable-workflow resolver validate input names, required-input
+# presence, types, and secret shapes against the reusable's `workflow_call:`
+# contract at parse time — a mismatch fails HERE, not in a consumer's pipeline.
+#
+# HITL release path — stays gated off: these jobs touch the release path
+# (feedback_release_hitl / G4) and would only ever run with explicit per-action
+# authorization + real secrets wired, which this self-check deliberately does not
+# carry. The run-for-real gate MUST stay in place.
+#
+# De-serialised layout (parallel-dev friction fix): each reusable owns its OWN
+# `example-<reusable>.yml`; `example-callers.yml` is a thin dispatcher that fans
+# out to every file here — see its header for the "add your file" convention.
+#
+# NEVER runs the underlying work by default: `workflow_call` only and every job is
+# gated on `run-for-real` (default false); the call graph is validated statically
+# regardless of the gate, the bodies never execute under the default dispatch.
+#
+# Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
+
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: >-
+          Leave false (default) for the static call-graph self-check — every job
+          stays gated off and only the input/secret SHAPES are validated. The
+          dispatcher (example-callers.yml) passes this through; flipping it true
+          would attempt a real release and needs explicit HITL authorization +
+          real secrets — this self-check is not the place for that.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-kairix:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/release.yml
+    with:
+      # kairix-shaped: CalVer vYYYY.M.D[.N], python changelog extractor, draft
+      # for human review, default fan-out to docker-publish + publish-pypi.
+      version: v2026.5.10.6
+      changelog-label: "2026.5.10"
+      release-title: kairix $VERSION
+      tag-message: kairix $VERSION
+      draft: true
+      ref: main
+    secrets:
+      gh-token: dummy-token-shape-check-only
+
+  release-taz:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/release.yml
+    with:
+      # taz-shaped: its own calver pattern (no leading v), an awk extractor, a
+      # taz release title, and NO fan-out (empty string skips that step).
+      version: "2026.6.1"
+      calver-pattern: '^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$'
+      changelog-label: Unreleased
+      changelog-extract-command: awk '/^## /{p=0} p; $0 ~ "## \\[" ENVIRON["CHANGELOG_LABEL"] "\\]"{p=1}' CHANGELOG.md
+      release-title: taz $VERSION
+      tag-message: taz $VERSION
+      draft: true
+      ref: main
+      fan-out-command: ""

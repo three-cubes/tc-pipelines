@@ -1,0 +1,63 @@
+name: example — sonar-scan (reusable self-check)
+
+# Static call-graph self-check for the `sonar-scan.yml` reusable. Every job here
+# `uses:` it via its LOCAL path with a real consumer's input shape, so actionlint
+# + GitHub's reusable-workflow resolver validate input names, required-input
+# presence, types, and secret shapes against the reusable's `workflow_call:`
+# contract at parse time — a mismatch fails HERE, not in a consumer's pipeline.
+#
+# Secret-free by construction: the required SONAR_TOKEN secret is wired to a
+# clearly-dummy literal so the shape resolves; the run-for-real gate keeps the
+# dummy from ever authenticating anything. No real credential appears.
+#
+# De-serialised layout (parallel-dev friction fix): each reusable owns its OWN
+# `example-<reusable>.yml`; `example-callers.yml` is a thin dispatcher that fans
+# out to every file here — see its header for the "add your file" convention.
+#
+# NEVER runs the underlying work by default: `workflow_call` only and every job is
+# gated on `run-for-real` (default false); the call graph is validated statically
+# regardless of the gate, the bodies never execute under the default dispatch.
+#
+# Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
+
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: >-
+          Leave false (default) for the static call-graph self-check — every job
+          stays gated off and only the input/secret SHAPES are validated. The
+          dispatcher (example-callers.yml) passes this through; flipping it true
+          would attempt a real run and is not the point of this self-check.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Required secret SONAR_TOKEN must be passed for the call shape to resolve;
+  # a clearly-dummy literal keeps the file secret-free and the run-for-real gate
+  # means it never authenticates.
+  sonar-kairix:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/sonar-scan.yml
+    with:
+      fetch-depth: 0
+      coverage-artifact-name: coverage-data
+      test-results-artifact-name: test-results-unit-3.12
+      args: -Dsonar.verbose=false
+    secrets:
+      SONAR_TOKEN: dummy-not-a-real-token-shape-check-only
+
+  sonar-taz:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/sonar-scan.yml
+    with:
+      # taz carries its projectKey in-workflow rather than properties, and runs
+      # a single coverage artifact under its own name.
+      project-key: three-cubes_taz
+      coverage-artifact-name: taz-coverage
+      test-results-artifact-name: taz-test-results
+    secrets:
+      SONAR_TOKEN: dummy-not-a-real-token-shape-check-only

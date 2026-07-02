@@ -1,0 +1,72 @@
+name: example — docker-build-publish (reusable self-check)
+
+# Static call-graph self-check for the `docker-build-publish.yml` reusable. Every
+# job here `uses:` it via its LOCAL path with a real consumer's input shape, so
+# actionlint + GitHub's reusable-workflow resolver validate input names,
+# required-input presence, types, and secret shapes against the reusable's
+# `workflow_call:` contract at parse time — a mismatch fails HERE, not in a
+# consumer's pipeline.
+#
+# HITL release path — stays gated off: these jobs touch the release path
+# (feedback_release_hitl / G4) and would only ever run with explicit per-action
+# authorization + real registry secrets wired, which this self-check deliberately
+# does not carry. The run-for-real gate MUST stay in place.
+#
+# De-serialised layout (parallel-dev friction fix): each reusable owns its OWN
+# `example-<reusable>.yml`; `example-callers.yml` is a thin dispatcher that fans
+# out to every file here — see its header for the "add your file" convention.
+#
+# NEVER runs the underlying work by default: `workflow_call` only and every job is
+# gated on `run-for-real` (default false); the call graph is validated statically
+# regardless of the gate, the bodies never execute under the default dispatch.
+#
+# Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
+
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: >-
+          Leave false (default) for the static call-graph self-check — every job
+          stays gated off and only the input/secret SHAPES are validated. The
+          dispatcher (example-callers.yml) passes this through; flipping it true
+          would attempt a real build/push and needs explicit HITL authorization
+          + real secrets — this self-check is not the place for that.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  docker-kairix:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/docker-build-publish.yml
+    with:
+      # kairix-shaped: ghcr image, event-driven kairix-release tag strategy,
+      # setuptools-scm version, KAIRIX_VERSION build arg, push.
+      image: ghcr.io/three-cubes/kairix
+      registry: ghcr.io
+      version-source: setuptools-scm
+      version-arg-name: KAIRIX_VERSION
+      tag-strategy: kairix-release
+      fetch-depth: 0
+      push: true
+    secrets:
+      registry-username: dummy-actor
+      registry-password: dummy-token-shape-check-only
+
+  docker-taz:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/docker-build-publish.yml
+    with:
+      # taz-shaped: explicit tag list, input-derived version, no version build
+      # arg, load-only build (taz deploys via VM, doesn't push an image today),
+      # so no registry login secret is wired.
+      image: ghcr.io/three-cubes/taz
+      version-source: input
+      version-arg-name: ""
+      tag-strategy: explicit
+      tags: ghcr.io/three-cubes/taz:dry,ghcr.io/three-cubes/taz:latest
+      push: false
+      load: true
