@@ -430,3 +430,45 @@ jobs:
       needs-redispatch-label: redispatch
     secrets:
       LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
+
+  # ── require-work-item (SP-C-5 fail-closed "no work without a work item") ─────
+  # The merge-side twin of verify-and-close. The shapes exercise the full
+  # workflow_call contract statically across BOTH key-provisioning paths: the
+  # secret-free Key Vault (WIF) path (kairix-kv, RECOMMENDED) and the fallback
+  # LINEAR_API_KEY secret path (taz). A real consumer triggers this on
+  # `pull_request`; here the run-for-real gate keeps it static-only (no live PR),
+  # and the fallback secret is a clearly-dummy literal so the call shape resolves
+  # without a real credential.
+  require-work-item-kairix-kv:
+    if: ${{ inputs.run-for-real == 'true' }}
+    uses: ./.github/workflows/require-work-item.yml
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write # federate to Azure for the secret-free Key Vault fetch
+    with:
+      # kairix-shaped, secret-free (RECOMMENDED): fetch the Linear key from Key
+      # Vault via WIF at run time — NO `secrets:` block. Default open-state set
+      # + OWNER/MEMBER maintainer bypass + the default no-work-item escape hatch.
+      linear-key-vault: ${{ vars.KAIRIX_KV_NAME }}
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+  require-work-item-taz:
+    if: ${{ inputs.run-for-real == 'true' }}
+    uses: ./.github/workflows/require-work-item.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      # taz-shaped, fallback secret path: require an already-started item (drop
+      # backlog/triage), trust repo collaborators as maintainers too, and let the
+      # label + rationale bypass without a code-owner approval (escape-requires-
+      # approval off).
+      allowed-state-types: "unstarted started"
+      maintainer-associations: "OWNER MEMBER COLLABORATOR"
+      no-work-item-label: hotfix-no-work-item
+      escape-requires-approval: false
+    secrets:
+      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
