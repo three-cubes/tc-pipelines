@@ -61,25 +61,79 @@ Kept **advisory-until-proven**: a flaky REQUIRED verifier would manufacture agen
 loops, so the verifier stays a judgment input to this deterministic close — never
 a silent hard gate (`governance/gate-hardening.md`, Determinism).
 
-## The `LINEAR_API_KEY` secret
+## The Linear API key — two paths
 
 The workflow authenticates to the Linear GraphQL API (`https://api.linear.app/graphql`)
-with a **required secret**, `LINEAR_API_KEY`.
+with a Linear **personal/workspace API key**, sent verbatim in the `Authorization`
+header with **no `Bearer` prefix** (per the Linear API — an OAuth access token
+would use `Bearer`; this workflow uses the raw-key form). The key needs write
+access to the target team's issues: **update issue state**, **create comments**,
+**add labels**, and **create a label** (only used the first time `needs-redispatch`
+is applied on a team).
 
-- It is a Linear **personal/workspace API key**, sent verbatim in the
-  `Authorization` header with **no `Bearer` prefix** (per the Linear API). An
-  OAuth access token would use `Bearer` — this workflow uses the raw-key form.
-- The key needs write access to the target team's issues: **update issue state**,
-  **create comments**, **add labels**, and **create a label** (only used the first
-  time `needs-redispatch` is applied on a team).
-- Store it as an **Actions secret** in the consumer repo (or org-level, scoped to
-  the consumer repos), e.g. `gh secret set LINEAR_API_KEY --repo <owner>/<repo>`.
-- It is scoped to **only** the Linear step inside the reusable — it is never
-  present in the environment of the arbitrary consumer `verify-command`.
+There are two ways to provision it. Whichever you use, the key is scoped to
+**only** the Linear step inside the reusable — never present in the environment
+of the arbitrary consumer `verify-command`, and **never written to a job or step
+output**.
+
+### RECOMMENDED — secret-free (Key Vault via WIF)
+
+Set `linear-key-vault` to an Azure **Key Vault name**. The job then federates to
+Azure via **Workload Identity Federation** (OIDC — no stored credential) and
+reads the key from Key Vault **at run time, inside the Linear step**. The
+consumer stores **no GitHub secret** at all — nothing to rotate in GitHub, and
+one KV secret serves every consumer repo.
+
+- The vault name and `linear-key-secret-name` (default **`ci-verify-and-close`**)
+  are env-bound and handed to `az keyvault secret show` — never interpolated into
+  a shell body (injection-safe). The fetched value is `::add-mask::`-ed the
+  instant it is read.
+- The caller job must grant **`id-token: write`** (for the OIDC federation) and
+  pass the managed-identity coordinates via the `azure-client-id` /
+  `azure-tenant-id` / `azure-subscription-id` inputs — typically the repo
+  variables `vars.AZURE_CLIENT_ID` / `vars.AZURE_TENANT_ID` /
+  `vars.AZURE_SUBSCRIPTION_ID` (the same WIF identity a repo already uses for
+  `wif-azure-login`).
+- Prereq: the WIF identity needs **Key Vault Secrets User** on the target vault,
+  and a federated credential bound to the consumer repo's `main` /
+  `pull_request` ref.
+
+### FALLBACK — GitHub secret
+
+Leave `linear-key-vault` empty and pass `secrets.LINEAR_API_KEY`. Store it as an
+**Actions secret** in the consumer repo (or org-level, scoped to the consumer
+repos), e.g. `gh secret set LINEAR_API_KEY --repo <owner>/<repo>`. This is the
+pre-existing behaviour, kept for consumers without an Azure WIF identity.
 
 ## Wiring it (consumer)
 
-Add an on-merge-to-main workflow to the consumer repo:
+### Secret-free (recommended) — Key Vault via WIF
+
+```yaml
+name: on-merge-to-main
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read # resolve the merged PR (branch + body) for the commit
+  id-token: write # federate to Azure for the Key Vault fetch (no stored secret)
+
+jobs:
+  verify-and-close:
+    uses: three-cubes/tc-pipelines/.github/workflows/verify-and-close.yml@v1
+    with:
+      verify-command: ./scripts/smoke.sh # your smoke / E2E / deploy-verify
+      linear-key-vault: ${{ vars.KAIRIX_KV_NAME }} # or any KV name
+      # linear-key-secret-name defaults to ci-verify-and-close
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    # no `secrets:` block — the key is fetched from Key Vault at run time
+```
+
+### Fallback — GitHub secret
 
 ```yaml
 name: on-merge-to-main
@@ -105,6 +159,9 @@ Common overrides:
 | input | default | when to change |
 |---|---|---|
 | `verify-command` | *(required)* | your post-merge smoke / E2E / deploy-verify |
+| `linear-key-vault` | *(empty)* | **recommended** — a KV name enables the secret-free WIF fetch |
+| `linear-key-secret-name` | `ci-verify-and-close` | the KV secret name holding the Linear key |
+| `azure-client-id` / `-tenant-id` / `-subscription-id` | *(empty)* | the WIF identity, required with `linear-key-vault` |
 | `checkout` | `true` | `false` for a pure remote deploy-verify (no working tree) |
 | `working-directory` | `.` | monorepo package path |
 | `done-state` | `Done` | your team's terminal state name |
@@ -121,4 +178,8 @@ before it reaches a shell body — never interpolated into a `run:` string — s
 value can break out of its string context. Dynamic values injected into GraphQL
 go through `jq --arg` (JSON-encoded), never string-spliced into a query. The
 `verify-command` is executed as a deliberate `bash -c "$VERIFY_COMMAND"` and runs
-**without** `LINEAR_API_KEY` in its environment. Third-party actions are SHA-pinned.
+**without** the Linear API key in its environment. On the secret-free path the
+vault name and secret name reach `az keyvault secret show` as env values (never
+interpolated), the fetched key is `::add-mask::`-ed the moment it is read, and it
+stays a local shell variable inside the Linear step — never a job or step output.
+Third-party actions are SHA-pinned.

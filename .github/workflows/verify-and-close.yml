@@ -32,10 +32,20 @@ name: verify-and-close
 # Injection-safe per the org workflow standard: every caller-supplied input and
 # every `github.event.*` field is env-bound before it reaches a shell body
 # (never interpolated into a `run:` string), so no value can break out of its
-# string context. The LINEAR_API_KEY secret is scoped to ONLY the Linear steps
-# (never the arbitrary consumer `verify-command` step).
+# string context. The Linear API key is scoped to ONLY the Linear steps (never
+# the arbitrary consumer `verify-command` step) and never written to a job or
+# step output.
 #
-# Part of the Autonomous Delivery Platform initiative (SP-C).
+# Key provisioning — two paths (RECOMMENDED first):
+#   * SECRET-FREE (recommended): set `linear-key-vault` to an Azure Key Vault
+#     name. The job federates to Azure via Workload Identity Federation (OIDC,
+#     no stored credential) and reads the key from Key Vault at run time inside
+#     the Linear step. The consumer stores NO GitHub secret. See the WIF login
+#     step + the `az keyvault secret show` fetch in the Update-Linear step.
+#   * FALLBACK: pass `secrets.LINEAR_API_KEY`. Used only when `linear-key-vault`
+#     is empty — the pre-existing behaviour.
+#
+# Part of the Autonomous Delivery Platform initiative (SP-C · PLA-311).
 
 on:
   workflow_call:
@@ -135,20 +145,64 @@ on:
         description: "Linear GraphQL endpoint (override for testing/proxies)."
         type: string
         default: "https://api.linear.app/graphql"
+      linear-key-vault:
+        description: >-
+          RECOMMENDED secret-free path. When set to an Azure Key Vault NAME, the
+          Linear API key is fetched at run time from that vault via Workload
+          Identity Federation (OIDC) — the consumer stores NO GitHub secret. The
+          job federates to Azure with the azure-* inputs below, reads
+          `linear-key-secret-name`, masks it, and uses it ONLY for the Linear
+          GraphQL Authorization header. Requires `id-token: write` on the caller
+          job. Leave empty to fall back to secrets.LINEAR_API_KEY.
+        type: string
+        default: ""
+      linear-key-secret-name:
+        description: >-
+          Key Vault secret NAME holding the Linear API key, read when
+          linear-key-vault is set. Passed to `az keyvault secret show` via env
+          (never interpolated into the run body). Default is the org's
+          `ci-verify-and-close` secret.
+        type: string
+        default: "ci-verify-and-close"
+      azure-client-id:
+        description: >-
+          User-assigned managed-identity client ID for the WIF login (typically
+          vars.AZURE_CLIENT_ID). Required only when linear-key-vault is set.
+        type: string
+        default: ""
+      azure-tenant-id:
+        description: >-
+          Azure AD tenant ID for the WIF login (typically vars.AZURE_TENANT_ID).
+          Required only when linear-key-vault is set.
+        type: string
+        default: ""
+      azure-subscription-id:
+        description: >-
+          Subscription ID for the WIF login (typically
+          vars.AZURE_SUBSCRIPTION_ID). Required only when linear-key-vault is set.
+        type: string
+        default: ""
     secrets:
       LINEAR_API_KEY:
         description: >-
-          Linear API key used as the `Authorization` header for the GraphQL
-          transition + comment (a personal/workspace API key, sent verbatim with
-          NO `Bearer` prefix per the Linear API). See
-          governance/loop/verify-and-close.md for how a consumer wires it.
-        required: true
+          FALLBACK Linear API key, used ONLY when `linear-key-vault` is empty.
+          Applied verbatim as the `Authorization` header for the GraphQL
+          transition + comment (a personal/workspace API key, NO `Bearer` prefix
+          per the Linear API). Prefer the secret-free `linear-key-vault` path;
+          see governance/loop/verify-and-close.md for how a consumer wires either.
+        required: false
 
 # The reusable declares the least it needs; the effective grant is the
 # intersection with the caller job, so a consumer must grant at least these.
+# `id-token: write` is the MAXIMUM the reusable can hold — it is only exercised
+# on the OPTIONAL Key Vault (WIF) path. A consumer that passes
+# secrets.LINEAR_API_KEY (no linear-key-vault) simply does not grant it in its
+# caller job, so the intersection drops it and the WIF login step is skipped; a
+# KV consumer grants `id-token: write` so the OIDC federation can run.
 permissions:
   contents: read
   pull-requests: read
+  id-token: write
 
 jobs:
   verify-and-close:
@@ -303,14 +357,31 @@ jobs:
           echo "outcome: verify=$VERIFY_OUTCOME," \
             "independent-verifier=$VERIFIER_VERDICT -> $result"
 
+      - name: Azure login for Key Vault (WIF — optional secret-free path)
+        # Only when the consumer opts into the KV-fetch path AND there is an
+        # issue to transition. Federates to Azure via OIDC (no stored credential)
+        # so the Update-Linear step can read the key from Key Vault at run time.
+        # The azure-* inputs are typically vars.AZURE_CLIENT_ID / _TENANT_ID /
+        # _SUBSCRIPTION_ID on the caller. Requires `id-token: write`.
+        if: inputs.linear-key-vault != '' && steps.resolve.outputs.resolved == 'true'
+        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@v1
+        with:
+          client-id: ${{ inputs.azure-client-id }}
+          tenant-id: ${{ inputs.azure-tenant-id }}
+          subscription-id: ${{ inputs.azure-subscription-id }}
+
       - name: Update Linear (close on pass / needs-fix on fail)
         if: steps.resolve.outputs.resolved == 'true'
-        # LINEAR_API_KEY is scoped to THIS step only — it is never present in the
-        # environment of the arbitrary consumer verify-command above. All dynamic
-        # values are env-bound and injected into GraphQL via jq --arg (JSON-
-        # encoded), so nothing is spliced into a query string.
+        # The Linear API key is scoped to THIS step only — it is never present in
+        # the environment of the arbitrary consumer verify-command above, and is
+        # never written to a job/step output. On the secret-free path the key is
+        # fetched from Key Vault INSIDE this step (env-bound vault + name, then
+        # masked). All dynamic values are env-bound and injected into GraphQL via
+        # jq --arg (JSON-encoded), so nothing is spliced into a query string.
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_KEY_VAULT: ${{ inputs.linear-key-vault }}
+          LINEAR_KEY_SECRET_NAME: ${{ inputs.linear-key-secret-name }}
           LINEAR_API_URL: ${{ inputs.linear-api-url }}
           RESULT: ${{ steps.outcome.outputs.result }}
           ISSUE_ID: ${{ steps.resolve.outputs.issue-id }}
@@ -328,13 +399,35 @@ jobs:
           set -euo pipefail
           api="${LINEAR_API_URL:-https://api.linear.app/graphql}"
 
+          # Resolve the Linear API key. Secret-free path (when linear-key-vault
+          # is set): fetch from Key Vault via the WIF session established above.
+          # Fallback path (vault empty): the caller-supplied secret, as before.
+          # The vault + secret NAME are env-bound (never interpolated into this
+          # body — injection-safe), and the fetched value is masked immediately
+          # so it can never surface in logs. The key stays a local shell variable
+          # in THIS step — never a job or step output.
+          if [[ -n "${LINEAR_KEY_VAULT:-}" ]]; then
+            linear_key="$(az keyvault secret show \
+              --vault-name "$LINEAR_KEY_VAULT" \
+              --name "$LINEAR_KEY_SECRET_NAME" \
+              --query value -o tsv)"
+            echo "::add-mask::$linear_key"
+          else
+            linear_key="${LINEAR_API_KEY:-}"
+          fi
+          if [[ -z "$linear_key" ]]; then
+            echo "::error::no Linear API key available — set linear-key-vault" \
+              "(recommended, secret-free) or pass secrets.LINEAR_API_KEY." >&2
+            exit 1
+          fi
+
           # Minimal GraphQL client. GraphQL-level errors return HTTP 200 with an
           # `errors` array, so we check that (not just the HTTP status).
           gql() {
             local resp
             resp="$(jq -n --arg q "$1" --argjson v "$2" '{query:$q,variables:$v}' \
               | curl -sS -X POST "$api" \
-                  -H "Authorization: $LINEAR_API_KEY" \
+                  -H "Authorization: $linear_key" \
                   -H "Content-Type: application/json" \
                   --data @-)"
             if [[ -z "$resp" ]] || jq -e '.errors' >/dev/null 2>&1 <<<"$resp"; then
