@@ -592,6 +592,149 @@ class HttpSourceFetchDescriptionTest(unittest.TestCase):
         )
 
 
+def _paged_issue_node(identifier, wave):
+    """A full-field-set GraphQL issue node, as a project-issues page returns."""
+    return {
+        "identifier": identifier,
+        "title": identifier,
+        "priority": 2,
+        "createdAt": "2026-07-01T00:00:00.000Z",
+        "branchName": f"dan/{identifier.lower()}",
+        "url": f"https://linear.app/x/{identifier}",
+        "description": "",
+        "state": {"type": "backlog", "name": "Backlog"},
+        "team": {"key": identifier.split("-")[0]},
+        "labels": {"nodes": [{"name": f"adp-wave-{wave}"}]},
+        "inverseRelations": {"nodes": []},
+    }
+
+
+class HttpSourcePaginatedFetchTest(unittest.TestCase):
+    """SGO-207: fetch() must page (project-ids hop → per-project, per-page issue
+    fetch) instead of sending one 250-wide initiative query Linear rejects 400."""
+
+    def _build_opener(self, calls):
+        # Two projects; project A spans two pages (hasNextPage True→False),
+        # project B is a single page. The opener answers the cheap project-ids
+        # hop, then each project-issues page keyed on (pid, after cursor).
+        pages = {
+            ("projA", None): {
+                "pageInfo": {"hasNextPage": True, "endCursor": "curA1"},
+                "nodes": [_paged_issue_node("PLA-1", 0), _paged_issue_node("PLA-2", 1)],
+            },
+            ("projA", "curA1"): {
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                "nodes": [_paged_issue_node("PLA-3", 1)],
+            },
+            ("projB", None): {
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                "nodes": [_paged_issue_node("SGO-9", 0)],
+            },
+        }
+
+        def fake_opener(req, timeout=None):
+            body = json.loads(req.data.decode("utf-8"))
+            calls.append(body)
+            variables = body["variables"]
+            if "pid" in variables:  # a project-issues page request
+                page = pages[(variables["pid"], variables["after"])]
+                data = {"data": {"project": {"issues": page}}}
+            else:  # the cheap project-ids hop
+                data = {
+                    "data": {
+                        "initiative": {
+                            "projects": {"nodes": [{"id": "projA"}, {"id": "projB"}]}
+                        }
+                    }
+                }
+            return _FakeResponse(json.dumps(data).encode("utf-8"))
+
+        return fake_opener
+
+    def test_fetch_assembles_all_projects_and_pages(self):
+        calls = []
+        src = HttpLinearSource("lin_api_x", opener=self._build_opener(calls))
+        got = src.fetch("INIT")
+
+        # candidates come from BOTH projects and ALL of project A's pages.
+        self.assertEqual(
+            [i.id for i in got], ["PLA-1", "PLA-2", "PLA-3", "SGO-9"]
+        )
+
+        # and match the pure parser fed the equivalent assembled payload shape.
+        assembled = {
+            "data": {
+                "initiative": {
+                    "projects": {
+                        "nodes": [
+                            {
+                                "issues": {
+                                    "nodes": [
+                                        _paged_issue_node("PLA-1", 0),
+                                        _paged_issue_node("PLA-2", 1),
+                                        _paged_issue_node("PLA-3", 1),
+                                        _paged_issue_node("SGO-9", 0),
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+        expected = parse_initiative_issues(assembled)
+        self.assertEqual(
+            [(i.id, i.wave, i.team_key) for i in got],
+            [(i.id, i.wave, i.team_key) for i in expected],
+        )
+
+    def test_fetch_calls_opener_per_project_and_per_page(self):
+        calls = []
+        src = HttpLinearSource("lin_api_x", opener=self._build_opener(calls))
+        src.fetch("INIT")
+
+        # 1 project-ids hop + 1 request PER PROJECT PER PAGE (A×2 + B×1) = 4.
+        self.assertEqual(len(calls), 4)
+
+        # the first request is the cheap project-ids hop (no `issues` field), and
+        # it carries only the initiative id variable.
+        self.assertNotIn("issues", calls[0]["query"])
+        self.assertEqual(calls[0]["variables"], {"id": "INIT"})
+
+        # the page requests, in order: A page-1, A page-2 (endCursor), then B.
+        page_calls = [
+            (c["variables"]["pid"], c["variables"]["after"])
+            for c in calls
+            if "pid" in c["variables"]
+        ]
+        self.assertEqual(
+            page_calls, [("projA", None), ("projA", "curA1"), ("projB", None)]
+        )
+
+        # NO single over-complex 250-wide initiative query is ever sent, and every
+        # page request bounds the fetch by the module page-size constant.
+        for c in calls:
+            self.assertNotIn("first: 250", c["query"])
+            self.assertNotEqual(c["query"], disp.INITIATIVE_ISSUES_QUERY)
+        for c in calls:
+            if "pid" in c["variables"]:
+                self.assertEqual(c["variables"]["first"], disp.ISSUE_PAGE_SIZE)
+
+    def test_fetch_surfaces_graphql_errors_mid_pagination(self):
+        # A GraphQL error on any page must raise (fail-fast), not read as empty.
+        def fake_opener(req, timeout=None):
+            variables = json.loads(req.data.decode("utf-8"))["variables"]
+            if "pid" in variables:
+                body = {"errors": [{"message": "Query too complex"}]}
+            else:
+                body = {"data": {"initiative": {"projects": {"nodes": [{"id": "p"}]}}}}
+            return _FakeResponse(json.dumps(body).encode("utf-8"))
+
+        src = HttpLinearSource("lin_api_x", opener=fake_opener)
+        with self.assertRaises(ValueError):
+            src.fetch("INIT")
+
+
 class DescriptionResolverWiringTest(unittest.TestCase):
     def test_dispatcher_adapts_source_fetch_description(self):
         # A source whose candidate list is truncated but which exposes

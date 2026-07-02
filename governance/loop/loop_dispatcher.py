@@ -75,6 +75,13 @@ ADP_INITIATIVE_ID = "7e522d9b-8cb2-45d2-a8ca-4ee6f83d554d"
 #: Linear's GraphQL endpoint (the live :class:`HttpLinearSource` transport).
 LINEAR_GRAPHQL_ENDPOINT = "https://api.linear.app/graphql"
 
+#: Page size for the live paginated fetch (:meth:`HttpLinearSource.fetch`). A
+#: single ``initiative { projects { issues(first: 250) } }`` query with the full
+#: field set is rejected by Linear with HTTP 400 "Query too complex" (SGO-207),
+#: so the fetch pages each project's issues in bounded chunks instead. Small
+#: enough that one page stays well under the complexity ceiling.
+ISSUE_PAGE_SIZE = 50
+
 #: Only this state *type* is a fresh candidate for dispatch. An item that is
 #: ``started`` (In Progress / In Review), ``completed`` (Done), or ``canceled``
 #: is already picked up or finished and must never be re-dispatched.
@@ -562,8 +569,65 @@ class HttpLinearSource:
     timeout: float = 30.0
 
     def fetch(self, initiative_id: str) -> list[CandidateIssue]:
-        payload = self._post(INITIATIVE_ISSUES_QUERY, {"id": initiative_id})
+        """Fetch every candidate in the initiative, paginated (SGO-207).
+
+        A single ``initiative { projects { issues(first: 250) … } }`` query with
+        the full field set is rejected by Linear with HTTP 400 "Query too
+        complex", so this spreads the cost instead of asking for it all at once:
+
+        1. a cheap query for the initiative's **project ids only**;
+        2. per project, a ``first: ISSUE_PAGE_SIZE`` + ``pageInfo.endCursor`` loop
+           over that project's issues, with the full field set the parser needs.
+
+        The collected nodes are assembled into the exact payload shape
+        :func:`parse_initiative_issues` already expects, so that pure, unit-tested
+        parser stays unchanged. GraphQL ``errors`` on any page are surfaced the
+        same way the parser does — a mid-pagination fault never masquerades as an
+        empty page.
+        """
+        nodes: list[dict] = []
+        for project_id in self._fetch_project_ids(initiative_id):
+            nodes.extend(self._fetch_project_issue_nodes(project_id))
+        payload = {
+            "data": {
+                "initiative": {"projects": {"nodes": [{"issues": {"nodes": nodes}}]}}
+            }
+        }
         return parse_initiative_issues(payload)
+
+    def _fetch_project_ids(self, initiative_id: str) -> list[str]:
+        """The initiative's project ids — the cheap first hop of the paginated
+        fetch (a fraction of the full field set, so it never trips the ceiling)."""
+        payload = self._post(INITIATIVE_PROJECT_IDS_QUERY, {"id": initiative_id})
+        _raise_on_graphql_errors(payload)
+        initiative = (payload.get("data") or {}).get("initiative") or {}
+        nodes = (initiative.get("projects") or {}).get("nodes") or []
+        return [pid for node in nodes if (pid := node.get("id"))]
+
+    def _fetch_project_issue_nodes(self, project_id: str) -> list[dict]:
+        """Every issue node of one project, paging ``first: ISSUE_PAGE_SIZE`` +
+        ``endCursor`` until exhausted. Returns the raw GraphQL nodes for
+        assembly into the parser's payload shape."""
+        nodes: list[dict] = []
+        after: Optional[str] = None
+        while True:
+            payload = self._post(
+                PROJECT_ISSUES_PAGE_QUERY,
+                {"pid": project_id, "first": ISSUE_PAGE_SIZE, "after": after},
+            )
+            _raise_on_graphql_errors(payload)
+            issues = (
+                ((payload.get("data") or {}).get("project") or {}).get("issues") or {}
+            )
+            nodes.extend(issues.get("nodes") or [])
+            page_info = issues.get("pageInfo") or {}
+            after = page_info.get("endCursor")
+            # Stop when Linear says there's no next page — or defensively if it
+            # claims one but hands back no cursor (a null cursor would otherwise
+            # re-request page one forever).
+            if not page_info.get("hasNextPage") or not after:
+                break
+        return nodes
 
     def fetch_description(self, identifier: str) -> str:
         """The issue's FULL description (``get_issue``, never truncated).
@@ -591,9 +655,67 @@ class HttpLinearSource:
             return json.loads(resp.read().decode("utf-8"))
 
 
+def _raise_on_graphql_errors(payload: dict) -> None:
+    """Raise on a GraphQL ``errors`` array — the same fail-fast the parsers do,
+    applied to every paginated page so a mid-fetch fault never reads as an empty
+    page (and silently under-reports the backlog)."""
+    if payload.get("errors"):
+        raise ValueError(f"Linear GraphQL errors: {payload['errors']}")
+
+
+#: GraphQL: the initiative's **project ids only** — the cheap first hop of the
+#: paginated :meth:`HttpLinearSource.fetch`. A tiny fraction of the full field
+#: set, so it never approaches Linear's query-complexity ceiling (SGO-207).
+INITIATIVE_PROJECT_IDS_QUERY = """
+query DispatcherProjectIds($id: String!) {
+  initiative(id: $id) {
+    projects {
+      nodes { id }
+    }
+  }
+}
+""".strip()
+
+
+#: GraphQL: one page of a single project's issues, with the full field set the
+#: parser needs (state type, labels, priority, age, branch, team key, and the
+#: ``blocked-by`` inverse relations). Paged (``first: $first`` bound to
+#: :data:`ISSUE_PAGE_SIZE`, ``after: $after`` = ``pageInfo.endCursor``) so each
+#: request stays under the complexity ceiling no matter how many issues a
+#: project holds. :meth:`HttpLinearSource.fetch` loops this per project.
+PROJECT_ISSUES_PAGE_QUERY = """
+query DispatcherProjectIssues($pid: String!, $first: Int!, $after: String) {
+  project(id: $pid) {
+    issues(first: $first, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        identifier
+        title
+        priority
+        createdAt
+        branchName
+        url
+        description
+        state { type name }
+        team { key }
+        labels { nodes { name } }
+        inverseRelations { nodes { type relatedIssue { identifier state { type } } } }
+      }
+    }
+  }
+}
+""".strip()
+
+
 #: GraphQL: the initiative's projects' issues, with the fields selection needs
 #: (state type, labels, priority, age, branch, team key) and the ``blocked-by``
 #: relations (an inverse "blocks" relation is a blocker on THIS issue).
+#:
+#: Retained as the canonical *response shape* :func:`parse_initiative_issues`
+#: consumes and that :meth:`HttpLinearSource.fetch` assembles the paginated pages
+#: into. It is **no longer sent to the wire**: a single 250-wide initiative query
+#: is rejected 400 "Query too complex" (SGO-207), so the live fetch paginates via
+#: :data:`INITIATIVE_PROJECT_IDS_QUERY` + :data:`PROJECT_ISSUES_PAGE_QUERY`.
 INITIATIVE_ISSUES_QUERY = """
 query DispatcherCandidates($id: String!) {
   initiative(id: $id) {
