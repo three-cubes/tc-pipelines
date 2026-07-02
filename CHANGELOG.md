@@ -10,6 +10,21 @@ for the consumer-facing `@vN` workflow/action references.
 
 ### Added
 
+- **`require-work-item` reusable workflow (PLA-313 / SP-C-5).** The fail-closed
+  merge-boundary enforcement of the invariant **NO WORK WITHOUT A WORK ITEM**:
+  [`.github/workflows/require-work-item.yml`](.github/workflows/require-work-item.yml)
+  (`workflow_call`) FAILS a PR unless its head branch (org convention
+  `<user>/<team>-<number>-<slug>`) or body resolves to a **real, open/in-progress**
+  Linear issue, verified via the Linear GraphQL API using the KV-fetched key
+  (secret-free via WIF, like `verify-and-close`). Bypasses: a **human maintainer**
+  author, or an explicit `no-work-item` label with a rationale **and** a
+  CODEOWNERS-gated (code-owner-approved) sign-off for genuine hotfixes.
+  Fail-closed: an unresolved id or an unreadable work-item source blocks the PR.
+  Publishes the stable required-status-check context **`require-work-item`** for a
+  ruleset to gate on. Injection-safe (every input + `github.event.*` env-bound;
+  GraphQL via `jq --arg`). Docs:
+  [`governance/loop/require-work-item.md`](governance/loop/require-work-item.md);
+  static call-graph shapes added to `example-callers.yml`.
 - **Canonical per-agent GitHub App governance (SGO-163).** Promoted from
   tc-agent-zone into `governance/`: the per-agent App set
   [`governance/agent-app-manifests/`](governance/agent-app-manifests/)
