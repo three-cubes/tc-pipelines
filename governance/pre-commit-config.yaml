@@ -70,3 +70,10 @@ repos:
         language: script
         stages: [commit-msg]
         always_run: true
+      - id: tc-fitness-replay
+        name: replay the fitness gate before push (local == CI)
+        entry: governance/git-hooks/pre-push
+        language: script
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true

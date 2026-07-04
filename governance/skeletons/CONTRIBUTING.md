@@ -18,6 +18,7 @@ and the same gate runs locally and in CI by construction.
 uv sync --all-extras --all-groups   # full dev env (so import-dependent fitness rules resolve)
 uv run pre-commit install           # wire the hygiene hooks
 uv run pre-commit install --hook-type commit-msg   # wire the no-attribution strip hook
+uv run pre-commit install --hook-type pre-push     # replay the fitness gate before every push (local == CI)
 ```
 
 ## The loop

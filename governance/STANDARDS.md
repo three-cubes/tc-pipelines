@@ -52,7 +52,7 @@ The **failure-driven auto-dispatch loop** that rides this model — its explicit
 ## 5. The inner-loop contract — replay the gate before you push
 
 The merge model (§4) is safe **only if green-locally implies green-in-CI.** Every `main`-break this
-org has had traces to a violation of one of these three rules:
+org has had traces to a violation of one of these four rules:
 
 1. **Replay the *exact* CI gate locally before every push.** With the full dev env installed
    (`uv sync --all-extras --all-groups`), run what CI runs — `uv run pre-commit run --all-files`
@@ -64,10 +64,18 @@ org has had traces to a violation of one of these three rules:
 2. **Regenerate-and-stage generated artifacts.** When you touch an *input* to a generated file,
    regenerate it and stage it in the **same** commit. A stale generated artifact reds `main` even when
    your hand-edit was correct. Known input→artifact pairs: `.github/CODEOWNERS` →
-   `public-interface-inventory.yaml`; catalogue inputs → the catalogue-currency check. (Wave-1's
-   "regenerate-and-stage" — until a pre-push hook enforces it, it is on you.)
+   `public-interface-inventory.yaml`; catalogue inputs → the catalogue-currency check. The `pre-push`
+   hook (`governance/git-hooks/pre-push`, wired via `pre-commit install --hook-type pre-push`) now
+   enforces this by replaying the full `tc-fitness run` before every push — a stale artifact fails the
+   gate locally. `git push --no-verify` skips it, for a genuine emergency only.
 
-3. **Never merge over a red gate.** No admin bypass, no "I'll fix it after." A red gate means the
+3. **Reconcile before push — locally, never in the UI.** When your branch is behind trunk, run
+   `git fetch && git merge origin/main` **locally**, replay the gate (rule 1), then push once. Clicking
+   *Update branch* in the GitHub UI merges trunk and launches a fresh ~16-minute CI run you have not
+   replayed — the merge result can red even when your branch was green. Reconcile-and-replay locally so
+   the push you make is the exact state CI signs off.
+
+4. **Never merge over a red gate.** No admin bypass, no "I'll fix it after." A red gate means the
    change is not done. The autonomous rulesets enforce this (zero bypass actors); **humans must hold
    the same line** — admin-merging red work is what breaks `main` and forces self-heal churn.
 
