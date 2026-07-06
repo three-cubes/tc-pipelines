@@ -1,0 +1,25 @@
+# OS metadata
+.DS_Store
+
+# Python caches
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Coverage output
+.coverage
+coverage.xml
+htmlcov/
+
+# Node package installs and coverage
+node_modules/
+coverage/
+lcov.info
+
+# Local editor state
+.idea/
+.vscode/

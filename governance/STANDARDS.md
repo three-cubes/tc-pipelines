@@ -58,8 +58,12 @@ org has had traces to a violation of one of these four rules:
    (`uv sync --all-extras --all-groups`), run what CI runs — `uv run pre-commit run --all-files`
    **and** `uv run tc-fitness run` — and get it green. A bare `python3` / `ruff` / single-file run is
    **not** a replay: it silently skips import-dependent fitness rules (they need the engine installed)
-   and only checks the files you name, while CI runs `--all-files`. If it is green locally but red in
-   CI, that is an **O1 parity bug in the local loop** (§1, O1) — fix the loop; never paper over it.
+   and only checks the files you name, while CI runs `--all-files`. Repo-specific hooks that import
+   repo code, `tc-fitness`, or tool dependencies must enter the locked uv environment and use a
+   sandbox-safe cache outside `$HOME` (`UV_CACHE_DIR=/tmp/<repo>-uv-cache`, plus
+   `UV_LINK_MODE=copy` when symlinked caches are not portable). Bare `python3` is allowed only for
+   stdlib-only hooks. If it is green locally but red in CI, that is an **O1 parity bug in the local
+   loop** (§1, O1) — fix the loop; never paper over it.
 
 2. **Regenerate-and-stage generated artifacts.** When you touch an *input* to a generated file,
    regenerate it and stage it in the **same** commit. A stale generated artifact reds `main` even when

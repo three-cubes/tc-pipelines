@@ -6,7 +6,7 @@
 # secrets from Azure Key Vault, applies the canonical branch ruleset (the
 # contract: required checks Quality gate + SonarCloud scan + SonarCloud Code
 # Analysis, 1 review, code-owner review, thread resolution), installs the
-# pre-commit hook config + CODEOWNERS + dependabot.yml from the template repo,
+# pre-commit hook config + CODEOWNERS + dependabot.yml + .gitignore from the template repo,
 # distributes the agent-affordance + harness payload (rendered skeletons +
 # sonar-sqaa hook + safe-commit/preflight), and prints a verification summary.
 #
@@ -191,7 +191,7 @@ if [[ "$DO_RULESET" == "1" ]]; then
   fi
 fi
 
-# ── 4. governance files (CODEOWNERS, dependabot, pre-commit) ─────────────────
+# ── 4. governance files (CODEOWNERS, dependabot, pre-commit, .gitignore) ─────
 if [[ "$DO_FILES" == "1" ]]; then
   echo "-- governance files --"
   echo "note: file installation opens a PR — this script prints the fetch+commit"
@@ -204,9 +204,11 @@ if [[ "$DO_FILES" == "1" ]]; then
       --jq '.content' | base64 -d > .github/dependabot.yml
     gh api repos/${TEMPLATE_REPO}/contents/governance/pre-commit-config.yaml \\
       --jq '.content' | base64 -d > .pre-commit-config.yaml
+    gh api repos/${TEMPLATE_REPO}/contents/governance/gitignore \\
+      --jq '.content' | base64 -d > .gitignore
     uv run pre-commit install
-    git add .github/CODEOWNERS .github/dependabot.yml .pre-commit-config.yaml
-    git commit -m "chore(governance): bootstrap CODEOWNERS + dependabot + pre-commit"
+    git add .github/CODEOWNERS .github/dependabot.yml .pre-commit-config.yaml .gitignore
+    git commit -m "chore(governance): bootstrap CODEOWNERS + dependabot + pre-commit + gitignore"
     gh pr create --fill
 EOF
 fi
