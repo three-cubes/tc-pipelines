@@ -104,3 +104,16 @@ def test_no_affordance_toggle_suppresses_the_payload() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "affordance + harness payload" not in result.stdout
+
+
+def test_dry_run_governance_files_install_gitignore_template() -> None:
+    result = _run(
+        "--repo", "three-cubes/sample", "--dry-run",
+        "--no-secrets", "--no-ruleset", "--no-affordance",
+    )
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+
+    assert "contents/governance/gitignore" in out
+    assert "> .gitignore" in out
+    assert ".DS_Store" in (REPO_ROOT / "governance/gitignore").read_text(encoding="utf-8")

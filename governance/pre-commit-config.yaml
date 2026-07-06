@@ -5,6 +5,10 @@
 # The canonical heavy gate is the fitness engine (`uv run tc-fitness run`, which
 # both CI and `make check` invoke). Add repo-specific local hooks below as
 # needed (e.g. a `tc-fitness run --staged` hook, bicep build, eslint).
+# Hooks that import repo code, tc-fitness, or tool dependencies must run through
+# the locked uv environment with a sandbox-safe cache, for example:
+# `env UV_CACHE_DIR=/tmp/<repo>-uv-cache UV_LINK_MODE=copy uv run --frozen python ...`.
+# Use bare `python3` only for stdlib-only hooks.
 
 repos:
   # ── General file hygiene ──────────────────────────────────────────────────
