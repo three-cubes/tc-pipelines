@@ -56,9 +56,22 @@ on:
         description: >-
           Arguments to the engine CLI. Default `run` executes the full gate
           declared in the repo's `[tool.tc_fitness]` config. Override e.g.
-          `run --select lint,pytest` or `run --changed-only`.
+          `run --changed-files-from .tc-fitness-changed-files`.
         type: string
         default: "run"
+      write-changed-files:
+        description: >-
+          Write a newline-delimited repo-relative changed-file list before the
+          gate. Pair with `tc-fitness-args: run --changed-files-from <path>` for
+          the diff-scoped PR smoke tier.
+        type: boolean
+        default: false
+      changed-files-path:
+        description: >-
+          Repo-relative file path written when `write-changed-files` is true.
+          Must match the path passed to `tc-fitness run --changed-files-from`.
+        type: string
+        default: ".tc-fitness-changed-files"
       run-no-attribution:
         description: >-
           Reject AI/LLM self-attribution residue in the PR's commit messages and
@@ -166,6 +179,58 @@ jobs:
           python-version: ${{ inputs.python-version }}
           sync-args: ${{ inputs.sync-args }}
           ci-requirements: ${{ inputs.ci-requirements-path }}
+
+      # ── Diff-scoped smoke support (opt-in) ─────────────────────────────
+      - name: Write changed-file list
+        if: inputs.write-changed-files
+        shell: bash
+        env:
+          CHANGED_FILES_PATH: ${{ inputs.changed-files-path }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$CHANGED_FILES_PATH" || "$CHANGED_FILES_PATH" = /* || "$CHANGED_FILES_PATH" == *".."* ]]; then
+            echo "::error::changed-files-path must be a non-empty repo-relative path without '..': '$CHANGED_FILES_PATH'." >&2
+            exit 1
+          fi
+
+          ensure_commit() {
+            local sha="$1"
+            [[ -z "$sha" ]] && return 0
+            git cat-file -e "${sha}^{commit}" 2>/dev/null && return 0
+            git fetch --no-tags --depth=1 origin "$sha"
+          }
+
+          zero_sha="0000000000000000000000000000000000000000"
+          base=""
+          head=""
+          if [[ -n "${PR_BASE_SHA:-}" && -n "${PR_HEAD_SHA:-}" ]]; then
+            base="$PR_BASE_SHA"
+            head="$PR_HEAD_SHA"
+          elif [[ -n "${PUSH_BEFORE_SHA:-}" && "$PUSH_BEFORE_SHA" != "$zero_sha" ]]; then
+            base="$PUSH_BEFORE_SHA"
+            head="$PUSH_AFTER_SHA"
+          elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            base="HEAD~1"
+            head="HEAD"
+          else
+            mkdir -p "$(dirname -- "$CHANGED_FILES_PATH")"
+            git ls-files > "$CHANGED_FILES_PATH"
+            count="$(wc -l < "$CHANGED_FILES_PATH" | tr -d ' ')"
+            echo "changed-files: wrote $count tracked path(s) to $CHANGED_FILES_PATH (initial checkout fallback)."
+            exit 0
+          fi
+
+          ensure_commit "$base"
+          ensure_commit "$head"
+          mkdir -p "$(dirname -- "$CHANGED_FILES_PATH")"
+          git diff --name-only "$base...$head" > "$CHANGED_FILES_PATH"
+          count="$(wc -l < "$CHANGED_FILES_PATH" | tr -d ' ')"
+          echo "changed-files: wrote $count path(s) to $CHANGED_FILES_PATH."
 
       # ── Repo-specific pre-orchestration (opt-in) ────────────────────────
       - name: Pre-steps

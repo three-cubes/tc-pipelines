@@ -10,6 +10,13 @@ for the consumer-facing `@vN` workflow/action references.
 
 ### Added
 
+- **`python-quality-gate.yml` diff-scoped smoke wiring.** Callers can opt in to
+  `write-changed-files: true`, which writes a newline-delimited repo-relative
+  PR/push diff file, then pair it with `tc-fitness-args: run
+  --changed-files-from .tc-fitness-changed-files` to run the tc-fitness
+  `<60s` changed-file smoke tier instead of a full unscoped gate on every PR.
+  The static example caller now exercises the new input shape.
+- **`.DS_Store` is ignored** so macOS Finder metadata stays out of repo diffs.
 - **`require-work-item` reusable workflow (PLA-313 / SP-C-5).** The fail-closed
   merge-boundary enforcement of the invariant **NO WORK WITHOUT A WORK ITEM**:
   [`.github/workflows/require-work-item.yml`](.github/workflows/require-work-item.yml)
