@@ -65,6 +65,10 @@ jobs:
       sync-args: --locked --all-packages
       # Exercise the D1 no-attribution message-scan leg's input shape statically.
       run-no-attribution: true
+      # Exercise the diff-scoped PR smoke input shape statically.
+      write-changed-files: true
+      changed-files-path: .tc-fitness-changed-files
+      tc-fitness-args: run --changed-files-from .tc-fitness-changed-files
       run-node: true
       pnpm-version: 10.27.0
       coverage-artifact-name: taz-coverage

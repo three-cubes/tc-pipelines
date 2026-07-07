@@ -48,7 +48,12 @@ The Python quality check is defined **once**, as a program you run: [tc-fitness]
 - **CI** runs it via [`python-quality-gate.yml`](.github/workflows/python-quality-gate.yml), which is just `checkout → setup-uv-cached → uv run tc-fitness run`.
 - **Local** `make check` runs the *same* `uv run tc-fitness run`.
 
-Both run the same program reading the same config, so the check you run locally is the exact same one CI runs. Anything repo-specific is config the tool reads — never baked into the workflow. `tc-agent-zone` and `kairix` are current consumers.
+Both run the same program reading the same config, so the full check you run
+locally is the exact same one CI runs. For fast PR feedback, callers can opt in
+to the diff-scoped smoke tier by having the workflow write a changed-file list
+and passing that list to `tc-fitness run --changed-files-from`. Anything
+repo-specific is config the tool reads — never baked into the workflow.
+`tc-agent-zone` and `kairix` are current consumers.
 
 ```yaml
 # caller in a three-cubes repo — the WHOLE python job:
@@ -87,10 +92,24 @@ Each workflow's inputs, secrets, and defaults are documented in the header of th
 | `fetch-depth` | `2` | checkout depth (`0` for full-history scans) |
 | `sync-args` | `"--locked --all-packages"` | `uv sync` args (single-package repos: `--all-extras --all-groups`) |
 | `ci-requirements-path` | `".github/requirements-ci.txt"` | `--require-hashes` CI-tools file; `""` skips |
-| `tc-fitness-args` | `"run"` | args to the tool's CLI (e.g. `run --changed-only`) |
+| `tc-fitness-args` | `"run"` | args to the tool's CLI (e.g. `run --changed-files-from .tc-fitness-changed-files`) |
+| `write-changed-files` | `false` | write a newline-delimited PR/push diff file before the gate |
+| `changed-files-path` | `".tc-fitness-changed-files"` | path written when `write-changed-files` is true |
 | `pre-steps` / `post-steps` | `""` | bash run before / after the check |
 | `upload-coverage-artifact` | `true` | upload coverage XML for `sonar-scan.yml` |
 | `run-node` | `false` | run the pnpm/TS half (separate ecosystem) |
+
+Diff-scoped PR smoke example:
+
+```yaml
+jobs:
+  quality:
+    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@v1
+    with:
+      write-changed-files: true
+      changed-files-path: .tc-fitness-changed-files
+      tc-fitness-args: run --changed-files-from .tc-fitness-changed-files
+```
 
 **Secret:** `gh-token` (optional) — `GITHUB_TOKEN` for the tool's secret-scan changed-file diff; falls back to `github.token`.
 
@@ -207,4 +226,3 @@ Prereq: the repo's WIF identity needs Key Vault Secrets User on `kv-tc-agents` �
 ## Versioning
 
 Consumers pin `@v1` (the floating major) so changes roll out on the org dependency-cooldown cadence; the `v1.x.y` immutable tags mark exact baselines. Breaking changes go out only through major version bumps. This repo self-pins its own composites to `@v1`.
-
