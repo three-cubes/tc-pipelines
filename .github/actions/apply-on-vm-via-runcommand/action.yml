@@ -71,11 +71,14 @@ runs:
         echo "----- BEGIN run-command output ($VM) -----"
         echo "$MSG"
         echo "----- END run-command output ($VM) -----"
-        # az vm run-command exits 0 even when the *script* failed — sniff
-        # the message for the typical bash error markers so we don't silently
-        # mark a broken deploy as green.
+        MSG_FILE=$(mktemp)
+        printf '%s\n' "$MSG" >"$MSG_FILE"
+        trap 'rm -f "$MSG_FILE"' EXIT
+        # az vm run-command exits 0 even when the *script* failed — gate the
+        # returned value[0].message so "Enable succeeded" cannot mask stderr
+        # failures from the script body.
         if [[ "$FAIL_ON_ERR" == "true" ]]; then
-          if echo "$MSG" | grep -qE '(^FAIL |^✗ |^ERROR:|Permission denied|fatal: |command not found)'; then
+          if ! python3 "$GITHUB_ACTION_PATH/../../../governance/scripts/run_command_output_gate.py" "$MSG_FILE" --label "apply script on ${VM}"; then
             echo "::error::Apply script on ${VM} reported failure in output (see above)."
             exit 1
           fi
