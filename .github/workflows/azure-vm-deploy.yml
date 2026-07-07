@@ -160,6 +160,34 @@ jobs:
             echo "::error::${description}: exhausted ${max_attempts} retries on (Conflict)"
             return 1
           }
+          gate_run_command_output() {
+            local vm="$1"
+            local message_file="$2"
+            python3 - "$vm" "$message_file" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          vm = sys.argv[1]
+          message = Path(sys.argv[2]).read_text(encoding="utf-8")
+          patterns = (
+              re.compile(r"(^|\n)FAIL(?:\s|:)", re.IGNORECASE),
+              re.compile(r"(^|\n)✗\s+"),
+              re.compile(r"(^|\n)ERROR:", re.IGNORECASE),
+              re.compile(r"\bPermission denied\b", re.IGNORECASE),
+              re.compile(r"(^|\n)fatal:\s+", re.IGNORECASE),
+              re.compile(r"\bcommand not found\b", re.IGNORECASE),
+              re.compile(r"Traceback \(most recent call last\):"),
+              re.compile(r"\bIllegal option -o pipefail\b"),
+          )
+          matches = [match.group(0).strip() for pattern in patterns if (match := pattern.search(message))]
+          if matches:
+              print(f"::error::Apply on {vm} reported fatal run-command output markers:", file=sys.stderr)
+              for match in matches:
+                  print(f"  - {match}", file=sys.stderr)
+              raise SystemExit(1)
+          PY
+          }
           # Iterate targets, calling the per-VM script + smoke check inline.
           # We do this inline (not as a matrix) because az run-command is
           # serial-friendly + matrix would each pay the checkout cost.
@@ -179,10 +207,13 @@ jobs:
             echo "$MSG"
             echo "----- END ${VM} apply output -----"
             printf '=== %s ===\n%s\n' "$VM" "$MSG" >> "$APPLY_ACC"
-            if echo "$MSG" | grep -qE '(^FAIL |^✗ |^ERROR:|Permission denied|fatal: |command not found)'; then
-              echo "::error::Apply on ${VM} reported failure (see output above)."
+            MSG_FILE=$(mktemp)
+            printf '%s\n' "$MSG" >"$MSG_FILE"
+            if ! gate_run_command_output "$VM" "$MSG_FILE"; then
+              rm -f "$MSG_FILE"
               exit 1
             fi
+            rm -f "$MSG_FILE"
             if [[ -n "${UNITS}" && "${UNITS}" != "null" ]]; then
               echo "=== Smoke ${VM} (${UNITS}) ==="
               SMOKE_MSG=$(run_with_retry "smoke on ${VM}" az vm run-command invoke \
