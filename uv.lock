@@ -74,7 +74,7 @@ wheels = [
 [[package]]
 name = "tc-pipelines-selftest-harness"
 version = "0.0.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "coverage" },
     { name = "three-cubes-fitness" },
