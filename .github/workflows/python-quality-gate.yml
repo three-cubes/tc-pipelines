@@ -288,10 +288,15 @@ jobs:
           echo "combining ${#shards[@]} shard file(s): ${shards[*]}"
           uv run coverage combine "${shards[@]}" || echo "::warning::coverage combine skipped an empty/partial shard file (kept the rest)."
           if [[ -f .coverage ]]; then
-            uv run coverage xml -o "$COVERAGE_XML"
+            uv run coverage xml -o "$COVERAGE_XML" || echo "::warning::coverage xml produced no report (empty/unreportable shard data)."
           else
             echo "::warning::no combined coverage data produced; no XML written."
           fi
+          # Coverage assembly is a non-blocking convenience for the Sonar handoff
+          # (matching the original always()/if-no-files-found: ignore upload). The
+          # gate's real verdict is the shard test results, which already gated in
+          # the quality-shard jobs — a reporting hiccup here must not fail the gate.
+          exit 0
       - name: Upload combined coverage XML
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
