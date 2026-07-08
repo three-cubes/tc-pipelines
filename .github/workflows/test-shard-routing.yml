@@ -1,0 +1,57 @@
+name: "self-test · python-quality-gate sharding"
+
+# Exercises the NOVEL wiring the sharding change adds to python-quality-gate.yml:
+#   * pytest-shards == 1  → the single byte-identical `quality` job runs; the
+#     sharded jobs skip (probe asserts NO shard args / COVERAGE_FILE).
+#   * pytest-shards == 2  → `shards` builds the [1,2] matrix, `quality-shard`
+#     runs both legs (probe asserts the injected `--split i of N` + COVERAGE_FILE),
+#     `coverage-combine` merges the shard data.
+# Both call the reusable via the LOCAL `./` ref so this PR's copy (and its
+# branch-pinned composite) is what runs. A committed fixture gate stands in for a
+# real repo gate; the deep pytest-split + combine mechanics are proven separately.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/python-quality-gate.yml"
+      - "actions/python-gate-body/**"
+      - ".github/workflows/test-shard-routing.yml"
+      - ".github/selftest-fixture/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unsharded:
+    name: "shards=1 (byte-identical path)"
+    uses: ./.github/workflows/python-quality-gate.yml
+    with:
+      pytest-shards: 1
+      run-no-attribution: false
+      write-changed-files: false
+      ci-requirements-path: ""
+      sync-args: "--no-project"
+      upload-coverage-artifact: false
+      pre-steps: |
+        set -euo pipefail
+        cp .github/selftest-fixture/.tc-fitness.toml .tc-fitness.toml
+        cp .github/selftest-fixture/shard_probe.py shard_probe.py
+        uv pip install three-cubes-fitness==0.9.0 coverage
+
+  sharded:
+    name: "shards=2 (matrix + combine path)"
+    uses: ./.github/workflows/python-quality-gate.yml
+    with:
+      pytest-shards: 2
+      run-no-attribution: false
+      write-changed-files: false
+      ci-requirements-path: ""
+      sync-args: "--no-project"
+      upload-coverage-artifact: true
+      pre-steps: |
+        set -euo pipefail
+        cp .github/selftest-fixture/.tc-fitness.toml .tc-fitness.toml
+        cp .github/selftest-fixture/shard_probe.py shard_probe.py
+        uv pip install three-cubes-fitness==0.9.0 coverage
+        echo "EXPECT_SHARD=1" >> "$GITHUB_ENV"
