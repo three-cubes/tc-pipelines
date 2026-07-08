@@ -1,0 +1,255 @@
+name: "Python quality gate body"
+description: >-
+  The shared body of the python-quality-gate reusable: checkout, the optional
+  pnpm/Node half, the locked-uv install, the optional changed-file list + pre/post
+  hooks, `tc-fitness run` (optionally sharded via `--shard i/N`), the no-attribution
+  message scan, the optional TS coverage half, and the coverage-artifact upload.
+  Extracted so the byte-identical single-job path and the sharded matrix path share
+  ONE definition (no drift between two copies of the gate body).
+
+inputs:
+  python-version:
+    required: true
+  uv-version:
+    required: true
+  sync-args:
+    required: true
+  ci-requirements-path:
+    required: true
+  fetch-depth:
+    required: true
+  tc-fitness-args:
+    required: true
+  write-changed-files:
+    required: true
+  changed-files-path:
+    required: true
+  run-no-attribution:
+    required: true
+  pre-steps:
+    required: true
+  post-steps:
+    required: true
+  run-node:
+    required: true
+  node-version-file:
+    required: true
+  pnpm-version:
+    required: true
+  pnpm-install-args:
+    required: true
+  ts-coverage-command:
+    required: true
+  gh-token:
+    required: true
+  # ── sharding ──────────────────────────────────────────────────────────────
+  shard-index:
+    description: >-
+      The 1-based shard number i. Empty (the default) runs the whole gate
+      unsharded — byte-identical to the pre-shard body. When set (with
+      shard-total), `tc-fitness run --shard i/N` splits the steps that opt in via
+      `shard_args`; the engine writes COVERAGE_FILE=.coverage.<i>.
+    required: false
+    default: ""
+  shard-total:
+    description: "The shard count N (paired with shard-index)."
+    required: false
+    default: ""
+  upload-coverage-artifact:
+    required: true
+  coverage-xml-path:
+    required: true
+  coverage-artifact-name:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        fetch-depth: ${{ inputs.fetch-depth }}
+
+    # ── Node / pnpm half (opt-in) ───────────────────────────────────────
+    - name: Set up pnpm
+      if: inputs.run-node == 'true'
+      uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      with:
+        version: ${{ inputs.pnpm-version }}
+    - name: Set up Node
+      if: inputs.run-node == 'true'
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version-file: ${{ inputs.node-version-file }}
+        cache: pnpm
+    - name: pnpm install
+      if: inputs.run-node == 'true'
+      shell: bash
+      run: pnpm install ${{ inputs.pnpm-install-args }}
+
+    # ── Locked-uv install (org composite, self-pinned to v1) ────────────
+    - name: Locked uv install
+      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@v1
+      with:
+        uv-version: ${{ inputs.uv-version }}
+        python-version: ${{ inputs.python-version }}
+        sync-args: ${{ inputs.sync-args }}
+        ci-requirements: ${{ inputs.ci-requirements-path }}
+
+    # ── Diff-scoped smoke support (opt-in) ─────────────────────────────
+    - name: Write changed-file list
+      if: inputs.write-changed-files == 'true'
+      shell: bash
+      env:
+        CHANGED_FILES_PATH: ${{ inputs.changed-files-path }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PUSH_BEFORE_SHA: ${{ github.event.before }}
+        PUSH_AFTER_SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+
+        if [[ -z "$CHANGED_FILES_PATH" || "$CHANGED_FILES_PATH" = /* || "$CHANGED_FILES_PATH" == *".."* ]]; then
+          echo "::error::changed-files-path must be a non-empty repo-relative path without '..': '$CHANGED_FILES_PATH'." >&2
+          exit 1
+        fi
+
+        ensure_commit() {
+          local sha="$1"
+          [[ -z "$sha" ]] && return 0
+          git cat-file -e "${sha}^{commit}" 2>/dev/null && return 0
+          git fetch --no-tags --depth=1 origin "$sha"
+        }
+
+        zero_sha="0000000000000000000000000000000000000000"
+        base=""
+        head=""
+        if [[ -n "${PR_BASE_SHA:-}" && -n "${PR_HEAD_SHA:-}" ]]; then
+          base="$PR_BASE_SHA"
+          head="$PR_HEAD_SHA"
+        elif [[ -n "${PUSH_BEFORE_SHA:-}" && "$PUSH_BEFORE_SHA" != "$zero_sha" ]]; then
+          base="$PUSH_BEFORE_SHA"
+          head="$PUSH_AFTER_SHA"
+        elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+          base="HEAD~1"
+          head="HEAD"
+        else
+          mkdir -p "$(dirname -- "$CHANGED_FILES_PATH")"
+          git ls-files > "$CHANGED_FILES_PATH"
+          count="$(wc -l < "$CHANGED_FILES_PATH" | tr -d ' ')"
+          echo "changed-files: wrote $count tracked path(s) to $CHANGED_FILES_PATH (initial checkout fallback)."
+          exit 0
+        fi
+
+        ensure_commit "$base"
+        ensure_commit "$head"
+        mkdir -p "$(dirname -- "$CHANGED_FILES_PATH")"
+        git diff --name-only "$base...$head" > "$CHANGED_FILES_PATH"
+        count="$(wc -l < "$CHANGED_FILES_PATH" | tr -d ' ')"
+        echo "changed-files: wrote $count path(s) to $CHANGED_FILES_PATH."
+
+    # ── Repo-specific pre-orchestration (opt-in) ────────────────────────
+    - name: Pre-steps
+      if: inputs.pre-steps != ''
+      shell: bash
+      run: ${{ inputs.pre-steps }}
+
+    # ── THE GATE — one binary, the repo's own config ────────────────────
+    # `tc-fitness run` reads `[tool.tc_fitness]` (or .tc-fitness.toml) from the
+    # checked-out repo and runs the declared gate in order — the SAME command
+    # `make check` runs locally. When `shard` is set, `--shard i/N` splits the
+    # steps that opt in via `shard_args` (the engine writes COVERAGE_FILE=.coverage.<i>).
+    - name: Fitness gate
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.gh-token }}
+        SHARD_INDEX: ${{ inputs.shard-index }}
+        SHARD_TOTAL: ${{ inputs.shard-total }}
+      run: |
+        set -euo pipefail
+        shard_flag=()
+        if [[ -n "$SHARD_INDEX" && -n "$SHARD_TOTAL" ]]; then
+          shard_flag=(--shard "${SHARD_INDEX}/${SHARD_TOTAL}")
+        fi
+        uv run tc-fitness ${{ inputs.tc-fitness-args }} "${shard_flag[@]}"
+
+    # ── No-attribution message scan (symmetric with the meta gate) ──────
+    - name: Reject AI/LLM self-attribution in commits + PR title/body
+      if: inputs.run-no-attribution == 'true'
+      shell: bash
+      env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        set -euo pipefail
+
+        module="tc_fitness.core_checks.no_llm_attribution"
+        workdir="$(mktemp -d)"
+        trap 'rm -rf "$workdir"' EXIT
+        rc=0
+
+        scan() {
+          if ! uv run python -m "$module" --scan-file "$2"; then
+            echo "::error::no-attribution: AI/LLM self-attribution residue in $1." >&2
+            rc=1
+          fi
+        }
+
+        shas=""
+        if [[ -n "${PR_BASE_SHA:-}" && -n "${PR_HEAD_SHA:-}" ]]; then
+          shas="$(git rev-list "${PR_BASE_SHA}..${PR_HEAD_SHA}" 2>/dev/null || true)"
+        fi
+        [[ -z "$shas" ]] && shas="$(git rev-list -1 HEAD)"
+        while IFS= read -r sha; do
+          [[ -z "$sha" ]] && continue
+          git log -1 --format=%B "$sha" > "$workdir/commit-${sha}.txt"
+          scan "commit ${sha} message" "$workdir/commit-${sha}.txt"
+        done <<< "$shas"
+
+        printf '%s' "$PR_TITLE" > "$workdir/pr-title.txt"
+        scan "PR title" "$workdir/pr-title.txt"
+        printf '%s' "$PR_BODY" > "$workdir/pr-body.txt"
+        scan "PR body" "$workdir/pr-body.txt"
+
+        if [[ "$rc" -ne 0 ]]; then
+          echo "::error::no-attribution: remove the AI/LLM self-attribution" \
+            "flagged above (decision D1). The same detector runs in the local" \
+            "commit-msg strip hook — install it to catch this before push." >&2
+        fi
+        exit "$rc"
+
+    # ── TS coverage half (opt-in) ───────────────────────────────────────
+    - name: TypeScript coverage
+      if: inputs.run-node == 'true'
+      shell: bash
+      run: ${{ inputs.ts-coverage-command }}
+
+    # ── Repo-specific post-orchestration (opt-in) ───────────────────────
+    - name: Post-steps
+      if: inputs.post-steps != ''
+      shell: bash
+      run: ${{ inputs.post-steps }}
+
+    # ── Coverage handoff ────────────────────────────────────────────────
+    # Unsharded: upload the engine-written coverage XML for the downstream sonar
+    # scan (the #499 artifact-handoff shape). Sharded: upload this shard's raw
+    # `.coverage.<i>` data file so the `coverage-combine` job merges them into the
+    # single XML instead (each carries the same artifact base name + a per-shard
+    # suffix so `download-artifact` with a pattern gathers them).
+    - name: Upload coverage XML (unsharded)
+      if: ${{ always() && inputs.upload-coverage-artifact == 'true' && inputs.shard-index == '' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ inputs.coverage-artifact-name }}
+        path: ${{ inputs.coverage-xml-path }}
+        if-no-files-found: ignore
+    - name: Upload shard coverage data (sharded)
+      if: ${{ always() && inputs.upload-coverage-artifact == 'true' && inputs.shard-index != '' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ inputs.coverage-artifact-name }}-shard-${{ inputs.shard-index }}
+        path: .coverage.*
+        include-hidden-files: true
+        if-no-files-found: ignore

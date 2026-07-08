@@ -134,6 +134,18 @@ on:
         description: "Command run for the TS coverage half when run-node is true."
         type: string
         default: "pnpm -r --if-present test:coverage"
+      pytest-shards:
+        description: >-
+          Number of parallel shards to split the gate's pytest step across. Default
+          1 = a single byte-identical `quality` job (the check name + behaviour are
+          unchanged). >1 fans the gate into N matrix runners each invoking
+          `tc-fitness run --shard i/N` (only steps declaring `shard_args` in the
+          repo's `[tool.tc_fitness]` are split), then a `coverage-combine` job merges
+          the shard `.coverage.<i>` files into the single XML the sonar handoff
+          consumes. Requires the repo to declare `shard_args` on its pytest step and
+          commit a `.test_durations` map (see tc-fitness `--shard`, ≥ v0.9.0).
+        type: number
+        default: 1
     secrets:
       gh-token:
         description: "GITHUB_TOKEN override for steps that need authenticated git/gh (engine secret-scan changed-file diff). Falls back to github.token."
@@ -143,35 +155,108 @@ permissions:
   contents: read
 
 jobs:
+  # Default (pytest-shards == 1): ONE byte-identical job. The name is preserved so
+  # existing consumers' required-status-check context is unchanged; the sharded
+  # jobs below are skipped and never required.
   quality:
     name: Python quality gate
+    if: ${{ inputs.pytest-shards <= 1 }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run the gate (unsharded)
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@a8518f5ecad0d49ff1c92ef38c6b217f930ea8e2 # v1 branch->SHA pin (SGO-264)
+        with:
+          python-version: ${{ inputs.python-version }}
+          uv-version: ${{ inputs.uv-version }}
+          sync-args: ${{ inputs.sync-args }}
+          ci-requirements-path: ${{ inputs.ci-requirements-path }}
+          fetch-depth: ${{ inputs.fetch-depth }}
+          tc-fitness-args: ${{ inputs.tc-fitness-args }}
+          write-changed-files: ${{ inputs.write-changed-files }}
+          changed-files-path: ${{ inputs.changed-files-path }}
+          run-no-attribution: ${{ inputs.run-no-attribution }}
+          pre-steps: ${{ inputs.pre-steps }}
+          post-steps: ${{ inputs.post-steps }}
+          run-node: ${{ inputs.run-node }}
+          node-version-file: ${{ inputs.node-version-file }}
+          pnpm-version: ${{ inputs.pnpm-version }}
+          pnpm-install-args: ${{ inputs.pnpm-install-args }}
+          ts-coverage-command: ${{ inputs.ts-coverage-command }}
+          gh-token: ${{ secrets.gh-token || github.token }}
+          upload-coverage-artifact: ${{ inputs.upload-coverage-artifact }}
+          coverage-xml-path: ${{ inputs.coverage-xml-path }}
+          coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
+          shard-index:
+          shard-total:
+
+  # ── Sharded path (pytest-shards > 1) ────────────────────────────────────────
+  # Build the [1..N] matrix (no range function in Actions expressions).
+  shards:
+    if: ${{ inputs.pytest-shards > 1 }}
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - id: gen
+        shell: bash
+        env:
+          N: ${{ inputs.pytest-shards }}
+        run: |
+          set -euo pipefail
+          # [1,2,...,N] — seq builds the comma list; the brackets make it JSON.
+          echo "matrix=[$(seq -s, 1 "$N")]" >> "$GITHUB_OUTPUT"
+
+  # Each shard runs the whole gate with `tc-fitness run --shard i/N`; only steps
+  # declaring `shard_args` split (pytest), so the non-pytest legs re-run per shard
+  # (cheap relative to the pytest win) while pytest wall-clock drops ~1/N.
+  quality-shard:
+    needs: shards
+    if: ${{ inputs.pytest-shards > 1 }}
+    name: Python quality gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
+    steps:
+      - name: Run the gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@a8518f5ecad0d49ff1c92ef38c6b217f930ea8e2 # v1 branch->SHA pin (SGO-264)
+        with:
+          python-version: ${{ inputs.python-version }}
+          uv-version: ${{ inputs.uv-version }}
+          sync-args: ${{ inputs.sync-args }}
+          ci-requirements-path: ${{ inputs.ci-requirements-path }}
+          fetch-depth: ${{ inputs.fetch-depth }}
+          tc-fitness-args: ${{ inputs.tc-fitness-args }}
+          write-changed-files: ${{ inputs.write-changed-files }}
+          changed-files-path: ${{ inputs.changed-files-path }}
+          run-no-attribution: ${{ inputs.run-no-attribution }}
+          pre-steps: ${{ inputs.pre-steps }}
+          post-steps: ${{ inputs.post-steps }}
+          run-node: ${{ inputs.run-node }}
+          node-version-file: ${{ inputs.node-version-file }}
+          pnpm-version: ${{ inputs.pnpm-version }}
+          pnpm-install-args: ${{ inputs.pnpm-install-args }}
+          ts-coverage-command: ${{ inputs.ts-coverage-command }}
+          gh-token: ${{ secrets.gh-token || github.token }}
+          upload-coverage-artifact: ${{ inputs.upload-coverage-artifact }}
+          coverage-xml-path: ${{ inputs.coverage-xml-path }}
+          coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
+          shard-index: ${{ matrix.shard }}
+          shard-total: ${{ inputs.pytest-shards }}
+
+  # Merge the shard `.coverage.<i>` files → the single coverage XML the sonar
+  # handoff consumes. always() so a shard FAIL that still produced partial
+  # coverage does not strand the report.
+  coverage-combine:
+    needs: quality-shard
+    if: ${{ always() && inputs.pytest-shards > 1 && inputs.upload-coverage-artifact }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: ${{ inputs.fetch-depth }}
-
-      # ── Node / pnpm half (opt-in) ───────────────────────────────────────
-      - name: Set up pnpm
-        if: inputs.run-node
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          version: ${{ inputs.pnpm-version }}
-      - name: Set up Node
-        if: inputs.run-node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version-file: ${{ inputs.node-version-file }}
-          cache: pnpm
-      - name: pnpm install
-        if: inputs.run-node
-        shell: bash
-        run: pnpm install ${{ inputs.pnpm-install-args }}
-
-      # ── Locked-uv install (org composite, self-pinned to v1) ────────────
-      # Provisions the pinned/cached uv venv + repo deps + optional CI tools so
-      # `tc-fitness run` has its interpreter and dependencies ready.
+          fetch-depth: 1
       - name: Locked uv install
         uses: three-cubes/tc-pipelines/actions/setup-uv-cached@v1
         with:
@@ -179,160 +264,43 @@ jobs:
           python-version: ${{ inputs.python-version }}
           sync-args: ${{ inputs.sync-args }}
           ci-requirements: ${{ inputs.ci-requirements-path }}
-
-      # ── Diff-scoped smoke support (opt-in) ─────────────────────────────
-      - name: Write changed-file list
-        if: inputs.write-changed-files
+      - name: Download shard coverage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: ${{ inputs.coverage-artifact-name }}-shard-*
+          merge-multiple: true
+      - name: Combine shard coverage → XML
         shell: bash
         env:
-          CHANGED_FILES_PATH: ${{ inputs.changed-files-path }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
-          PUSH_AFTER_SHA: ${{ github.sha }}
+          COVERAGE_XML: ${{ inputs.coverage-xml-path }}
         run: |
-          set -euo pipefail
-
-          if [[ -z "$CHANGED_FILES_PATH" || "$CHANGED_FILES_PATH" = /* || "$CHANGED_FILES_PATH" == *".."* ]]; then
-            echo "::error::changed-files-path must be a non-empty repo-relative path without '..': '$CHANGED_FILES_PATH'." >&2
-            exit 1
-          fi
-
-          ensure_commit() {
-            local sha="$1"
-            [[ -z "$sha" ]] && return 0
-            git cat-file -e "${sha}^{commit}" 2>/dev/null && return 0
-            git fetch --no-tags --depth=1 origin "$sha"
-          }
-
-          zero_sha="0000000000000000000000000000000000000000"
-          base=""
-          head=""
-          if [[ -n "${PR_BASE_SHA:-}" && -n "${PR_HEAD_SHA:-}" ]]; then
-            base="$PR_BASE_SHA"
-            head="$PR_HEAD_SHA"
-          elif [[ -n "${PUSH_BEFORE_SHA:-}" && "$PUSH_BEFORE_SHA" != "$zero_sha" ]]; then
-            base="$PUSH_BEFORE_SHA"
-            head="$PUSH_AFTER_SHA"
-          elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
-            base="HEAD~1"
-            head="HEAD"
-          else
-            mkdir -p "$(dirname -- "$CHANGED_FILES_PATH")"
-            git ls-files > "$CHANGED_FILES_PATH"
-            count="$(wc -l < "$CHANGED_FILES_PATH" | tr -d ' ')"
-            echo "changed-files: wrote $count tracked path(s) to $CHANGED_FILES_PATH (initial checkout fallback)."
+          # NOT `set -e`: `coverage combine` exits non-zero when it SKIPS an
+          # empty/partial shard file (e.g. a shard whose tests were all filtered),
+          # but the files it DID combine are still valid. Tolerate that and gate on
+          # whether a combined `.coverage` was actually produced.
+          set -uo pipefail
+          shopt -s nullglob
+          shards=(.coverage.*)
+          if [[ ${#shards[@]} -eq 0 ]]; then
+            echo "::warning::no shard coverage data found; skipping combine."
             exit 0
           fi
-
-          ensure_commit "$base"
-          ensure_commit "$head"
-          mkdir -p "$(dirname -- "$CHANGED_FILES_PATH")"
-          git diff --name-only "$base...$head" > "$CHANGED_FILES_PATH"
-          count="$(wc -l < "$CHANGED_FILES_PATH" | tr -d ' ')"
-          echo "changed-files: wrote $count path(s) to $CHANGED_FILES_PATH."
-
-      # ── Repo-specific pre-orchestration (opt-in) ────────────────────────
-      - name: Pre-steps
-        if: inputs.pre-steps != ''
-        shell: bash
-        run: ${{ inputs.pre-steps }}
-
-      # ── THE GATE — one binary, the repo's own config ────────────────────
-      # `tc-fitness run` reads `[tool.tc_fitness]` (or .tc-fitness.toml) from
-      # the checked-out repo and runs the declared gate in order. This is the
-      # SAME command `make check` runs locally — local == CI by construction.
-      - name: Fitness gate
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.gh-token || github.token }}
-        run: uv run tc-fitness ${{ inputs.tc-fitness-args }}
-
-      # ── No-attribution message scan (symmetric with the meta gate) ──────
-      # `tc-fitness run` above already scans in-repo FILES for attribution
-      # residue and gates commit IDENTITY over the range (both via the repo's
-      # [tool.tc_fitness] config). This step covers the surfaces that are NOT
-      # files: the PR's commit MESSAGES and the PR title/body — reusing the SAME
-      # already-installed `no_llm_attribution` detector in READ-ONLY mode
-      # (`--scan-file`, never rewrites). The PR title/body reach the script ONLY
-      # as env values — never interpolated into this run body — injection-safe.
-      - name: Reject AI/LLM self-attribution in commits + PR title/body
-        if: inputs.run-no-attribution
-        shell: bash
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-
-          module="tc_fitness.core_checks.no_llm_attribution"
-          workdir="$(mktemp -d)"
-          trap 'rm -rf "$workdir"' EXIT
-          rc=0
-
-          # Read-only residue scan of ONE text artifact via the repo's installed
-          # engine. Records failure but keeps going, so the log lists every
-          # offending surface, not just the first.
-          scan() {
-            if ! uv run python -m "$module" --scan-file "$2"; then
-              echo "::error::no-attribution: AI/LLM self-attribution residue in $1." >&2
-              rc=1
-            fi
-          }
-
-          # (a) every commit message in the PR range (base..head). When the range
-          # cannot resolve (shallow checkout — set fetch-depth: 0 for full
-          # coverage) or there is no PR context, fall back to HEAD's own message
-          # so historical commits are never re-litigated and pushes never fail.
-          shas=""
-          if [[ -n "${PR_BASE_SHA:-}" && -n "${PR_HEAD_SHA:-}" ]]; then
-            shas="$(git rev-list "${PR_BASE_SHA}..${PR_HEAD_SHA}" 2>/dev/null || true)"
+          echo "combining ${#shards[@]} shard file(s): ${shards[*]}"
+          uv run coverage combine "${shards[@]}" || echo "::warning::coverage combine skipped an empty/partial shard file (kept the rest)."
+          if [[ -f .coverage ]]; then
+            uv run coverage xml -o "$COVERAGE_XML" || echo "::warning::coverage xml produced no report (empty/unreportable shard data)."
+          else
+            echo "::warning::no combined coverage data produced; no XML written."
           fi
-          [[ -z "$shas" ]] && shas="$(git rev-list -1 HEAD)"
-          while IFS= read -r sha; do
-            [[ -z "$sha" ]] && continue
-            git log -1 --format=%B "$sha" > "$workdir/commit-${sha}.txt"
-            scan "commit ${sha} message" "$workdir/commit-${sha}.txt"
-          done <<< "$shas"
-
-          # (b) PR title and (c) PR body — env-bound, written verbatim so the
-          # detector (not the shell) interprets their content.
-          printf '%s' "$PR_TITLE" > "$workdir/pr-title.txt"
-          scan "PR title" "$workdir/pr-title.txt"
-          printf '%s' "$PR_BODY" > "$workdir/pr-body.txt"
-          scan "PR body" "$workdir/pr-body.txt"
-
-          if [[ "$rc" -ne 0 ]]; then
-            echo "::error::no-attribution: remove the AI/LLM self-attribution" \
-              "flagged above (decision D1). The same detector runs in the local" \
-              "commit-msg strip hook — install it to catch this before push." >&2
-          fi
-          exit "$rc"
-
-      # ── TS coverage half (opt-in) ───────────────────────────────────────
-      - name: TypeScript coverage
-        if: inputs.run-node
-        shell: bash
-        run: ${{ inputs.ts-coverage-command }}
-
-      # ── Repo-specific post-orchestration (opt-in) ───────────────────────
-      - name: Post-steps
-        if: inputs.post-steps != ''
-        shell: bash
-        run: ${{ inputs.post-steps }}
-
-      # ── Coverage-artifact handoff to sonar-scan.yml ─────────────────────
-      # The engine wrote coverage XML at coverage-xml-path; upload it so the
-      # downstream sonar-scan job imports it instead of re-running pytest
-      # (the #499 artifact-handoff shape). always() so a gate failure that
-      # still produced partial coverage doesn't strand the artifact.
-      - name: Upload coverage artifact
-        if: ${{ always() && inputs.upload-coverage-artifact }}
+          # Coverage assembly is a non-blocking convenience for the Sonar handoff
+          # (matching the original always()/if-no-files-found: ignore upload). The
+          # gate's real verdict is the shard test results, which already gated in
+          # the quality-shard jobs — a reporting hiccup here must not fail the gate.
+          exit 0
+      - name: Upload combined coverage XML
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ inputs.coverage-artifact-name }}
           path: ${{ inputs.coverage-xml-path }}
           if-no-files-found: ignore
-          retention-days: 1
