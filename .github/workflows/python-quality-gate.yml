@@ -164,7 +164,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run the gate (unsharded)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@dan/sgo-264-tc-pipelines-shard-matrix
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@a8518f5ecad0d49ff1c92ef38c6b217f930ea8e2 # v1 branch->SHA pin (SGO-264)
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -220,7 +220,7 @@ jobs:
         shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Run the gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@dan/sgo-264-tc-pipelines-shard-matrix
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@a8518f5ecad0d49ff1c92ef38c6b217f930ea8e2 # v1 branch->SHA pin (SGO-264)
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
