@@ -31,13 +31,12 @@ jobs:
       run-no-attribution: false
       write-changed-files: false
       ci-requirements-path: ""
-      sync-args: "--no-project"
+      sync-args: "--locked"
       upload-coverage-artifact: false
       pre-steps: |
         set -euo pipefail
         cp .github/selftest-fixture/.tc-fitness.toml .tc-fitness.toml
         cp .github/selftest-fixture/shard_probe.py shard_probe.py
-        uv pip install three-cubes-fitness==0.9.0 coverage
 
   sharded:
     name: "shards=2 (matrix + combine path)"
@@ -47,11 +46,10 @@ jobs:
       run-no-attribution: false
       write-changed-files: false
       ci-requirements-path: ""
-      sync-args: "--no-project"
+      sync-args: "--locked"
       upload-coverage-artifact: true
       pre-steps: |
         set -euo pipefail
         cp .github/selftest-fixture/.tc-fitness.toml .tc-fitness.toml
         cp .github/selftest-fixture/shard_probe.py shard_probe.py
-        uv pip install three-cubes-fitness==0.9.0 coverage
         echo "EXPECT_SHARD=1" >> "$GITHUB_ENV"

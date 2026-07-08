@@ -186,8 +186,8 @@ jobs:
           upload-coverage-artifact: ${{ inputs.upload-coverage-artifact }}
           coverage-xml-path: ${{ inputs.coverage-xml-path }}
           coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
-          shard-index: 
-          shard-total: 
+          shard-index:
+          shard-total:
 
   # ── Sharded path (pytest-shards > 1) ────────────────────────────────────────
   # Build the [1..N] matrix (no range function in Actions expressions).
