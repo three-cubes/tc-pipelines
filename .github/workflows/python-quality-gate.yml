@@ -164,7 +164,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run the gate (unsharded)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@dan/sgo-264-reusable-fan-in-gate
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@7973e3c3d8470a6d8009eb4a2e8e0f16a6475363 # SHA pin (SGO-264)
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -220,7 +220,7 @@ jobs:
         shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Run the gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@dan/sgo-264-reusable-fan-in-gate
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@7973e3c3d8470a6d8009eb4a2e8e0f16a6475363 # SHA pin (SGO-264)
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
