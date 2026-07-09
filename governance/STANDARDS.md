@@ -90,3 +90,46 @@ governance rule: **it already exists above.** Read it. If it's missing or weak, 
 into the canonical home** (§3) — open a PR to `tc-fitness`/`tc-pipelines` — do not re-create it in a
 single repo. Every repo's `AGENTS.md` / `CLAUDE.md` / `.github/copilot-instructions.md` links here for
 exactly this reason.
+
+## 7. Engineering standards library (`standards/`)
+
+The canonical body of each engineering standard lives once, here, in
+[`standards/`](standards/). A repo's own docs **reference** these — they do not re-copy them. When a
+pattern is weak, improve it here; every repo converges up. (The SDLC-access + HITL, gate-hardening,
+security-scan, and Autonomous-Delivery standards keep their existing homes at the `governance/` top
+level — see §3–§4 — and are not duplicated below.)
+
+| Concern | Standard | What it governs |
+|---|---|---|
+| SDLC & workflow | [`development-workflow.md`](standards/development-workflow.md) | Branch, commit, PR, quality-gate, local-first loop conventions. |
+| SDLC & workflow | [`testing-strategy.md`](standards/testing-strategy.md) | The test pyramid (contract/integration/E2E) + quality gates. |
+| SDLC & workflow | [`validation-and-backpressure.md`](standards/validation-and-backpressure.md) | The syntax→unit→contract→integration→BDD ladder + stop conditions. |
+| SDLC & workflow | [`sdlc-release-workflow.md`](standards/sdlc-release-workflow.md) | Trunk-based release: tag from `main`, CHANGELOG-driven notes. |
+| SDLC & workflow | [`contract-test-patterns.md`](standards/contract-test-patterns.md) | Copy-paste contract-test skeletons (TS + Python) + baseline-shrink. |
+| SDLC & workflow | [`process-shared-repo-pr-review-and-merge.md`](standards/process-shared-repo-pr-review-and-merge.md) | Review + merge process for shared repos the author can't self-approve. |
+| Quality & fitness | [`quality-ratchet.md`](standards/quality-ratchet.md) | Touched-file coverage ratchet — lift without papering. |
+| Quality & fitness | [`mutation-testing-survival-ratchet.md`](standards/mutation-testing-survival-ratchet.md) | Diff-scoped mutation + survivors ratchet. |
+| Quality & fitness | [`agent-actionable-feedback.md`](standards/agent-actionable-feedback.md) | Every error carries `fix:`/`next:`/`run:`. |
+| Quality & fitness | [`sonarqube-usage.md`](standards/sonarqube-usage.md) | New-code gate conditions, Security-Rating≥A, don't-ignore policy, FP mechanics. |
+| Architecture & decisions | [`architecture-decision-method.md`](standards/architecture-decision-method.md) | How a decision is researched + justified (method, not ADR mechanics). |
+| Architecture & decisions | [`engineering-nfr-standard.md`](standards/engineering-nfr-standard.md) | The six-dimension NFR checklist every design must clear. |
+| Language & deps | [`python-dependency-locking.md`](standards/python-dependency-locking.md) | uv workspace + frozen `uv.lock`. |
+| Language & deps | [`js-ts-tooling-baseline.md`](standards/js-ts-tooling-baseline.md) | pnpm workspace + flat-config eslint. |
+| IA, naming & docs | [`repo-ia-and-naming.md`](standards/repo-ia-and-naming.md) | Repo layout + file/dir naming syntax. |
+| IA, naming & docs | [`naming-for-agent-affordance.md`](standards/naming-for-agent-affordance.md) | Name the WORK not the implementation — semantics of skill/tool/MCP names. |
+| IA, naming & docs | [`no-real-names.md`](standards/no-real-names.md) | Synthetic names in fixtures/examples. |
+| IA, naming & docs | [`documentation-standard.md`](standards/documentation-standard.md) | Doc structure + describe-the-target-not-the-journey. |
+| Security & config | [`security-framework.md`](standards/security-framework.md) | Secrets, privileged ops, network + destructive-op gating. |
+| Security & config | [`repo-governance-secret-wiring.md`](standards/repo-governance-secret-wiring.md) | Wiring a repo's governance secrets safely. |
+| Security & config | [`environment-and-config-management.md`](standards/environment-and-config-management.md) | One committed registry for every deploy-target identifier; secrets referenced by name. |
+| Bootstrap & adoption | [`new-repo-bootstrap.md`](standards/new-repo-bootstrap.md) | Standing up a repo with the standards baked in. |
+| Bootstrap & adoption | [`common-standards-adoption-playbook.md`](standards/common-standards-adoption-playbook.md) | Converging an existing repo up to the common standards. |
+| Bootstrap & adoption | [`roadmap-management-linear-github.md`](standards/roadmap-management-linear-github.md) | Linear-as-control-surface + GitHub linkage. |
+| Deploy & ops | [`snapshot-before-apply.md`](standards/snapshot-before-apply.md) | Recovery point before any destructive apply (concrete: VM OS-disk snapshot). |
+| Deploy & ops | [`deployment-verification.md`](standards/deployment-verification.md) | Recovery-point-before + verification-probe-after, generalised beyond one cloud. |
+| Agent orchestration | [`subagent-orchestration.md`](standards/subagent-orchestration.md) | Single owner, no parallel git ops, no live ops, bounded output. |
+| Agent orchestration | [`sub-agent-orchestration-lessons-2026-05-17.md`](standards/sub-agent-orchestration-lessons-2026-05-17.md) | Field lessons that extend the orchestration standard. |
+| Agent orchestration | [`parallel-agent-discipline.md`](standards/parallel-agent-discipline.md) | Dispatching parallel streams without collision. |
+| MCP tooling | [`mcp-engineering-standard.md`](standards/mcp-engineering-standard.md) | Tool-design contract: structured I/O, validate companions, drop-and-warn. |
+| MCP tooling | [`mcp-tooling-canonical-pattern.md`](standards/mcp-tooling-canonical-pattern.md) | MCP server language/layout/helpers/contract-tests. |
+| MCP tooling | [`mcp-performance-and-affordance-measurement.md`](standards/mcp-performance-and-affordance-measurement.md) | Perf SLO bands + affordance scoring for a capability. |
