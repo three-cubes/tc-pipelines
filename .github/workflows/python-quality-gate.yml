@@ -164,6 +164,17 @@ on:
           in-gate concern-parallelism + `--tier` release).
         type: string
         default: ""
+      coverage-combine-post:
+        description: >-
+          Repo-owned bash command run in the `coverage-combine` job AFTER the shard
+          `.coverage.*` are merged to the combined XML, BEFORE the Sonar upload —
+          for a consumer whose pytest uses many `--cov` roots to normalise the
+          multi-source paths so Sonar resolves them (same trust model as
+          pre-steps/post-steps: repo-owned config, never external input). Runs only
+          when the combined XML exists; non-blocking. Only relevant when
+          pytest-shards > 1.
+        type: string
+        default: ""
     secrets:
       gh-token:
         description: "GITHUB_TOKEN override for steps that need authenticated git/gh (engine secret-scan changed-file diff). Falls back to github.token."
@@ -317,6 +328,22 @@ jobs:
           # gate's real verdict is the shard test results, which already gated in
           # the quality-shard jobs — a reporting hiccup here must not fail the gate.
           exit 0
+      # Post-combine hook: repo-specific transform of the combined coverage XML
+      # BEFORE the Sonar handoff — e.g. a consumer whose pytest uses many `--cov`
+      # roots (ambiguous multi-source paths) collapses them to repo-root here so
+      # Sonar resolves them. Runs only when the combined XML exists; non-blocking.
+      - name: Coverage combine post-hook
+        if: ${{ inputs.coverage-combine-post != '' }}
+        shell: bash
+        env:
+          COVERAGE_XML: ${{ inputs.coverage-xml-path }}
+        run: |
+          set -uo pipefail
+          if [[ -f "$COVERAGE_XML" ]]; then
+            ${{ inputs.coverage-combine-post }}
+          else
+            echo "::warning::no combined coverage XML; skipping coverage-combine-post."
+          fi
       - name: Upload combined coverage XML
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
