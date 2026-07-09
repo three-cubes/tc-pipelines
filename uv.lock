@@ -83,10 +83,10 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "coverage", specifier = ">=7.0" },
-    { name = "three-cubes-fitness", git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.9.0" },
+    { name = "three-cubes-fitness", git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.10.0" },
 ]
 
 [[package]]
 name = "three-cubes-fitness"
-version = "0.9.0"
-source = { git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.9.0#232ace8946c461150cb638ab173bbea72d2e304f" }
+version = "0.10.0"
+source = { git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.10.0#1867db451038ca33b262a5d92a231327c1b541d1" }

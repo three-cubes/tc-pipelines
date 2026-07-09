@@ -19,6 +19,16 @@ name: python-quality-gate
 # `sonar-scan.yml`. Repo-specific gate STEPS are config in the engine, never
 # inputs here — that is the whole point of the convergence.
 #
+# ── Reusable-tag ↔ engine-tag compatibility ─────────────────────────────────
+# A consumer pins BOTH this reusable (@vX.Y.Z) and three-cubes-fitness (in its
+# pyproject). Optional inputs need a minimum engine; the composite fails with an
+# actionable message if the pin is too old, so mismatches never surface as cryptic
+# argparse errors. Minimums:
+#   reusable >= v1.11.0  →  engine any        (base gate)
+#   pytest-shards > 1    →  engine >= v0.9.0  (--shard)
+#   tier set             →  engine >= v0.10.0 (--tier + stage/depends_on parallelism)
+# The default (no shards, no tier) works on any engine >= v0.8.x.
+#
 # Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
 
 on:
@@ -146,6 +156,14 @@ on:
           commit a `.test_durations` map (see tc-fitness `--shard`, ≥ v0.9.0).
         type: number
         default: 1
+      tier:
+        description: >-
+          Pass `--tier <name>` to `tc-fitness run` (smoke/full/nightly) — runs only
+          the `[tool.tc_fitness]` steps whose `tags` include the name. Empty (the
+          default) runs the full gate. Needs three-cubes-fitness >= v0.10.0 (the
+          in-gate concern-parallelism + `--tier` release).
+        type: string
+        default: ""
     secrets:
       gh-token:
         description: "GITHUB_TOKEN override for steps that need authenticated git/gh (engine secret-scan changed-file diff). Falls back to github.token."
@@ -186,6 +204,7 @@ jobs:
           upload-coverage-artifact: ${{ inputs.upload-coverage-artifact }}
           coverage-xml-path: ${{ inputs.coverage-xml-path }}
           coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
+          tier: ${{ inputs.tier }}
           shard-index:
           shard-total:
 
@@ -242,6 +261,7 @@ jobs:
           upload-coverage-artifact: ${{ inputs.upload-coverage-artifact }}
           coverage-xml-path: ${{ inputs.coverage-xml-path }}
           coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
+          tier: ${{ inputs.tier }}
           shard-index: ${{ matrix.shard }}
           shard-total: ${{ inputs.pytest-shards }}
 
