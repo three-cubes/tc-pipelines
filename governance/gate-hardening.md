@@ -7,6 +7,8 @@ well-tested, secure, and deterministic** — not just "the tests that exist pass
 **Sequence (load-bearing):** harden a repo's gate to this bar and verify it runs green,
 *then* flip that repo to 0-review. Never flip first.
 
+> **This doc is the bar; the mechanics are separate.** To add or change a CORE check or a reusable pipeline and ship it (converge-up, tag-release, consumer-repin), see [`standards/improving-fitness-gates.md`](standards/improving-fitness-gates.md).
+
 ## Principle — clean as you code
 
 Hold **new / changed** code to a hard bar; **ratchet** legacy debt monotonically (it may

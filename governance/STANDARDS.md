@@ -35,6 +35,7 @@ engine + reusables, then every repo converges up — nobody is down-levelled.
 - **[`tc-fitness`](https://github.com/three-cubes/tc-fitness)** — the runnable gate engine (`uv run tc-fitness run`) + the check catalogue. New checks land here.
 - **[`tc-pipelines`](https://github.com/three-cubes/tc-pipelines)** (this repo) — the reusable `workflow_call` workflows + composite actions + `governance/` templates (rulesets, CODEOWNERS, gate-hardening, dependabot, pre-commit). CI + governance shape land here.
 - **[`governance/gate-hardening.md`](gate-hardening.md)** — the bar a repo's gate must clear before it runs autonomously (a pointer to the §2 spec, not a parallel definition).
+- **[`governance/standards/improving-fitness-gates.md`](standards/improving-fitness-gates.md)** — the mechanics of changing a gate or a reusable and shipping it (converge-up, tag-release, consumer-repin); the complement to `gate-hardening.md` (the bar).
 
 ## 4. Merge governance (the model)
 
@@ -88,8 +89,10 @@ org has had traces to a violation of one of these four rules:
 Before you design a quality gate, a fitness function, a coverage/mutation policy, a CI workflow, or a
 governance rule: **it already exists above.** Read it. If it's missing or weak, **propose the change
 into the canonical home** (§3) — open a PR to `tc-fitness`/`tc-pipelines` — do not re-create it in a
-single repo. Every repo's `AGENTS.md` / `CLAUDE.md` / `.github/copilot-instructions.md` links here for
-exactly this reason.
+single repo. The mechanics of that change (CORE check → tag-release → consumer-repin; reusable →
+SHA-pin → tag) are in [`standards/improving-fitness-gates.md`](standards/improving-fitness-gates.md).
+Every repo's `AGENTS.md` / `CLAUDE.md` / `.github/copilot-instructions.md` links here for exactly
+this reason.
 
 ## 7. Engineering standards library (`standards/`)
 
@@ -111,6 +114,7 @@ level — see §3–§4 — and are not duplicated below.)
 | Quality & fitness | [`mutation-testing-survival-ratchet.md`](standards/mutation-testing-survival-ratchet.md) | Diff-scoped mutation + survivors ratchet. |
 | Quality & fitness | [`agent-actionable-feedback.md`](standards/agent-actionable-feedback.md) | Every error carries `fix:`/`next:`/`run:`. |
 | Quality & fitness | [`sonarqube-usage.md`](standards/sonarqube-usage.md) | New-code gate conditions, Security-Rating≥A, don't-ignore policy, FP mechanics. |
+| Quality & fitness | [`improving-fitness-gates.md`](standards/improving-fitness-gates.md) | Add/improve a CORE check or a reusable and ship it: converge-up, tag-release, consumer-repin. |
 | Architecture & decisions | [`architecture-decision-method.md`](standards/architecture-decision-method.md) | How a decision is researched + justified (method, not ADR mechanics). |
 | Architecture & decisions | [`engineering-nfr-standard.md`](standards/engineering-nfr-standard.md) | The six-dimension NFR checklist every design must clear. |
 | Language & deps | [`python-dependency-locking.md`](standards/python-dependency-locking.md) | uv workspace + frozen `uv.lock`. |
