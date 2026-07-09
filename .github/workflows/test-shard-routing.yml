@@ -48,6 +48,10 @@ jobs:
       ci-requirements-path: ""
       sync-args: "--locked"
       upload-coverage-artifact: true
+      # Post-combine hook: proves the reusable runs a repo-owned command on the
+      # combined coverage XML before the Sonar upload (taz uses this to normalise
+      # multi-source paths). Marker is grepped in the coverage-combine job log.
+      coverage-combine-post: "echo 'COMBINE-POST-HOOK ran on combined coverage'"
       pre-steps: |
         set -euo pipefail
         cp .github/selftest-fixture/.tc-fitness.toml .tc-fitness.toml
