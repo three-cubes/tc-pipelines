@@ -169,6 +169,13 @@ runs:
         set -euo pipefail
         shard_flag=()
         if [[ -n "$SHARD_INDEX" && -n "$SHARD_TOTAL" ]]; then
+          # Engine-capability floor: --shard landed in three-cubes-fitness v0.9.0.
+          # Fail with an actionable message rather than a cryptic argparse error if
+          # the consumer set pytest-shards>1 on an older engine pin.
+          if ! uv run tc-fitness run --help 2>&1 | grep -q -- '--shard'; then
+            echo "::error::pytest-shards>1 needs three-cubes-fitness >= v0.9.0 (this repo's engine pin has no --shard). fix: bump the tc-fitness pin in pyproject.toml, then re-run."
+            exit 1
+          fi
           shard_flag=(--shard "${SHARD_INDEX}/${SHARD_TOTAL}")
         fi
         uv run tc-fitness ${{ inputs.tc-fitness-args }} "${shard_flag[@]}"
