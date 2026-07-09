@@ -164,7 +164,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run the gate (unsharded)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@a8518f5ecad0d49ff1c92ef38c6b217f930ea8e2 # v1 branch->SHA pin (SGO-264)
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@7973e3c3d8470a6d8009eb4a2e8e0f16a6475363 # SHA pin (SGO-264)
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -220,7 +220,7 @@ jobs:
         shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Run the gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@a8518f5ecad0d49ff1c92ef38c6b217f930ea8e2 # v1 branch->SHA pin (SGO-264)
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@7973e3c3d8470a6d8009eb4a2e8e0f16a6475363 # SHA pin (SGO-264)
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -304,3 +304,39 @@ jobs:
           name: ${{ inputs.coverage-artifact-name }}
           path: ${{ inputs.coverage-xml-path }}
           if-no-files-found: ignore
+
+  # ── The single required-status context (shard-count-independent) ────────────
+  # The `quality` job runs only unsharded and `quality-shard` only sharded, so
+  # neither name is stable to pin in branch protection: pinning `quality` lets a
+  # FAILED shard merge (that job is SKIPPED when sharding is on — a skipped
+  # required check passes); pinning the shard cells bakes the shard COUNT into
+  # branch protection. This fan-in always runs, needs both lanes, and fails if any
+  # lane failed OR neither quality lane ran — so it is the ONE context a consumer
+  # pins regardless of pytest-shards. Its name never changes with the shard count.
+  gate:
+    name: Python quality gate result
+    needs: [quality, quality-shard, coverage-combine]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate the quality lanes
+        env:
+          R_QUALITY: ${{ needs.quality.result }}
+          R_SHARD: ${{ needs.quality-shard.result }}
+          R_COMBINE: ${{ needs.coverage-combine.result }}
+        run: |
+          set -euo pipefail
+          echo "quality=$R_QUALITY quality-shard=$R_SHARD coverage-combine=$R_COMBINE"
+          for r in "$R_QUALITY" "$R_SHARD" "$R_COMBINE"; do
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "::error::Python quality gate FAILED — a quality lane did not pass ($r)."
+              exit 1
+            fi
+          done
+          # Exactly one of the two quality lanes runs (the other is skipped by the
+          # pytest-shards condition); if BOTH skipped, the gate never actually ran.
+          if [[ "$R_QUALITY" == "skipped" && "$R_SHARD" == "skipped" ]]; then
+            echo "::error::Python quality gate did not run — neither the unsharded nor the sharded lane executed."
+            exit 1
+          fi
+          echo "Python quality gate: PASS."
