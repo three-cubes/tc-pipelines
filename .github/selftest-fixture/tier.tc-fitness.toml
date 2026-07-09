@@ -1,0 +1,18 @@
+# Tier self-test fixture for python-quality-gate.yml's `tier` passthrough.
+# `smoke-step` passes; `full-step` FAILS if it runs. Under `--tier smoke` only the
+# smoke-tagged step is selected, so the gate passes — if tier selection were broken
+# the full step would run `false` and the gate would fail. Exercised by the `tier`
+# job in test-shard-routing.yml (needs engine >= v0.10.0).
+name = "tier self-test fixture"
+
+[[steps]]
+id = "smoke-step"
+summary = "smoke-tier probe"
+tags = ["smoke"]
+run = ["true"]
+
+[[steps]]
+id = "full-step"
+summary = "full-tier only — fails if run under --tier smoke"
+tags = ["full"]
+run = ["false"]

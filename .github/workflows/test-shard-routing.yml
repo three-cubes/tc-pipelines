@@ -53,3 +53,19 @@ jobs:
         cp .github/selftest-fixture/.tc-fitness.toml .tc-fitness.toml
         cp .github/selftest-fixture/shard_probe.py shard_probe.py
         echo "EXPECT_SHARD=1" >> "$GITHUB_ENV"
+
+  tier:
+    name: "tier=smoke (selector)"
+    uses: ./.github/workflows/python-quality-gate.yml
+    with:
+      tier: smoke
+      run-no-attribution: false
+      write-changed-files: false
+      ci-requirements-path: ""
+      sync-args: "--locked"
+      upload-coverage-artifact: false
+      pre-steps: |
+        set -euo pipefail
+        # smoke-step passes; full-step fails if run. --tier smoke must select only
+        # the smoke-tagged step, so the gate passes iff tier selection works.
+        cp .github/selftest-fixture/tier.tc-fitness.toml .tc-fitness.toml
