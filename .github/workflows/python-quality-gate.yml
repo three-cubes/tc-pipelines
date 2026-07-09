@@ -182,7 +182,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run the gate (unsharded)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@dan/sgo-266-reusable-tier-and-compat-matrix
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@d0145c781a3f26a434fa46d4933d791d7acda078 # SHA pin (SGO-266)
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -239,7 +239,7 @@ jobs:
         shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Run the gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@dan/sgo-266-reusable-tier-and-compat-matrix
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@d0145c781a3f26a434fa46d4933d791d7acda078 # SHA pin (SGO-266)
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
