@@ -1,136 +1,181 @@
 # New repo bootstrap
 
-The canonical pattern for starting a new Three Cubes repo. Synthesised across
-Three Cubes repos (e.g. kairix, a retrieval product, and an agent-infra repo)
-after they moved to trunk-based development.
+Bootstrap a new Three Cubes repo — or bring an existing one up to the org
+standard — with the [`bootstrap-repo-governance.sh`](../scripts/bootstrap-repo-governance.sh)
+onboarding script. One command sets the repo's variables + secrets, applies the
+canonical `main` ruleset, installs the governance files, and renders the full
+quality-gate baseline (the tc-fitness engine pin + `[tool.tc_fitness]` gate, the
+CORE-check catalogue, the reusable CI + auto-merge callers, the Makefile, and the
+secrets baseline) — so a bootstrapped repo's `main` ruleset only ever requires
+checks the repo actually emits.
 
-Use this as a checklist when seeding a new repo or when sanity-checking an
-existing one against the org standard.
+This is the union baseline already canonical across the fleet — a shared
+baseline, not a new constraint set. It composes the org standards; where a
+section is owned by another standard, this doc references it rather than
+restating it.
+
+## One-command bootstrap
+
+Run the script against the target repo:
+
+```bash
+governance/scripts/bootstrap-repo-governance.sh --repo three-cubes/<name>
+```
+
+It runs seven sections in order, each independently toggleable via a flag:
+
+1. **Repo variables** — reconcile `AZURE_CLIENT_ID` / `AZURE_SUBSCRIPTION_ID` /
+   `AZURE_TENANT_ID` against the org, writing a repo-level override only where the
+   org value is absent (org inheritance covers the common case). See
+   [repo-governance-secret-wiring](repo-governance-secret-wiring.md).
+2. **Secrets from Key Vault** — wire `SONAR_TOKEN` + `CODECOV_TOKEN` from
+   `kv-tc-agents`, org-inheritance-aware (skips a repo override where the org
+   secret already resolves).
+3. **Branch ruleset (`main`)** — apply the canonical ruleset: the required
+   fitness contexts + code-owner review + thread resolution, and block deletion +
+   non-fast-forward.
+4. **Governance files** — print the fetch+commit sequence for `CODEOWNERS`,
+   `dependabot.yml`, the pre-commit config, `.gitignore`, and the repo-local
+   `scripts/git-hooks/` (`commit-msg` + `pre-push`).
+5. **Agent-affordance + harness payload** — render `CLAUDE.md`, `AGENTS.md`,
+   `CONTRIBUTING.md`, `ETHOS.md`, `RESOLVER.md`, and `SCORECARD.md` with the repo
+   tokens resolved, install the `sonar-sqaa` PostToolUse hook (idempotent
+   `settings.json` merge), and ship `scripts/safe-commit.sh` + `scripts/preflight.sh`.
+6. **Quality-gate wiring** — render the gate that emits the exact contexts the
+   ruleset requires (see *What it renders*).
+7. **Verify** — the internal-consistency self-check (see *`--verify` self-check*).
+
+The script performs no live git: it renders and verifies locally and prints the
+`run (in a clone …)` fetch+commit sequence for anything that lands in the repo —
+it never pushes (per [subagent-orchestration](subagent-orchestration.md): no live
+ops from a bootstrap). Run it, follow the printed sequences on a branch, and open
+the PR as the three-cubes-agent App.
+
+Templates — the ruleset and every skeleton — are fetched from
+`three-cubes/tc-pipelines/governance/` over `gh api`; pass `--template-dir <clone>`
+to render from a local checkout offline. When the script runs from inside a
+tc-pipelines checkout it sources [`../skeletons/`](../skeletons/) locally.
+
+### Flags
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--repo three-cubes/<name>` | required | The target repo. |
+| `--kv-name <name>` | `kv-tc-agents` | Azure Key Vault the standard secrets are read from. |
+| `--fitness-tag vX.Y.Z` | the pinned tc-fitness engine tag baked into the script | The immutable tc-fitness tag the rendered `pyproject` pins and the CI no-attribution leg uses. |
+| `--pipelines-tag vN` | the pinned tc-pipelines reusables tag | The tc-pipelines reusable-workflow ref the rendered `ci.yml` / `auto-merge.yml` / `release.yml` call. |
+| `--sonar` / `--no-sonar` | `--sonar` | Emit the SonarCloud jobs and require the two Sonar contexts, or trim both from `ci.yml` and the ruleset. |
+| `--with-release` | off | Also render a `release.yml` caller. |
+| `--sonar-project-key <key>` | `three-cubes_<slug>` | The SonarCloud `projectKey` rendered into `sonar-project.properties`. |
+| `--out-dir <dir>` | a reported temp dir | Where the wiring + affordance payload renders. |
+| `--verify` | off | Run the self-check after rendering. |
+| `--verify-only` | off | Verify an already-rendered `--out-dir` and exit; render nothing, take no live action. |
+| `--template-dir <clone>` | fetch over `gh api` | Render from a local tc-pipelines checkout instead of fetching templates. |
+| `--no-secrets` | wire secrets | Skip the Key Vault secret wiring. |
+| `--no-ruleset` | apply ruleset | Skip applying the `main` ruleset. |
+| `--no-files` | print install sequence | Skip the governance-file install sequence. |
+| `--no-affordance` | render payload | Skip the agent-affordance + harness payload. |
+| `--no-wiring` | render wiring | Skip the quality-gate wiring render. |
+| `--dry-run` | live | Print the live `gh` / `az` calls instead of executing them (local renders still run). |
+
+### What it renders
+
+Under `--out-dir` (a reported temp dir by default), the wiring section renders a
+complete drop-in:
+
+- **`pyproject.tc_fitness.toml`** — the engine pin (`three-cubes-fitness` as a
+  dev-group dependency at a pinned tag), the `[tool.tc_fitness]` gate block, and
+  one `[tool.tc_fitness.core_checks.*]` config block per bound CORE check. Merge
+  each fragment into the repo's `pyproject.toml`.
+- **`scripts/checks/_core_catalogue.py`** — the CORE-check catalogue binding the
+  shared engine checks the repo inherits (attribution, commit-identity,
+  engine-floor, harness-canon, ci-consumes-shared-gate), dispatched in-process as
+  one gate step so the single `uv run tc-fitness run` contract holds.
+- **`.github/workflows/ci.yml`** — the `python-quality-gate.yml` reusable caller
+  plus the aggregator jobs (`Quality gate`, `no-attribution`, and under `--sonar`
+  `SonarCloud scan`) that carry the *bare* required-status-check context names —
+  a reusable call surfaces `<caller> / <reusable job>` checks, never a bare name,
+  so these thin aggregators are what the ruleset resolves against.
+- **`.github/workflows/auto-merge.yml`** — arms `gh pr merge --auto` on the green
+  `Quality gate` fan-in check.
+- **`.github/rulesets/main.json`** — the `main` ruleset whose required contexts
+  match the jobs `ci.yml` emits (the SonarCloud contexts are trimmed under
+  `--no-sonar`).
+- **`Makefile`** — `make check` (`uv run tc-fitness run`, the exact gate CI runs)
+  and `make setup` (install the local hooks).
+- **`.secrets.baseline`** — a fresh `detect-secrets scan` when the tool is
+  available, else the shipped empty baseline (secret hygiene is zero-tolerance).
+- **`.pre-commit-config.yaml`** + **`scripts/git-hooks/{commit-msg,pre-push}`** —
+  the local hook config and the repo-local hook scripts it points at.
+- **`sonar-project.properties`** — only under `--sonar`; policy per
+  [sonarqube-usage](sonarqube-usage.md).
+- **`.github/workflows/release.yml`** — only under `--with-release`.
+- The six affordance docs, so `--out-dir` is a self-contained drop-in.
+
+### `--verify` self-check
+
+Run `--verify` after the render — or `--verify-only --out-dir <dir>` against an
+already-rendered tree — to assert the rendered tree is internally consistent, so
+a bootstrapped repo is never blocked by a ruleset requiring a check nothing emits:
+
+- **Ruleset contexts are a subset of the emitted jobs.** Every
+  required-status-check context in the applied `main` ruleset is a job name
+  `ci.yml` emits, or a known external app check (`SonarCloud Code Analysis`). This
+  catches a `Quality gate`-vs-`CI gate` name drift before it reaches `main`.
+- **Secrets baseline present.** `.secrets.baseline` exists — the pre-commit hook
+  and the gate's secret-scan step both need it.
+- **Pyproject pinned + bound.** The `pyproject` fragment carries the
+  `three-cubes-fitness @ git+…` engine pin and every CORE binding
+  (`no_llm_attribution`, `canonical_commit_identity`, `engine_version_floor`,
+  `harness_canon_reference`, `ci_consumes_shared_gate`).
+
+A failure prints its `fix:` / `next:` line and exits non-zero. The bootstrap
+contract test
+([`test_bootstrap_repo_governance.py`](../scripts/tests/test_bootstrap_repo_governance.py))
+exercises the flags, the render, and this self-check end-to-end.
 
 ## Branch strategy
 
-**Trunk-based on `main`.** No long-lived `develop` branch. Routine commits
-go direct to `main` after `safe-commit.sh` / `make check` passes locally;
-PRs only for release-stabilisation, large grouped reviews, or external
-collaboration.
+Trunk-based on `main`. The ruleset the bootstrap applies requires the fitness
+contexts — `Quality gate`, `no-attribution`, `SonarCloud scan`, and
+`SonarCloud Code Analysis` (the Sonar pair dropped under `--no-sonar`) — plus a
+code-owner review, and blocks deletion + non-fast-forward. Ship one feature = one
+branch = one PR authored by the three-cubes-agent App; `auto-merge.yml` merges on
+green. See [development-workflow](development-workflow.md).
 
-**Branch protection rule on `main`:**
-- Require status check `CI gate` (or equivalent terminal gate name) to pass
-- Require linear history (or signed merge commits)
-- Restrict force-push
-- No required PR review for solo work; add reviewer requirement once team
-  size warrants it
+Cut releases the canonical way via [sdlc-release-workflow](sdlc-release-workflow.md);
+render the `release.yml` caller with `--with-release`.
 
-**Release flow:**
-- `release.yml` (workflow_dispatch) tags `main` HEAD with CalVer
-  `vYYYY.M.D[.N]` and creates a GitHub Release whose body is read from
-  the corresponding `CHANGELOG.md` section
-- No `develop→main` PR ritual
-- Alpha tags: `release-alpha.yml` cuts `vYYYY.M.D.aN` from `main` HEAD
+## The quality gate
 
-## Repository defaults
+The gate is the rendered `[tool.tc_fitness]` block, run by `uv run tc-fitness run`
+both locally (`make check`) and in CI (the `python-quality-gate.yml` reusable) —
+local == CI by construction, because both run the same command over the same
+config. CORE governance checks are *inherited* from the shared tc-fitness engine
+via the rendered `_core_catalogue.py` binding plus the `[tool.tc_fitness.core_checks.*]`
+config blocks; the engine owns the check code, the repo owns only the config.
 
-```
-.github/
-  workflows/
-    ci.yml              # quality gate (per-stage if Python-heavy, single-job if make-orchestrated)
-    release.yml         # workflow_dispatch, tags + GitHub Release
-    release-alpha.yml   # workflow_dispatch, cuts alpha tag from main
-    dependabot.yml      # security-only by default; cooldown enforced
-.architecture/
-  baseline/             # grandfathered violations per fitness rule
-scripts/
-  checks/               # fitness function detectors (Python preferred)
-  safe-commit.sh        # local pre-push gate; mirrors CI exactly
-CHANGELOG.md            # release notes — release.yml reads sections by version
-CLAUDE.md               # engineering standards (for human + agent collaborators)
-README.md               # one-screen orientation per top-level dir
-```
-
-## Fitness functions (canonical set)
-
-Mechanical, blocking checks. Each detector lives in `scripts/checks/`,
-each has a baseline file at `.architecture/baseline/<rule>-files.txt`
-that grandfathers existing violations. **Net-new violations block** at
-local pre-commit, `safe-commit.sh` / `make check`, and CI Stage 0.
-
-| ID | Rule | Source |
-|---|---|---|
-| F1 | No internal `@patch` / `monkeypatch.setattr` on first-party modules | kairix |
-| F2 | No `monkeypatch.setenv` on project env vars | kairix |
-| F3 | Per-line suppressions (`# noqa`, `# type: ignore`, `# nosec`, etc.) carry rationale | kairix |
-| F5 | No internal-name imports in tests; inject Fakes via constructor | kairix |
-| F6 | No `*_fn` / `*_loader` / `*_factory` test-only kwargs in production | kairix |
-| F7 | Per-file coverage ≥ 90% (unit) | kairix |
-| F8 | Every test carries a category marker (`unit` / `bdd` / `contract` / `integration` / etc.) | kairix |
-| F10 | CI workflow silencers (`continue-on-error`) require rationale | kairix |
-| F11 | Test skip mechanisms require rationale | kairix |
-| F12 | Every BDD feature has a happy-path scenario | kairix |
-| F13 | BDD scenarios reject implementation symbols | kairix |
-| F15 | No logging of secret-named variables in plaintext | kairix |
-| F16 | Cognitive complexity ≤ 15 per function | kairix |
-| F17 | No string literal ≥10 chars duplicated ≥3 times | kairix |
-| F18 | No commented-out code | kairix |
-| F19 | Unused parameters must be `_`-prefixed | kairix |
-| F20 | Empty function bodies require docstring or `# Intentionally empty —` | kairix |
-| F21 | `scripts/checks/check_*.{py,sh}` failure output carries `fix:` / `next:` / `run:` markers | kairix |
-| F22 | Repo paths follow per-tree naming conventions | kairix |
-| F23 | Every top-level directory has a `README.md` orientation | kairix |
-| F24 | No `from tests.*` imports in production code | kairix |
-| F30 | Every CLI subcommand + MCP tool has an outcome test | kairix |
-| F31 | No hardcoded `/Users/<dev>/` or `/home/<dev>/` paths | cross-repo |
-| F32 | No real first / org names in test fixtures + reference data + docs | cross-repo |
-| F33 | `# shellcheck disable=<rule>` directives require rationale | cross-repo |
-
-**Repo-specific additions** — a repo may keep local checks that encode its
-own domain concerns. Example: an agent-platform repo keeps these, which are
-not relevant to product repos:
-
-- `agent_bdd_scenarios_present` — every agent has a BDD spec
-- `agent_grade_regression` — scorecard delta tracking
-- `agent_memory_policy` — per-agent memory hygiene
-- `constitution_enforcement_refs_valid` — constitution links resolve
-- `no_cross_agent_memory_refs` — agents can't peek into each other's memory
-- `imds_block_check` — Azure IMDS metadata endpoint hardening
-- `llm_judge_affordance` — LLM-judge prompt format check
-- `per_agent_secret_isolation` — per-agent secret scoping
-- `token_logger_attribution_complete` — token-usage attribution complete
+Add a repo-specific detector, or improve a shared one, per
+[improving-fitness-gates](improving-fitness-gates.md) — converge *up* into
+tc-fitness for anything shared across repos, and keep only a genuinely repo-local
+concern in `scripts/checks/`. Keep the `pyproject.toml` gate block CODEOWNERS-gated
+to `@three-cubes/maintainers` so the agent App can never widen the gate that gates
+it. Contract-test any new interface per
+[contract-test-patterns](contract-test-patterns.md).
 
 ## Local development gate
 
-Every repo ships `scripts/safe-commit.sh` (or equivalent `make check`)
-that runs the same gates CI runs, in the same order:
-
-```
-ruff lint → ruff format → mypy --strict → pytest with --cov →
-arch fitness (run-all.sh) → detect-secrets → confidential-pattern scan
-```
-
-The script writes commits only when **every** gate passes. Coverage
-generation (F7/F9) runs locally so the per-file floor is enforced in
-seconds, not minutes via CI.
-
-Escape hatch for intermediate refactors: `KAIRIX_SKIP_COVERAGE=1`
-(or similar repo-specific env var). CI still enforces the gate on push.
-
-## Releases
-
-- `CHANGELOG.md` carries one section per released version. The current
-  `[Unreleased]` section becomes the next release's body.
-- `release.yml` accepts `version` (e.g. `v2026.5.18`) and
-  `changelog_label` (e.g. `2026.5.18`); the workflow tags `main` HEAD,
-  pulls the named section out of `CHANGELOG.md`, and creates a GitHub
-  Release with that body.
-- Alpha cuts via `release-alpha.yml -f date_version=YYYY.M.D -f alpha_n=N`.
-  Alpha tags trigger downstream Docker + PyPI publishes automatically.
-- Release HITL: cutting tags + deploying to shared infra requires
-  explicit per-action human authorisation.
+`make check` runs the exact gate CI runs. `make setup` installs the pre-commit
+config: the `commit-msg` strip hook (rejects AI/LLM self-attribution before it is
+authored — see [AUTONOMOUS-DELIVERY-STANDARD](../AUTONOMOUS-DELIVERY-STANDARD.md))
+and the `pre-push` gate replay, so the fitness gate fires before the CI
+round-trip rather than after it. Run `make check` green before every push.
 
 ## Dependencies
 
-**Dependabot cooldown**: never apply package-manager updates until 7+
-days post-release (semver-major: 14d). Security advisories bypass.
-Configure in `.github/dependabot.yml`:
+The rendered `.github/dependabot.yml` enforces a cooldown: never apply
+package-manager updates until 7+ days post-release (semver-major: 14d); security
+advisories bypass.
 
 ```yaml
 updates:
@@ -144,57 +189,47 @@ updates:
 
 ## Secrets
 
-- `.secrets.baseline` (detect-secrets) checked in; pre-commit hook runs
-  scan on every commit. Add to baseline only with an audited reason in
-  the commit message.
-- Runtime secrets fetched from Azure Key Vault via the
-  `kairix.secrets` / equivalent module. Environment-set fallback for dev.
-- Never log secret-named variables (F15 enforces this mechanically).
+Secret hygiene is zero-tolerance: the rendered `.secrets.baseline` ships empty, so
+any new finding gates the build; add to the baseline only with an audited reason
+in the commit message. Runtime secrets are fetched from Azure Key Vault at deploy
+time, never committed. The shared org secrets and the promotion path are canonical
+in [repo-governance-secret-wiring](repo-governance-secret-wiring.md); the security
+posture is in [security-framework](security-framework.md).
 
-## CI → Azure OIDC
+## One-time human acts
 
-For workflows that need cloud access (e.g. fetching secrets from KV,
-deploying to a VM):
+The script prints the four acts it cannot perform itself — each needs org-admin,
+cloud, or third-party rights:
 
-1. Create an Azure AD App Registration `<repo>-ci-keyvault-reader` (or
-   similar role-scoped name).
-2. Add federated credentials trusting the repo:
-   - `repo:<org>/<repo>:ref:refs/heads/main`
-   - `repo:<org>/<repo>:pull_request`
-3. Grant the SP minimum-required RBAC role on the target resource (e.g.
-   `Key Vault Secrets User` on the KV).
-4. Set GH repo variables: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
-   `AZURE_SUBSCRIPTION_ID`, plus any resource name (e.g.
-   `KAIRIX_KV_NAME`).
-5. Workflow uses `azure/login@v2` with `permissions: id-token: write`.
+1. **WIF + Key Vault identity** — deploy the CI deploy-identity so CI can mint the
+   App token and read secrets, then set the `AZURE_*` repo/org variables from its
+   outputs.
+2. **Maintainers team** — grant `@three-cubes/maintainers` on the repo and confirm
+   `CODEOWNERS` routes the control-plane paths to it.
+3. **GitHub App install** — install / grant the three-cubes-agent App on the repo
+   so agents author PRs as the App.
+4. **SonarCloud project** (only under `--sonar`) — create the project in org
+   `three-cubes`, enable PR decoration, and confirm `SONAR_TOKEN` resolves.
 
-No long-lived secrets stored in GitHub — federated identity covers the
-auth path.
-
-## Node 24 opt-in
-
-Set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"` at the workflow-level
-`env:` block in every workflow. Suppresses the Node 20 deprecation
-warning until `actions/setup-python@v6` and friends ship with Node 24
-runtime support.
+Then add the maintainer's `<id>+<login>@users.noreply.github.com` to
+`[tool.tc_fitness.core_checks.canonical_commit_identity]` `allowed_emails`, and
+flip the ruleset's required review count to 0 for autonomous merge only *after*
+the gate is proven green and deterministic — see
+[gate-hardening](../gate-hardening.md) and [autonomous-loop](../autonomous-loop.md).
 
 ## Bootstrap checklist
 
 For a new repo, in order:
 
-- [ ] `git init`; default branch `main`; trunk-based
-- [ ] `CLAUDE.md` with engineering standards
-- [ ] `CHANGELOG.md` with `[Unreleased]` placeholder
-- [ ] `scripts/safe-commit.sh` (or `make check` target) running the gate chain
-- [ ] `scripts/checks/run-all.sh` invoking each fitness detector
-- [ ] `.architecture/baseline/` directory created (empty if no offenders yet)
-- [ ] `.github/workflows/{ci,release,release-alpha}.yml` from template
-- [ ] `.github/dependabot.yml` with cooldown enforced
-- [ ] `.secrets.baseline` initialised via `detect-secrets scan > .secrets.baseline`
-- [ ] Branch protection on `main`: require `CI gate`, restrict force-push
-- [ ] `docs/standards/` symlink or copy of the canonical-patterns set
-- [ ] OIDC App Registration created if cloud access needed
-- [ ] Per-language baselines configured (ruff, mypy, pytest, etc.)
+- [ ] Run `bootstrap-repo-governance.sh --repo three-cubes/<name>` (add `--verify`).
+- [ ] On a branch, follow each printed `run (in a clone …)` sequence: the
+      governance files, the affordance + harness payload, and the quality-gate
+      wiring (merge the `pyproject` fragments into `pyproject.toml`).
+- [ ] Run `make check` green locally before the first push.
+- [ ] Open the PR as the three-cubes-agent App and let the green gate merge it.
+- [ ] Complete the four one-time human acts above.
+- [ ] Add the maintainer identity to `canonical_commit_identity` `allowed_emails`
+      before flipping the repo autonomous.
 
-This doc is the union baseline of engineering standards already canonical
-across the fleet — treat it as the shared baseline, not a new constraint set.
+The bootstrap converges a new repo onto the shared baseline in one command; the
+checklist is the human sequence around it, not a parallel set of rules.
