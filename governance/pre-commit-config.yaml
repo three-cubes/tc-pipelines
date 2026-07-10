@@ -70,13 +70,13 @@ repos:
     hooks:
       - id: tc-no-attribution
         name: strip AI/LLM self-attribution from the commit message
-        entry: governance/git-hooks/commit-msg
+        entry: scripts/git-hooks/commit-msg
         language: script
         stages: [commit-msg]
         always_run: true
       - id: tc-fitness-replay
         name: replay the fitness gate before push (local == CI)
-        entry: governance/git-hooks/pre-push
+        entry: scripts/git-hooks/pre-push
         language: script
         stages: [pre-push]
         pass_filenames: false

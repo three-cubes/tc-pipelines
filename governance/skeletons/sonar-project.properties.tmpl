@@ -1,0 +1,30 @@
+# SonarCloud project configuration for {{REPO}}.
+# Rendered by bootstrap-repo-governance.sh only under --sonar (the SonarCloud
+# project must exist first — see the one-time-human checklist). The reusable
+# sonar-scan.yml reads coverage + test-results paths from here; it does not
+# re-run the suite.
+#
+# Policy (governance/standards/sonarqube-usage.md): no coverage exclusions and no
+# issue-ignore overrides — don't game the rating. Only file/dir exclusions for
+# generated / cached / vendor content. `sonar.qualitygate.wait=true` makes the CI
+# scan block on the Quality Gate verdict and exit with it.
+
+sonar.organization=three-cubes
+sonar.projectKey={{SONAR_PROJECT_KEY}}
+sonar.projectName={{REPO}}
+
+sonar.sources=.
+sonar.exclusions=\
+  **/node_modules/**,\
+  .venv/**,\
+  **/__pycache__/**,\
+  **/.pytest_cache/**,\
+  **/.ruff_cache/**,\
+  **/dist/**,\
+  **/coverage/**
+
+# Coverage + test-results the reusable gate produced and sonar-scan.yml lands on
+# disk for Sonar's sensors to import.
+sonar.python.coverage.reportPaths=coverage.xml
+
+sonar.qualitygate.wait=true

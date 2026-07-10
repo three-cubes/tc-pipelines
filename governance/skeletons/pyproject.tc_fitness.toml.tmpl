@@ -1,0 +1,88 @@
+# ── tc-fitness gate — MERGE THIS INTO {{REPO}}'s pyproject.toml ───────────────
+# Two fragments below. Merge each into the matching table of your pyproject.toml
+# (a fresh repo can paste them verbatim). The single gate both CI and local run
+# is `uv run tc-fitness run`, which reads the `[tool.tc_fitness]` block here, so
+# local == CI by construction. The reusable `python-quality-gate.yml@{{PIPELINES_TAG}}`
+# caller (see .github/workflows/ci.yml) runs the SAME command.
+
+# 1. The engine pin. tc-fitness is a dev-group dependency, pinned to an immutable
+#    tag so the gate can never silently drift. The `engine_version_floor` CORE
+#    check (below) asserts this pin clears the central floor.
+[dependency-groups]
+dev = [
+    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@{{FITNESS_TAG}} ; python_version >= '3.12'",
+    "detect-secrets>=1.5.0",
+    "pytest>=8",
+]
+
+# 2. The gate. Every step runs in order from one `uv run tc-fitness run`.
+[tool.tc_fitness]
+name = "{{REPO}} CORE quality gate"
+
+# Secret hygiene — ZERO-TOLERANCE. The baseline ships EMPTY (.secrets.baseline),
+# so any new finding gates the build. detect-secrets is a dev-group dependency,
+# so the step never silently skips in CI.
+[[tool.tc_fitness.steps]]
+id = "secret-scan"
+summary = "no committed secrets (zero-tolerance, empty baseline)"
+shell = "detect-secrets-hook --baseline .secrets.baseline $(git ls-files | grep -v -E '^(\\.secrets\\.baseline)$')"
+fix = "remove the secret; reference it via a vault at deploy time"
+next = "re-run `uv run tc-fitness run --only secret-scan`"
+
+# CORE governance checks — the SHARED engine checks {{REPO}} INHERITS (never
+# reimplements). Bound via the catalogue in scripts/checks/_core_catalogue.py and
+# driven entirely by the `[tool.tc_fitness.core_checks.*]` config blocks below, so
+# zero repo strings live in the engine. Dispatched IN-PROCESS as one more gate
+# step, preserving the single-gate contract.
+[[tool.tc_fitness.steps]]
+id = "core-governance-checks"
+summary = "CORE inherited checks (attribution + commit-identity + engine-floor + harness-canon + ci-consumes-shared-gate)"
+catalogue = "scripts.checks._core_catalogue:CORE_ENTRIES"
+checks_dir = "scripts/checks"
+dispatch = "inprocess"
+fix = "read the FAIL line; strip AI-attribution residue, re-author the commit under an allowlisted identity, bump the pinned engine tag to clear the floor, add the canonical banner to CLAUDE.md/AGENTS.md, or wire ci.yml to the shared gate"
+next = "re-run `uv run tc-fitness run --only core-governance-checks`"
+
+# ── CORE-check config blocks (one per bound check) ───────────────────────────
+# The engine injects the matching block into each `core:<module>` catalogue row
+# when it dispatches the step. Every repo-specific value is CONFIG here — the
+# engine ships no {{REPO}} identity. Keep this file CODEOWNERS-gated
+# (/pyproject.toml → @three-cubes/maintainers) so the agent App can never widen
+# the allowlist or narrow the scan roots on the gate that gates it.
+
+# no_llm_attribution — scan {{REPO}}'s authored source trees for banned
+# AI/LLM-attribution signatures (Co-Authored-By:<model> trailers,
+# "Generated with <tool>", the robot emoji). The baseline grandfathers any
+# pre-adoption residue so only NET-NEW attribution fails.
+[tool.tc_fitness.core_checks.no_llm_attribution]
+roots = ["src", "scripts", "tests", "docs"]
+
+# canonical_commit_identity — every commit author AND committer in the PR range
+# must be on the allowlist: the three-cubes-agent App (the canonical bot) + your
+# human maintainer. ADD YOUR MAINTAINER's `<id>+<login>@users.noreply.github.com`
+# before flipping the repo autonomous, or every human commit fails the gate.
+[tool.tc_fitness.core_checks.canonical_commit_identity]
+allowed_emails = [
+    "295831460+three-cubes-agent[bot]@users.noreply.github.com",
+    # "<id>+<maintainer-login>@users.noreply.github.com",
+]
+
+# engine_version_floor — {{REPO}}'s pinned tc-fitness tag (the git-URL `@{{FITNESS_TAG}}`
+# ref above) must be at or above the central floor, so {{REPO}} can't silently sit
+# behind a gate-critical engine release. Fix a below-floor pin by BUMPING the pin,
+# never by lowering the floor.
+[tool.tc_fitness.core_checks.engine_version_floor]
+floor = "{{FITNESS_FLOOR}}"
+
+# harness_canon_reference — CLAUDE.md + AGENTS.md must carry the canonical-standards
+# banner and reference governance/STANDARDS.md (not a repo-local fork of the rules).
+# The rendered affordance skeletons satisfy this out of the box.
+[tool.tc_fitness.core_checks.harness_canon_reference]
+repo_type = "product"
+
+# ci_consumes_shared_gate — {{REPO}}'s CI must consume the shared gate: a workflow
+# `uses:` the canonical python-quality-gate.yml reusable OR runs `tc-fitness run`.
+# The rendered .github/workflows/ci.yml satisfies this. Adopt in WARN mode first
+# with `warn_only = true` if wiring CI in a later commit.
+[tool.tc_fitness.core_checks.ci_consumes_shared_gate]
+warn_only = false
