@@ -29,6 +29,10 @@ on:
 permissions:
   contents: read
   security-events: write
+  # The reusable's codeql job declares `actions: read`; a called workflow cannot
+  # request a permission the caller has not granted (validated at load, before
+  # the job's `if:` — so it applies even with run-codeql: false), so grant it here.
+  actions: read
 
 jobs:
   security:

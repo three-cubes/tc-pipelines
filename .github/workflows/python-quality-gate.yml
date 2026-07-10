@@ -179,6 +179,9 @@ on:
       gh-token:
         description: "GITHUB_TOKEN override for steps that need authenticated git/gh (engine secret-scan changed-file diff). Falls back to github.token."
         required: false
+      private-infra-patterns:
+        description: "Optional consumer secret forwarded into the fitness gate's env as PRIVATE_INFRA_PATTERNS (e.g. kairix's F73 private-infra detector). Unset leaves it empty."
+        required: false
 
 permissions:
   contents: read
@@ -212,6 +215,7 @@ jobs:
           pnpm-install-args: ${{ inputs.pnpm-install-args }}
           ts-coverage-command: ${{ inputs.ts-coverage-command }}
           gh-token: ${{ secrets.gh-token || github.token }}
+          private-infra-patterns: ${{ secrets.private-infra-patterns }}
           upload-coverage-artifact: ${{ inputs.upload-coverage-artifact }}
           coverage-xml-path: ${{ inputs.coverage-xml-path }}
           coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
@@ -269,6 +273,7 @@ jobs:
           pnpm-install-args: ${{ inputs.pnpm-install-args }}
           ts-coverage-command: ${{ inputs.ts-coverage-command }}
           gh-token: ${{ secrets.gh-token || github.token }}
+          private-infra-patterns: ${{ secrets.private-infra-patterns }}
           upload-coverage-artifact: ${{ inputs.upload-coverage-artifact }}
           coverage-xml-path: ${{ inputs.coverage-xml-path }}
           coverage-artifact-name: ${{ inputs.coverage-artifact-name }}

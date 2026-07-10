@@ -42,6 +42,13 @@ inputs:
     required: true
   gh-token:
     required: true
+  private-infra-patterns:
+    description: >-
+      Optional consumer-specific secret forwarded into the fitness gate step's
+      env as PRIVATE_INFRA_PATTERNS — a repo's private-infra secret-scan
+      detector (e.g. kairix F73). Empty (the default) leaves it unset.
+    required: false
+    default: ""
   # ── sharding ──────────────────────────────────────────────────────────────
   shard-index:
     description: >-
@@ -170,6 +177,7 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.gh-token }}
+        PRIVATE_INFRA_PATTERNS: ${{ inputs.private-infra-patterns }}
         SHARD_INDEX: ${{ inputs.shard-index }}
         SHARD_TOTAL: ${{ inputs.shard-total }}
         TIER: ${{ inputs.tier }}
