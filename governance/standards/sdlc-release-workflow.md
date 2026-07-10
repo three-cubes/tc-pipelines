@@ -237,3 +237,7 @@ git checkout v2026.4.18a1  # detached HEAD, pinned
 # or
 git reset --hard v2026.4.18a1
 ```
+
+### Trunk-only VM-deploy repos — deploy on merge
+
+A trunk-only repo that deploys to a VM (e.g. `tc-agent-zone`) does not cut alpha tags or run a manual `git checkout` on the deploy path. Merge to `main` **triggers** its `deploy-on-merge` workflow, which calls the tc-pipelines [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable (pinned to a `@vN` tag) to snapshot → apply → smoke the target VM. The deploy is bracketed by a recovery-point snapshot before the first mutation and a verification probe after — see [`snapshot-before-apply.md`](snapshot-before-apply.md) + [`deployment-verification.md`](deployment-verification.md). Reserve the manual pinned-checkout flow above for operator-driven or recovery deploys; the pip-install alpha-tag flow (§4–§6) stays scoped to package repos.

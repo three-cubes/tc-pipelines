@@ -28,6 +28,7 @@
 
 - The canonical standard and full index: [`governance/STANDARDS.md`](governance/STANDARDS.md) — improve that one standard; do not fork your own copy.
 - The quality check itself: [tc-fitness](https://github.com/three-cubes/tc-fitness).
+- Changing a check or a pipeline: [`governance/standards/improving-fitness-gates.md`](governance/standards/improving-fitness-gates.md) — converge up to the one home, tag-release, consumer-repin.
 - Deploy setup, migration, and cost notes: [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) · [docs/MIGRATION.md](docs/MIGRATION.md) · [docs/COST-OPTIMIZATION.md](docs/COST-OPTIMIZATION.md).
 
 **License:** Apache-2.0 (see [`LICENSE`](LICENSE)). This repo is public and used by both public and private org repos. It holds no credentials of any kind.

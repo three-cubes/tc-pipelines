@@ -5,6 +5,12 @@
 > the system works — drive the real surface and observe it. This generalises the
 > [snapshot-before-apply](snapshot-before-apply.md) pattern beyond any one cloud.
 
+In the org's paved road this bracket is concrete: a merge to `main` triggers the consumer's
+`deploy-on-merge` workflow, which calls the tc-pipelines
+[`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable — it takes the
+recovery-point snapshot from the pipeline (WIF) identity before the first mutation and runs the
+post-apply smoke probe against the real surface. See [`snapshot-before-apply.md`](snapshot-before-apply.md).
+
 ## Why
 
 An apply that half-succeeds can leave a service that won't restart, a config that rejects the next

@@ -16,15 +16,19 @@ Our development approach prioritises **systematic quality**, **evidence-based de
 
 ## Agent-specific contract
 
-If you are an agent or directing one, also read the repo's `CLAUDE.md`. It carries the agent-specific operating contract: primary-agent review gate before each cherry-pick / PR approval, worktree-isolation hygiene for parallel subagents, human gate on PR *creation* (not just merge), and the actionable-feedback principle for any new pipeline-blocking message. The human-readable workflow document below stays canonical for humans; `CLAUDE.md` is its agent-shaped sibling.
+If you are an agent or directing one, also read the repo's `CLAUDE.md`. It carries the agent-specific operating contract: primary-agent review gate before each cherry-pick, worktree-isolation hygiene for parallel subagents, the CODEOWNERS control-plane review carve-out (the human-in-the-loop sits on the gate's own definition, not on every PR), and the actionable-feedback principle for any new pipeline-blocking message. The human-readable workflow document below stays canonical for humans; `CLAUDE.md` is its agent-shaped sibling.
 
 ### Track substantial work as a Linear item
 
 Track substantial or delegated work as a Linear work item — do not let it live only in chat. Use the delivery-management verbs: **specify** the work, **decompose** it, **delegate** to a cluster, **update** as it progresses, **harvest** the decisions, and **close** when done. Harvest before you close — once the conversation decays, the work item is the durable record. Route intent ("track this", "add to Linear") through the repo's delivery-management ToolPack. Canon: the delivery-management operating model + operating-model standard.
 
-### Commit and ship under a per-agent GitHub App
+### Commit and ship under a GitHub App identity
 
-Commit, open PRs and merge under your **per-agent GitHub App** identity (one `tc-agent-<name>` App per agent) with short-lived installation tokens — not a shared human PAT. The App tiers are least-privilege: agents cannot self-approve, bypass CODEOWNERS, or override branch protection. A human approves every PR and owns the merge gate. Canon: the agent SDLC access + HITL standard.
+Author every commit, PR, and merge under a **GitHub App** identity — the canonical `three-cubes-agent`, or a per-agent App (`tc-agent-builder`/`shape`/`consultant`/`growth`) so the audit log shows *which* agent acted — with short-lived installation tokens minted over WIF from `kv-tc-agents`, never a shared human PAT. The App tiers are least-privilege: an agent cannot self-approve, bypass CODEOWNERS, or override branch protection.
+
+Commit *author* and *committer* both resolve to the App's `[bot]` identity — `three-cubes-agent[bot]` / `295831460+three-cubes-agent[bot]@users.noreply.github.com`. Carry no AI/LLM self-attribution: no `Co-Authored-By: <model>` trailer, no "Generated with" credit, no robot emoji. The `no_llm_attribution` + `canonical_commit_identity` fitness checks and the commit-msg strip hook enforce this on every commit and the PR title + body. Because a PR author cannot approve their own PR, App-authorship is exactly what lets a human maintainer review the control-plane changes that need one.
+
+Ordinary work then **merges itself on a green gate** — no human runs the merge; a human review is required only on the control-plane paths CODEOWNERS pins (see the Merge gate below). Canon: the [Agent SDLC-access + HITL standard](../agent-sdlc-access-and-hitl.md) + [`STANDARDS.md §4`](../STANDARDS.md).
 
 ## Work Lifecycle
 
@@ -39,11 +43,11 @@ Idea → Issue → Plan → Execute → Review → Merge → Deploy → Verify
 | **Idea → Issue** | All work starts as a tracked issue. Assign priority and milestone. |
 | **Issue → Plan** | List files that change, define verification criteria, identify dependencies and risks. |
 | **Plan → Execute** | Branch from `main`, follow commit conventions, run verification after every logical change. |
-| **Execute → Review** | Open PR, all automated checks pass, complete manual verification checklist. |
-| **Review → Merge** | Merge commit to `main`, ~daily cadence per feature branch. Branch deletes after merge. |
-| **Merge → Deploy → Verify** | Deploy is operator-triggered, not automatic on merge: run the `deploy-on-merge` workflow (`workflow_dispatch`), select scope, then verify the post-deploy health check and smoke test. Fix forward if deploy fails. |
+| **Execute → Review** | Open PR as the App, all automated checks pass, complete manual verification checklist. |
+| **Review → Merge** | On a green gate, `auto-merge-on-green.yml` arms `gh pr merge --auto` as the App and GitHub merges the moment every required check passes — no human runs the merge. Branch deletes after merge. |
+| **Merge → Deploy → Verify** | Merge to `main` **triggers** `deploy-on-merge`, which calls the tc-pipelines `azure-vm-deploy.yml` reusable (tag-pinned): snapshot-before → apply → smoke-after. Fix forward if the probe fails. |
 
-> **Deploy is not automatic on merge.** The `deploy-on-merge` workflow deliberately disables the push trigger — the manual `workflow_dispatch` is the human gate against unintended production changes. The job authenticates to the cloud via WIF/OIDC, snapshots the target host, applies the selected scope (e.g. `auto`/`config`/`infra`), and runs the smoke check. The deploy reusables live in [tc-pipelines](https://github.com/three-cubes/tc-pipelines) (`azure-vm-deploy.yml`).
+> **Merge to `main` triggers the deploy.** `deploy-on-merge` calls the tc-pipelines [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable (pinned to a `@vN` tag): authenticate via WIF/OIDC, take a recovery-point snapshot of the target host, apply the selected scope (`auto`/`config`/`infra`), and run the post-apply smoke probe. The human gate on production is the **required reviewer on the production GitHub Environment** — the App can create the deployment and a human approves it — not a disabled trigger. See [`deployment-verification.md`](deployment-verification.md) + [`snapshot-before-apply.md`](snapshot-before-apply.md) for the recovery-point-before / verify-after bracket, and [`agent-sdlc-access-and-hitl.md`](../agent-sdlc-access-and-hitl.md) §Enforcement for the Environment-reviewer gate.
 
 ---
 
@@ -63,6 +67,8 @@ Idea → Issue → Plan → Execute → Review → Merge → Deploy → Verify
 ---
 
 ## Quality Gates
+
+> **Improving a gate?** To add or change a fitness gate or a pipeline recommendation, converge up to the canonical home — never fork a check or inline a pipeline in a consumer repo. The mechanics (tc-fitness CORE check → tag-release → consumer-repin; tc-pipelines reusable → SHA-pin → tag) are in [`improving-fitness-gates.md`](improving-fitness-gates.md); the bar a gate must clear is [`gate-hardening.md`](../gate-hardening.md).
 
 ### Local-first feedback loop
 
@@ -171,17 +177,21 @@ docs: update ways of working with agent workflow
 
 ### Merge Strategy
 
-- **Merge commit** to `main` (`gh pr merge --merge --delete-branch`) — squash and rebase merging are disabled at the repo level so the feature branch's commit history is preserved.
+- **Merge commit** to `main` — squash and rebase merging are disabled at the repo level, so the feature branch's commit history is preserved. The merge is **armed** by the App via `gh pr merge --auto --merge --delete-branch` and **executed by GitHub** the moment every required check is green; a human does not run it.
 - PR title: `type(scope): description (#issue)`
-- Branch deletes after merge
+- Branch deletes after merge.
 
-### Merge gate — required contexts, review, and `--admin`
+### Merge gate — required contexts, review, and auto-merge
 
-Three status contexts gate every merge: **Quality gate** (`make check`), **SonarCloud scan** (the GH Actions pytest+coverage job), and **SonarCloud Code Analysis** (the SonarCloud app's new-code quality gate). Beyond these, two active org **rulesets** (`org-baseline-main`, `main`) require **1 approving review + code-owner review + thread resolution** — this is invisible in classic branch protection, which reports `required_approving_review_count: 0`. A PR author cannot self-approve.
+Three status contexts gate every merge: **Quality gate** (`uv run tc-fitness run`), **SonarCloud scan** (the coverage + new-code analysis job), and **SonarCloud Code Analysis** (the SonarCloud app's new-code quality gate); a repo that has hardened its gate also requires **Mutation**. The `main` ruleset (`RULESET-D1`) blocks deletion + force-push, is **not strict** (no forced up-to-date rebase), does **not** stale-dismiss reviews, and requires **0 approvals on ordinary work**.
 
-`gh pr merge --admin` is the **owner's logged exception** that clears the review gate. Agents request it; they never self-authorise (the durable rule is "agents have no override"). The admin-bypass also covers, under the interim coverage-gate policy, a **coverage / duplication / smell-only** SonarCloud Code Analysis failure.
+**Ordinary work auto-merges on green.** `auto-merge-on-green.yml` fires on the Quality-gate `workflow_run` completion; when the fan-in "CI gate" check-run is green it arms `gh pr merge --auto` as the App, and GitHub merges the instant every required context passes. No human runs the merge.
 
-It MUST NOT clear a **Security Rating worse than A**. Before any `--admin` past a failing SonarCloud Code Analysis, read the SonarCloud PR decoration (`gh api repos/<org>/<repo>/issues/<pr>/comments` → the `sonarqubecloud[bot]` body) and check the failed conditions. A security finding is fixed, not bypassed — repo policy sets **no Sonar issue-ignore overrides** (see `sonar-project.properties`): genuinely refactor the finding (e.g. validate + reconstruct a URL flowing to `urlopen` for S5144 SSRF), never suppress it.
+**Control-plane changes hold for a human.** A PR that touches a CODEOWNERS-owned path — the CI/merge machinery, the gate's own definition (`[tool.tc_fitness]`), governance canon, contracts/schemas, deploy/runtime-config — requires a `@three-cubes/maintainers` (humans-only) review and does **not** auto-merge. Everything else — skills, tools, tests, feature docs, content — merges unattended on green. This is what makes App-authorship load-bearing: because an author cannot approve their own PR, the required human review is a genuine second party. The two CORE paved-road repos (tc-pipelines, tc-fitness) hold *every* PR for an `n+1` human approval — see [`process-shared-repo-pr-review-and-merge.md`](process-shared-repo-pr-review-and-merge.md).
+
+`gh pr merge --admin` is the **owner's logged exception**, requested by an agent and never self-authorised — a ruleset with no bypass actors blocks even admins, so the override is a deliberate human act. It clears the review gate and, under the interim coverage-gate policy, a **coverage / duplication / smell-only** SonarCloud Code Analysis failure — but never a required check red for another reason, and never a **Security Rating worse than A**. Before any `--admin` past a failing SonarCloud Code Analysis, read the SonarCloud PR decoration (`gh api repos/<org>/<repo>/issues/<pr>/comments` → the `sonarqubecloud[bot]` body) and check the failed conditions. A security finding is fixed, not bypassed — repo policy sets **no Sonar issue-ignore overrides** (see `sonar-project.properties`): genuinely refactor the finding (e.g. validate + reconstruct a URL flowing to `urlopen` for S5144 SSRF), never suppress it.
+
+Canon: [`STANDARDS.md §4`](../STANDARDS.md) + [`agent-sdlc-access-and-hitl.md`](../agent-sdlc-access-and-hitl.md); `RULESET-D1` / `CODEOWNERS-D1` / `STD-MERGE` in [`ADR-POLICY.md`](../decisions/ADR-POLICY.md).
 
 ---
 

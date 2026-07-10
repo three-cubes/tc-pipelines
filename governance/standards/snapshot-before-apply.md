@@ -16,7 +16,7 @@ A snapshot lets the operator revert to the last-known-good in ~5 minutes. Withou
 
 **Snapshots are taken from the CI runner, NOT from the VM itself.** The runner has a WIF-bound identity with `Disk Snapshot Contributor` narrowly scoped to `RG-AGENTS-CORE`; the VM-local managed identities deliberately don't have this role (granting it would also grant snapshot-delete + storage-delete rights per the built-in role definition, which is too broad for a runtime identity that runs untrusted skill code).
 
-The CI workflow `.github/workflows/deploy-on-merge.yml` does this:
+The consumer's `deploy-on-merge.yml` calls the tc-pipelines [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable, whose [`snapshot-azure-vm-disk`](../../.github/actions/snapshot-azure-vm-disk/action.yml) composite runs the canonical snapshot shape before the apply:
 
 ```yaml
 - name: Snapshot vm-openclaw + vm-hermes-poc
@@ -87,7 +87,7 @@ The current convention is to keep snapshots for 14 days; a dedicated prune cron 
 
 ## CI-driven apply integration
 
-The CI apply workflow (`.github/workflows/deploy-main.yml`) inherits this discipline. The workflow runs the apply script directly — no separate snapshot step is needed in the workflow itself; the script's own `take_snapshot` call fires before any mutation.
+The consumer's CI apply workflow (`.github/workflows/deploy-on-merge.yml`) inherits this discipline. It calls the tc-pipelines [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable, whose [`snapshot-azure-vm-disk`](../../.github/actions/snapshot-azure-vm-disk/action.yml) composite step takes the recovery point from the pipeline (WIF) identity before the apply and passes `--no-snapshot` to the apply script — so the in-script `take_snapshot` fallback (above) is skipped on the CI path and fires only for operator-driven runs.
 
 For pure infrastructure changes (Bicep applies), the snapshot lives in the runbook — Bicep applies use a different rollback shape (`az deployment ... what-if` + redeploy from prior template), not OS-disk revert.
 
