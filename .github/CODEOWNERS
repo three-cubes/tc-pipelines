@@ -1,0 +1,30 @@
+# tc-pipelines CODEOWNERS — the org's CI + deploy control plane.
+#
+# A code-owner review is required ONLY for a PR that touches one of the paths
+# below. Everything else (README, CHANGELOG, prose docs) auto-merges on green
+# once the "main" ruleset drops required approvals to 0 with code-owner review
+# left ON. This is the org standard: governance/config needs a human; routine
+# work merges itself.
+#
+# Owner is @quanyeomans (matching the sibling control-plane repo tc-fitness):
+# the reusable workflows and composite actions here are consumed by every repo
+# in the org, so a change to them is the highest-blast-radius edit we make.
+
+# The reusable workflows + composite actions every repo consumes.
+/.github/                @quanyeomans
+/actions/                @quanyeomans
+
+# The canonical standards, rulesets, skeletons, and the bootstrap script.
+/governance/             @quanyeomans
+
+# Deploy + tooling that acts on live infrastructure.
+/infra/                  @quanyeomans
+/tools/                  @quanyeomans
+
+# The repo's own gate config + dependency pins.
+/pyproject.toml          @quanyeomans
+/uv.lock                 @quanyeomans
+
+# CODEOWNERS governs itself.
+/CODEOWNERS              @quanyeomans
+/.github/CODEOWNERS      @quanyeomans
