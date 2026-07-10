@@ -1,0 +1,76 @@
+"""{{REPO}}'s CORE-check catalogue — the `core:` rows the shared engine dispatches.
+
+This is the ONE place {{REPO}} binds *shared* engine CORE checks it INHERITS
+rather than reimplements. Each row is a :class:`tc_fitness.catalogue.RuleEntry`
+whose ``check`` field uses the ``core:`` namespace, so the engine resolves it to
+``tc_fitness.core_checks.<module>`` and injects the matching
+``[tool.tc_fitness.core_checks.<module>]`` config block from ``pyproject.toml``
+via :meth:`FitnessRule.from_config`. The catalogue carries NO repo-specific
+values (roots / allowlists / refs) — those are config; this file is just the
+binding manifest.
+
+The gate dispatches these in-process as the ``core-governance-checks`` step
+(``catalogue = "scripts.checks._core_catalogue:CORE_ENTRIES"``), so the single
+``uv run tc-fitness run`` contract holds — the CORE checks are one more step in
+{{REPO}}'s one gate, not a separate CI leg.
+
+Render this to ``scripts/checks/_core_catalogue.py``. Bind more CORE checks by
+adding a ``RuleEntry`` row here plus its ``[tool.tc_fitness.core_checks.*]``
+config block; the engine's ``CORE_CHECKS`` registry lists every shippable check.
+"""
+
+from __future__ import annotations
+
+from tc_fitness.catalogue import RuleEntry
+
+#: The CORE checks {{REPO}} binds. Consumed by the ``core-governance-checks`` gate
+#: step; the engine injects each row's config block and dispatches it in-process.
+CORE_ENTRIES: tuple[RuleEntry, ...] = (
+    RuleEntry(
+        id="no-llm-attribution",
+        gate="no-llm-attribution",
+        check="core:no_llm_attribution",
+        category="governance",
+        scope="cross-cutting",
+        summary="No AI/LLM self-attribution residue in {{REPO}}'s authored source.",
+        staged_class="file-local",
+    ),
+    RuleEntry(
+        id="canonical-commit-identity",
+        gate="canonical-commit-identity",
+        check="core:canonical_commit_identity",
+        category="governance",
+        scope="cross-cutting",
+        summary="Every commit in the PR range is authored by an allowlisted identity.",
+        staged_class="always-run",
+    ),
+    RuleEntry(
+        id="engine-version-floor",
+        gate="engine-version-floor",
+        check="core:engine_version_floor",
+        category="governance",
+        scope="cross-cutting",
+        summary="{{REPO}}'s pinned tc-fitness engine tag clears the central floor.",
+        staged_class="always-run",
+    ),
+    RuleEntry(
+        id="harness-canon-reference",
+        gate="harness-canon-reference",
+        check="core:harness_canon_reference",
+        category="governance",
+        scope="cross-cutting",
+        summary="CLAUDE.md + AGENTS.md reference the shared canon, not a repo-local fork.",
+        staged_class="always-run",
+    ),
+    RuleEntry(
+        id="ci-consumes-shared-gate",
+        gate="ci-consumes-shared-gate",
+        check="core:ci_consumes_shared_gate",
+        category="governance",
+        scope="cross-cutting",
+        summary="{{REPO}}'s CI consumes the shared python-quality-gate reusable / engine.",
+        staged_class="always-run",
+    ),
+)
+
+__all__ = ["CORE_ENTRIES"]

@@ -1,0 +1,16 @@
+# {{REPO}} — the local loop. `make check` runs the EXACT gate CI runs, so
+# green-locally implies green-in-CI (governance/STANDARDS.md §5). `make setup`
+# installs the pre-commit hooks so those gates fire on every commit + push.
+
+.PHONY: check setup
+
+# The single quality gate — the same `uv run tc-fitness run` the reusable
+# python-quality-gate.yml runs in CI, reading pyproject.toml's [tool.tc_fitness].
+check:
+	uv run tc-fitness run
+
+# One-time dev setup: install the commit-msg strip hook + the pre-push gate replay
+# so the fitness gate fires locally before the CI round-trip.
+setup:
+	uv run pre-commit install --hook-type commit-msg --hook-type pre-push
+	uv run pre-commit install

@@ -1,0 +1,171 @@
+---
+name: "Quality gate (PR + push)"
+
+# {{REPO}}'s single quality lane. The whole gate is the repo-local
+# `[tool.tc_fitness]` block in pyproject.toml; the org-shared reusable
+# `python-quality-gate.yml@{{PIPELINES_TAG}}` provisions a pinned/cached uv venv and
+# runs the SAME `uv run tc-fitness run` that `make check` runs locally — local ==
+# CI by construction.
+#
+# Required-status-check contexts (governance/rulesets/main.json gates on these):
+#   * `Quality gate`             — the `check` aggregator below (a reusable call
+#                                   surfaces `<caller> / <reusable job>` checks,
+#                                   never a bare name, so THIS job carries it).
+#   * `no-attribution`           — the `no-attribution` job below (the shared
+#                                   tc-fitness detector over the PR commit range +
+#                                   title/body; bare context, own signal).
+#   * `SonarCloud scan`          — the `sonar` aggregator (only when Sonar is wired).
+#   * `SonarCloud Code Analysis` — posted by the SonarCloud GitHub App itself.
+# Renaming a job means updating governance/rulesets/main.json in lockstep — the
+# bootstrap `--verify` step catches a `Quality gate` vs `CI gate` drift.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "CHANGELOG.md"
+      - "docs/**"
+  pull_request:
+    branches: [main]
+  merge_group:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The fitness gate. run-no-attribution is off here because the dedicated
+  # `no-attribution` job below owns that scan as its own required context.
+  gate:
+    name: Python gate (reusable)
+    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@{{PIPELINES_TAG}}
+    with:
+      python-version: "3.12"
+      sync-args: "--all-extras --all-groups"
+      ci-requirements-path: ""
+      run-no-attribution: false
+      upload-coverage-artifact: true
+    secrets:
+      gh-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Quality gate aggregator — the required branch-protection context. A reusable
+  # call surfaces `<caller> / <reusable job>` checks, never a bare `Quality gate`,
+  # so THIS job carries that exact name and gates iff the reusable passed.
+  check:
+    name: Quality gate
+    needs: [gate]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Gate on the reusable result
+        env:
+          R_GATE: ${{ needs.gate.result }}
+        run: |
+          set -euo pipefail
+          echo "gate=$R_GATE"
+          if [[ "$R_GATE" != "success" ]]; then
+            echo "::error::Quality gate failed — the reusable python-quality-gate did not pass ($R_GATE)."
+            exit 1
+          fi
+          echo "Quality gate: PASS."
+
+  # no-attribution — reject AI/LLM self-attribution residue in the PR commit range
+  # and the PR title/body (Autonomous Delivery Platform D1). ONE detector: the
+  # shared tc-fitness `no_llm_attribution` scan the local commit-msg strip hook and
+  # the fitness gate also use, so the hook, this leg, and the gate never drift.
+  # `--scan-file` is READ-ONLY (CI never rewrites history); the PR title/body reach
+  # the script only as env values, never interpolated into the run body.
+  no-attribution:
+    name: no-attribution
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8
+      - name: Reject AI/LLM self-attribution in commits + PR title/body
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          module="tc_fitness.core_checks.no_llm_attribution"
+          from="git+https://github.com/three-cubes/tc-fitness@{{FITNESS_TAG}}"
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+          rc=0
+          scan() {
+            if ! uvx --from "$from" python -m "$module" --scan-file "$2"; then
+              echo "::error::no-attribution: AI/LLM self-attribution residue in $1." >&2
+              rc=1
+            fi
+          }
+          scan_advisory() {
+            if ! uvx --from "$from" python -m "$module" --scan-file "$2"; then
+              echo "::warning::no-attribution: possible residue in $1 (advisory — confirm it is documentation)." >&2
+            fi
+          }
+          shas="$(git rev-list "${PR_BASE_SHA}..${PR_HEAD_SHA}")"
+          while IFS= read -r sha; do
+            [[ -z "$sha" ]] && continue
+            git log -1 --format=%B "$sha" > "$workdir/commit-${sha}.txt"
+            scan "commit ${sha} message" "$workdir/commit-${sha}.txt"
+          done <<< "$shas"
+          printf '%s' "$PR_TITLE" > "$workdir/pr-title.txt"
+          scan "PR title" "$workdir/pr-title.txt"
+          printf '%s' "$PR_BODY" > "$workdir/pr-body.txt"
+          scan_advisory "PR body" "$workdir/pr-body.txt"
+          if [[ "$rc" -ne 0 ]]; then
+            echo "::error::no-attribution: remove the AI/LLM self-attribution flagged above. Install the local commit-msg strip hook to catch it before push." >&2
+          fi
+          exit "$rc"
+# SONAR-BLOCK-START
+  # SonarCloud scan (scan-only) — consumes the coverage artifact the gate produced
+  # instead of re-running the suite. `sonar.qualitygate.wait=true` in
+  # sonar-project.properties makes this job's conclusion the Sonar verdict.
+  sonar-scan:
+    name: Sonar scan (reusable)
+    needs: [gate]
+    if: always() && needs.gate.result == 'success'
+    uses: three-cubes/tc-pipelines/.github/workflows/sonar-scan.yml@{{PIPELINES_TAG}}
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # SonarCloud scan aggregator — the required branch-protection context (bare name,
+  # not the nested reusable check). `SonarCloud Code Analysis` is posted separately
+  # by the SonarCloud GitHub App when the scan submits its analysis.
+  sonar:
+    name: SonarCloud scan
+    needs: [sonar-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Gate on the Sonar scan result
+        env:
+          R_SONAR: ${{ needs.sonar-scan.result }}
+        run: |
+          set -euo pipefail
+          echo "sonar-scan=$R_SONAR"
+          if [[ "$R_SONAR" != "success" ]]; then
+            echo "::error::SonarCloud scan failed or did not run ($R_SONAR)."
+            exit 1
+          fi
+          echo "SonarCloud scan: PASS."
+# SONAR-BLOCK-END
