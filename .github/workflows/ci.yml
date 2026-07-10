@@ -21,3 +21,15 @@ jobs:
       # Dogfood the D1 no-attribution leg on tc-pipelines' own PRs (default-on;
       # set explicitly so the self-check exercises the leg it ships).
       run-no-attribution: true
+
+  # Fan-in aggregator: a single check-run that is green iff the whole `meta`
+  # self-check passed. auto-merge.yml arms `--auto` off THIS check-run name, so
+  # it is the one stable gate a ruleset or consumer points at.
+  quality-gate:
+    name: Quality gate
+    needs: meta
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert the meta self-check succeeded
+        run: test "${{ needs.meta.result }}" = "success"
