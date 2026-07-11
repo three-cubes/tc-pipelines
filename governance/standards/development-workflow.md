@@ -135,6 +135,13 @@ A detect-secrets false positive on a keyword-like name (`secret_resolution`, an 
 | Smoke test | Post-deploy script confirms core flow works |
 | No crash loops | Container/service logs show clean startup |
 
+### Definition of Done
+
+A change is DONE when its behaviour is proven and its required gate is verified. Two clauses make that concrete as procedure (layer-3 in [`agent-process-controls.md`](agent-process-controls.md)) rather than guidance a busy agent may skip:
+
+- **Pin a shared-contract behaviour change with red-before-green evidence.** A change to a shared contract — a public method, or an engine surface a consumer depends on — is DONE only when the PR body carries the pinning test run against the **old** behaviour and shown **failing**, then green on the new code. The failing run proves the test binds the behaviour that changed; a test added after the change can pass without ever exercising it.
+- **Claim "done" or "green" only from a verified required check.** Cite the actual required-check result — the pasted `gh pr checks <pr>` output for the named required contexts (**Quality gate**, **SonarCloud scan**, **SonarCloud Code Analysis**). "No visible fails" is not a green. Human review is the backstop for the claim; instrument the claim-then-corrected rate so the pattern trends.
+
 ---
 
 ## Branching and Commit Conventions
