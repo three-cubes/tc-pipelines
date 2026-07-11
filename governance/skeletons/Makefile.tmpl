@@ -2,12 +2,21 @@
 # green-locally implies green-in-CI (governance/STANDARDS.md §5). `make setup`
 # installs the pre-commit hooks so those gates fire on every commit + push.
 
-.PHONY: check setup
+.PHONY: check fix setup
 
 # The single quality gate — the same `uv run tc-fitness run` the reusable
 # python-quality-gate.yml runs in CI, reading pyproject.toml's [tool.tc_fitness].
+# `check` is the VERIFIER: it reports, it never mutates.
 check:
 	uv run tc-fitness run
+
+# Shift-left auto-fix: CORRECT the deterministic lint/format/lockfile drift so the
+# local loop fixes it rather than only reporting it at `make check` time. Run `fix`
+# before `check` — everything `fix` corrects, `check` would otherwise have failed on.
+fix:
+	uv run ruff check --fix .
+	uv run ruff format .
+	uv lock
 
 # One-time dev setup: install the commit-msg strip hook + the pre-push gate replay
 # so the fitness gate fires locally before the CI round-trip.

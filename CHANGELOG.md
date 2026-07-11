@@ -10,6 +10,26 @@ for the consumer-facing `@vN` workflow/action references.
 
 ### Added
 
+- **`python-quality-gate.yml` change-gated pytest shards (SGO-280).** A new
+  optional `code-change-filter` input (extended-regex over changed paths) gates
+  the pytest shard fan-out: on a **docs/config-only** PR (no changed path matches)
+  the N-way `quality-shard` matrix + `coverage-combine` are **skipped** and a
+  single `quality` catalogue lane carries the fan-in `gate` instead; on a code
+  change the shards run as normal. The decision is the pure, unit-tested
+  [`actions/detect-code-changes`](actions/detect-code-changes/) composite
+  (`decide-code-changed.sh`), consumed by a new `detect-changes` job. **Backward
+  compatible:** an empty filter (the default) makes `code-changed` always `true`,
+  so every downstream `if:` reduces to its prior form — byte-identical for
+  consumers that set no filter. Fails **open** (shards run) on any indeterminate
+  diff, so a detection glitch never skips tests. The static example caller
+  exercises the new input shape. Pair with the diff-scoped smoke wiring below so
+  the fallback lane also skips pytest itself on docs-only.
+- **`make fix` shift-left in the bootstrap skeleton (SGO-280).** The rendered
+  `Makefile` now carries a `fix:` target that runs the deterministic auto-fixers
+  (`uv run ruff check --fix` + `uv run ruff format` + `uv lock`), so the local
+  loop **corrects** lint/format/lockfile drift rather than only reporting it at
+  `make check` time; `ruff` is added to the skeleton's dev group so the affordance
+  is live. `make check` stays the verifier (unchanged).
 - **`python-quality-gate.yml` diff-scoped smoke wiring.** Callers can opt in to
   `write-changed-files: true`, which writes a newline-delimited repo-relative
   PR/push diff file, then pair it with `tc-fitness-args: run

@@ -215,6 +215,27 @@ def test_wiring_render_resolves_every_token(tmp_path: Path) -> None:
         assert f"core_checks.{binding}" in pyproject, f"pyproject omits CORE binding {binding}"
 
 
+def test_wiring_makefile_has_a_fix_target_running_the_autofixers(tmp_path: Path) -> None:
+    # `make fix` shift-left (SGO-280): the rendered Makefile must CORRECT
+    # lint/format/lockfile deterministically so the local loop auto-fixes rather
+    # than only reporting it. `make check` stays the VERIFIER (unchanged).
+    out_dir = tmp_path / "wire"
+    assert _render(out_dir).returncode == 0
+    makefile = (out_dir / "Makefile").read_text(encoding="utf-8")
+
+    # A real `fix:` target exists and is declared .PHONY.
+    assert re.search(r"^fix:", makefile, re.MULTILINE), "Makefile has no `fix:` target"
+    assert re.search(r"^\.PHONY:.*\bfix\b", makefile, re.MULTILINE), "`fix` is not .PHONY"
+
+    # It runs the deterministic auto-fixers: ruff --fix + ruff format + uv lock.
+    assert "ruff check --fix" in makefile, "fix target does not run `ruff check --fix`"
+    assert "ruff format" in makefile, "fix target does not run `ruff format`"
+    assert "uv lock" in makefile, "fix target does not run `uv lock`"
+
+    # `make check` stays the VERIFIER — fix and check are distinct targets.
+    assert re.search(r"^check:", makefile, re.MULTILINE), "Makefile lost its `check:` verifier"
+
+
 def test_wiring_ci_emits_every_required_ruleset_context(tmp_path: Path) -> None:
     # The gap this whole extension closes: the ruleset must never require a
     # context nothing emits. Every required context is a ci.yml job name (or an

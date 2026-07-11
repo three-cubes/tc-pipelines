@@ -13,6 +13,9 @@ dev = [
     "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@{{FITNESS_TAG}} ; python_version >= '3.12'",
     "detect-secrets>=1.5.0",
     "pytest>=8",
+    # `make fix` shift-left — the deterministic auto-fixer the local loop runs
+    # before `make check` (ruff --fix + ruff format). Pinned to the CI source-of-truth line.
+    "ruff>=0.15",
 ]
 
 # 2. The gate. Every step runs in order from one `uv run tc-fitness run`.

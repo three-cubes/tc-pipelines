@@ -73,3 +73,24 @@ jobs:
       pnpm-version: 10.27.0
       coverage-artifact-name: taz-coverage
       ts-coverage-command: pnpm -r --if-present test:coverage
+
+  # Change-gated sharding (SGO-280): a consumer that fans pytest across shards AND
+  # wants a docs/config-only PR to skip that fan-out declares a code-change-filter.
+  # This job validates the new input's SHAPE against the reusable's workflow_call
+  # contract statically (the runtime skip/run behaviour is proven by the decision
+  # helper's unit test + the test-shard-routing self-test). Pairs the filter with
+  # the engine's --changed-files-from diff-scoping so the fallback lane also skips
+  # pytest itself on a docs-only change.
+  quality-change-gated:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/python-quality-gate.yml
+    with:
+      sync-args: --locked --all-packages
+      pytest-shards: 4
+      code-change-filter: '\.py$|^src/|^tests/|^pyproject\.toml$|^uv\.lock$'
+      write-changed-files: true
+      changed-files-path: .tc-fitness-changed-files
+      tc-fitness-args: run --changed-files-from .tc-fitness-changed-files
+      coverage-artifact-name: change-gated-coverage
+    secrets:
+      gh-token: dummy-token-shape-check-only

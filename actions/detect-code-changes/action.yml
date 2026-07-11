@@ -1,0 +1,99 @@
+name: "Detect code changes (change-gate)"
+description: >-
+  Decide whether a PR/push touched CODE (per an extended-regex filter) so the
+  python-quality-gate reusable can skip the pytest shard fan-out on a
+  docs/config-only change. Checks the repo out, computes the changed-file list
+  (base...head, robust across pull_request / push / merge_group / initial
+  checkout), and runs the pure `decide-code-changed.sh` decision. Fails OPEN
+  (`code-changed=true`) whenever the filter is empty or the diff is
+  indeterminate, so it never wrongly SKIPS the tests.
+
+inputs:
+  code-change-filter:
+    description: >-
+      Extended-regex matched against each repo-relative changed path. ANY match =
+      code changed = run the shards. Empty (the default) DISABLES detection —
+      `code-changed` is always `true` and the shard matrix runs exactly as today.
+    required: false
+    default: ""
+  fetch-depth:
+    description: "checkout fetch-depth for the diff (2 = HEAD~1; 0 = full history)."
+    required: false
+    default: "2"
+
+outputs:
+  code-changed:
+    description: "'true' if code changed (run the shards) or detection is off; 'false' for a docs/config-only change."
+    value: ${{ steps.decide.outputs.code-changed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        fetch-depth: ${{ inputs.fetch-depth }}
+
+    - name: Decide code-changed
+      id: decide
+      shell: bash
+      env:
+        CODE_CHANGE_FILTER: ${{ inputs.code-change-filter }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        PUSH_BEFORE_SHA: ${{ github.event.before }}
+        PUSH_AFTER_SHA: ${{ github.sha }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+
+        # Detection disabled (no filter) -> run everything, no git work needed.
+        if [[ -z "${CODE_CHANGE_FILTER}" ]]; then
+          echo "code-changed=true" >> "$GITHUB_OUTPUT"
+          echo "change-gate: filter empty — detection disabled, shards run."
+          exit 0
+        fi
+
+        changed_files="$(mktemp)"
+
+        ensure_commit() {
+          local sha="$1"
+          [[ -z "$sha" ]] && return 0
+          git cat-file -e "${sha}^{commit}" 2>/dev/null && return 0
+          git fetch --no-tags --depth=1 origin "$sha" 2>/dev/null || return 1
+        }
+
+        zero_sha="0000000000000000000000000000000000000000"
+        base=""
+        head=""
+        if [[ -n "${PR_BASE_SHA:-}" && -n "${PR_HEAD_SHA:-}" ]]; then
+          base="$PR_BASE_SHA"
+          head="$PR_HEAD_SHA"
+        elif [[ -n "${MG_BASE_SHA:-}" && -n "${MG_HEAD_SHA:-}" ]]; then
+          base="$MG_BASE_SHA"
+          head="$MG_HEAD_SHA"
+        elif [[ -n "${PUSH_BEFORE_SHA:-}" && "$PUSH_BEFORE_SHA" != "$zero_sha" ]]; then
+          base="$PUSH_BEFORE_SHA"
+          head="$PUSH_AFTER_SHA"
+        elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+          base="HEAD~1"
+          head="HEAD"
+        fi
+
+        # Indeterminate diff (initial checkout, missing commits) -> fail OPEN.
+        if [[ -z "$base" || -z "$head" ]] || ! ensure_commit "$base" || ! ensure_commit "$head"; then
+          echo "code-changed=true" >> "$GITHUB_OUTPUT"
+          echo "change-gate: diff base/head indeterminate — failing open, shards run."
+          exit 0
+        fi
+
+        git diff --name-only "$base...$head" > "$changed_files"
+        echo "change-gate: $(wc -l < "$changed_files" | tr -d ' ') changed path(s) vs filter /${CODE_CHANGE_FILTER}/"
+
+        decision="$(bash "${ACTION_PATH}/decide-code-changed.sh" \
+          --filter "${CODE_CHANGE_FILTER}" \
+          --changed-files "${changed_files}")"
+        echo "code-changed=${decision}" >> "$GITHUB_OUTPUT"
+        echo "change-gate: code-changed=${decision}"

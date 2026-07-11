@@ -175,6 +175,21 @@ on:
           pytest-shards > 1.
         type: string
         default: ""
+      code-change-filter:
+        description: >-
+          Extended-regex matched against each changed path to gate the pytest shard
+          fan-out: on a docs/config-only PR (NO changed path matches) the N-way
+          `quality-shard` matrix + `coverage-combine` are SKIPPED and a single
+          `quality` catalogue lane runs the gate instead; on a code change the
+          shards run as normal. Empty (the DEFAULT) DISABLES the gate — the shard
+          matrix always runs, so behaviour is byte-identical for every consumer that
+          sets no filter (backward-compatible). Pair with the engine's
+          `--changed-files-from` diff-scoping (write-changed-files + tc-fitness-args)
+          so the fallback lane also skips pytest itself. Example:
+          `\.py$|^src/|^tests/|^pyproject\.toml$|^uv\.lock$`. Only relevant when
+          pytest-shards > 1.
+        type: string
+        default: ""
     secrets:
       gh-token:
         description: "GITHUB_TOKEN override for steps that need authenticated git/gh (engine secret-scan changed-file diff). Falls back to github.token."
@@ -187,12 +202,36 @@ permissions:
   contents: read
 
 jobs:
+  # Change-gate: decide whether the PR/push touched CODE (per code-change-filter)
+  # so the pytest shard fan-out can be skipped on a docs/config-only change. With
+  # an EMPTY filter (the default) this outputs `code-changed=true` with no git work,
+  # so every downstream `if:` reduces to its pre-change form — byte-identical for
+  # consumers that set no filter. Fails OPEN (true) on any indeterminate diff, so a
+  # detection glitch costs a redundant run, never a skipped test.
+  detect-changes:
+    name: Detect code changes (change-gate)
+    runs-on: ubuntu-latest
+    outputs:
+      code-changed: ${{ steps.detect.outputs.code-changed }}
+    steps:
+      - name: Decide code-changed
+        id: detect
+        # repin to an immutable SHA at release (SGO-280); branch ref bootstraps a
+        # new internal action so the self-test resolves it on the branch.
+        uses: three-cubes/tc-pipelines/actions/detect-code-changes@dan/sgo-280-reusable-ci-standard
+        with:
+          code-change-filter: ${{ inputs.code-change-filter }}
+          fetch-depth: ${{ inputs.fetch-depth }}
+
   # Default (pytest-shards == 1): ONE byte-identical job. The name is preserved so
   # existing consumers' required-status-check context is unchanged; the sharded
-  # jobs below are skipped and never required.
+  # jobs below are skipped and never required. Also the FALLBACK lane when sharding
+  # is on but the change-gate found a docs/config-only change (code-changed=false):
+  # one catalogue lane runs so the fan-in `gate` still has a passing quality lane.
   quality:
     name: Python quality gate
-    if: ${{ inputs.pytest-shards <= 1 }}
+    needs: [detect-changes]
+    if: ${{ inputs.pytest-shards <= 1 || needs.detect-changes.outputs.code-changed != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Run the gate (unsharded)
@@ -223,10 +262,14 @@ jobs:
           shard-index:
           shard-total:
 
-  # ── Sharded path (pytest-shards > 1) ────────────────────────────────────────
-  # Build the [1..N] matrix (no range function in Actions expressions).
+  # ── Sharded path (pytest-shards > 1 AND code changed) ───────────────────────
+  # Build the [1..N] matrix (no range function in Actions expressions). Gated on
+  # the change-gate: a docs/config-only change (code-changed=false) skips the whole
+  # shard fan-out — the `quality` fallback lane above carries the gate instead. An
+  # empty code-change-filter makes code-changed always true, so this is unchanged.
   shards:
-    if: ${{ inputs.pytest-shards > 1 }}
+    needs: [detect-changes]
+    if: ${{ inputs.pytest-shards > 1 && needs.detect-changes.outputs.code-changed == 'true' }}
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
@@ -244,8 +287,8 @@ jobs:
   # declaring `shard_args` split (pytest), so the non-pytest legs re-run per shard
   # (cheap relative to the pytest win) while pytest wall-clock drops ~1/N.
   quality-shard:
-    needs: shards
-    if: ${{ inputs.pytest-shards > 1 }}
+    needs: [shards, detect-changes]
+    if: ${{ inputs.pytest-shards > 1 && needs.detect-changes.outputs.code-changed == 'true' }}
     name: Python quality gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
     runs-on: ubuntu-latest
     strategy:
@@ -285,8 +328,8 @@ jobs:
   # handoff consumes. always() so a shard FAIL that still produced partial
   # coverage does not strand the report.
   coverage-combine:
-    needs: quality-shard
-    if: ${{ always() && inputs.pytest-shards > 1 && inputs.upload-coverage-artifact }}
+    needs: [quality-shard, detect-changes]
+    if: ${{ always() && inputs.pytest-shards > 1 && inputs.upload-coverage-artifact && needs.detect-changes.outputs.code-changed == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
