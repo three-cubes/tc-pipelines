@@ -1,0 +1,59 @@
+name: example — fitness-engine-canary (reusable self-check)
+
+# Static call-graph self-check for the `fitness-engine-canary.yml` reusable. Each
+# job here `uses:` it via its LOCAL path with a real consumer's input shape, so
+# actionlint + GitHub's reusable-workflow resolver validate input names,
+# required-input presence, types, and secret shapes against the reusable's
+# `workflow_call:` contract at parse time — a mismatch fails HERE, in
+# tc-pipelines' own CI, not later in the engine-release pipeline.
+#
+# De-serialised layout (parallel-dev friction fix): each reusable owns its OWN
+# `example-<reusable>.yml`; `example-callers.yml` is a thin dispatcher that fans
+# out to every file here — see its header for the "add your file" convention.
+#
+# NEVER runs the underlying work by default: `workflow_call` only and every job is
+# gated on `run-for-real` (default false); the call graph is validated statically
+# regardless of the gate, the bodies never execute under the default dispatch.
+# Flipping it true would repin + run a real consumer's whole gate against a
+# candidate engine ref — that belongs in the engine-release pipeline, not here.
+
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: >-
+          Leave false (default) for the static call-graph self-check — every job
+          stays gated off and only the input/secret SHAPES are validated. The
+          dispatcher (example-callers.yml) passes this through; flipping it true
+          would attempt a real canary run (a real consumer checkout + a candidate
+          engine ref + its full gate) and is not the point of this self-check.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  canary-kairix:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/fitness-engine-canary.yml
+    with:
+      # kairix-shaped: single-package consumer, default sync-inclusive gate.
+      candidate-ref: dan/sgo-275-fix-empty-roots
+      consumer-repo: three-cubes/kairix
+      consumer-ref: main
+    secrets:
+      gh-token: dummy-token-shape-check-only
+
+  canary-taz:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/fitness-engine-canary.yml
+    with:
+      # taz-shaped: a workspace consumer, so the gate-command syncs the workspace
+      # lock; exercises the gate-command + driver-ref input shapes statically.
+      candidate-ref: 1a2b3c4d5e6f7081920a1b2c3d4e5f6071829304
+      consumer-repo: three-cubes/tc-agent-zone
+      consumer-ref: main
+      gate-command: "uv lock --upgrade-package three-cubes-fitness && uv sync --locked --all-packages && uv run tc-fitness run"
+      driver-ref: v1
+      python-version: "3.12"

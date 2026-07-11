@@ -1,0 +1,122 @@
+name: fitness-engine-canary
+
+# Reusable (workflow_call) pre-release consumer canary for the fitness engine.
+#
+# Runs a REAL consumer's fitness gate against a CANDIDATE engine ref (the fix
+# branch/SHA, never a tag) and BLOCKS the release if that gate reds — the step
+# that was missing when the v0.13.0 empty-roots regression escaped: nothing ran
+# a consumer's gate against the candidate before the tag + fleet repin.
+#
+# Wiring: check out the consumer repo, check out this repo (tc-pipelines) at
+# `driver-ref` for the canary driver, then invoke
+# `governance/scripts/fitness-engine-canary.sh`. The script repins the
+# consumer's three-cubes-fitness pin to `candidate-ref` and runs `gate-command`
+# in the consumer dir, EXITING WITH THE GATE'S EXIT CODE — so this job is red iff
+# the consumer gate is red against the candidate. Pin this in the engine-release
+# workflow as a REQUIRED step between "engine PR merged" and "tag + repin".
+#
+# All caller-supplied inputs are env-bound before reaching a shell body (never
+# interpolated into a `run:` string) so a value can't break out of its string
+# context — injection-safe per the org workflow standard.
+
+on:
+  workflow_call:
+    inputs:
+      candidate-ref:
+        description: >-
+          git ref of the fitness-engine FIX (branch or SHA, NOT a tag) the
+          consumer's three-cubes-fitness pin is rewritten to before the gate
+          runs. The whole point is to prove the fix on a real consumer BEFORE
+          the tag exists.
+        type: string
+        required: true
+      consumer-repo:
+        description: "The real consumer repo whose gate stands in for the fleet (three-cubes/<name>)."
+        type: string
+        required: true
+      consumer-ref:
+        description: >-
+          Ref of the consumer to check out (its release/main). Empty (default)
+          checks out the consumer's default branch.
+        type: string
+        default: ""
+      gate-command:
+        description: >-
+          The consumer gate command run in the consumer dir AFTER the repin. The
+          default relocks + syncs so the repinned CANDIDATE engine is actually
+          installed, then runs the gate. Override for a workspace consumer (e.g.
+          `uv lock --upgrade-package three-cubes-fitness && uv sync --locked --all-packages && uv run tc-fitness run`).
+        type: string
+        default: "uv lock --upgrade-package three-cubes-fitness && uv sync --all-extras --all-groups && uv run tc-fitness run"
+      driver-ref:
+        description: >-
+          tc-pipelines ref the canary driver (governance/scripts/fitness-engine-canary.sh)
+          is checked out from. Pin to the SAME ref you pin this workflow at (e.g.
+          v1) so the driver version matches the workflow version.
+        type: string
+        default: "v1"
+      python-version:
+        description: "Python version uv resolves the candidate engine + gate against."
+        type: string
+        default: "3.12"
+      uv-version:
+        description: "Pinned uv version (org standard)."
+        type: string
+        default: "0.11.16"
+    secrets:
+      gh-token:
+        description: >-
+          Optional GITHUB_TOKEN override for a consumer gate that needs
+          authenticated git/gh (e.g. a new-code diff). Falls back to github.token.
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: Fitness engine canary
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # The real consumer whose gate stands in for the fleet.
+      - name: Checkout consumer repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ inputs.consumer-repo }}
+          ref: ${{ inputs.consumer-ref }}
+          path: consumer
+          persist-credentials: false
+
+      # The canary driver, from tc-pipelines at the pinned ref, into a
+      # dot-prefixed helper dir so it never collides with the consumer tree.
+      - name: Checkout canary driver
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: three-cubes/tc-pipelines
+          ref: ${{ inputs.driver-ref }}
+          path: .tc-pipelines
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: ${{ inputs.uv-version }}
+          python-version: ${{ inputs.python-version }}
+
+      - name: Canary the candidate engine against the consumer gate
+        shell: bash
+        # Inputs are env-bound, never interpolated into the body — a value can't
+        # break out of its string context (injection-safe per the org standard).
+        env:
+          CANDIDATE_REF: ${{ inputs.candidate-ref }}
+          CONSUMER_DIR: ${{ github.workspace }}/consumer
+          GATE_COMMAND: ${{ inputs.gate-command }}
+          GH_TOKEN: ${{ secrets.gh-token || github.token }}
+        run: |
+          set -euo pipefail
+          bash .tc-pipelines/governance/scripts/fitness-engine-canary.sh \
+            --candidate-ref "$CANDIDATE_REF" \
+            --consumer-dir "$CONSUMER_DIR" \
+            --gate-cmd "$GATE_COMMAND"

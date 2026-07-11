@@ -37,6 +37,7 @@ name: example-callers (reusable self-check dispatcher)
 # ── Per-reusable example files ───────────────────────────────────────────────
 #   docker-build-publish → example-docker-build-publish.yml  (HITL — gated off)
 #   event-dispatch       → example-event-dispatch.yml
+#   fitness-engine-canary → example-fitness-engine-canary.yml
 #   fresh-install-smoke  → example-fresh-install-smoke.yml
 #   mutation-gate        → example-mutation-gate.yml
 #   publish-pypi         → example-publish-pypi.yml           (HITL — gated off)
@@ -86,6 +87,11 @@ jobs:
 
   event-dispatch:
     uses: ./.github/workflows/example-event-dispatch.yml
+    with:
+      run-for-real: ${{ inputs.run-for-real }}
+
+  fitness-engine-canary:
+    uses: ./.github/workflows/example-fitness-engine-canary.yml
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
