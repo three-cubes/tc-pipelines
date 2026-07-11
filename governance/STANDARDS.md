@@ -110,6 +110,7 @@ level — see §3–§4 — and are not duplicated below.)
 | SDLC & workflow | [`sdlc-release-workflow.md`](standards/sdlc-release-workflow.md) | Trunk-based release: tag from `main`, CHANGELOG-driven notes. |
 | SDLC & workflow | [`contract-test-patterns.md`](standards/contract-test-patterns.md) | Copy-paste contract-test skeletons (TS + Python) + baseline-shrink. |
 | SDLC & workflow | [`process-shared-repo-pr-review-and-merge.md`](standards/process-shared-repo-pr-review-and-merge.md) | Review + merge process for shared repos the author can't self-approve. |
+| SDLC & workflow | [`agent-process-controls.md`](standards/agent-process-controls.md) | The control hierarchy for agent-behaviour risks — push high-value risks from guidance up to structural gates. |
 | Quality & fitness | [`quality-ratchet.md`](standards/quality-ratchet.md) | Touched-file coverage ratchet — lift without papering. |
 | Quality & fitness | [`mutation-testing-survival-ratchet.md`](standards/mutation-testing-survival-ratchet.md) | Diff-scoped mutation + survivors ratchet. |
 | Quality & fitness | [`agent-actionable-feedback.md`](standards/agent-actionable-feedback.md) | Every error carries `fix:`/`next:`/`run:`. |
