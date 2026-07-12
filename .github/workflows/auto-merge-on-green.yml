@@ -38,11 +38,16 @@ on:
         type: boolean
         default: false
       pr-number:
-        description: "PR number to act on. Empty -> the pull_request event's number."
+        description: >-
+          PR number to act on. Empty -> resolved from head-sha via
+          commits/{sha}/pulls (workflow_run callers), else the pull_request
+          event's number.
         type: string
         default: ""
       head-sha:
-        description: "HEAD SHA whose check-runs are read. Empty -> the pull_request head sha."
+        description: >-
+          HEAD SHA whose check-runs are read AND from which the PR is resolved
+          when pr-number is empty. Empty -> the pull_request head sha.
         type: string
         default: ""
       azure-client-id:
@@ -87,6 +92,17 @@ jobs:
           SHA: ${{ inputs.head-sha || github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+
+          # Resolve the PR from the HEAD sha when the caller passed none. A
+          # workflow_run caller has no github.event.pull_request, so it supplies
+          # only head-sha; the App token (minted above) carries pull-requests
+          # access, so this lookup succeeds where a caller's default GITHUB_TOKEN
+          # (contents:read) would 403. The `|| PR=''` guard keeps `set -e` from
+          # aborting on an absent PR — the empty-context check below handles it.
+          if [ -z "$PR" ] && [ -n "$SHA" ]; then
+            PR="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/pulls" \
+              -H 'Accept: application/vnd.github+json' --jq '.[0].number // empty')" || PR=''
+          fi
 
           if [ -z "$PR" ] || [ -z "$SHA" ]; then
             echo "auto-merge-on-green: no PR / HEAD sha in context — nothing to do."
