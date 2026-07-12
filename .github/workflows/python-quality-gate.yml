@@ -24,9 +24,10 @@ name: python-quality-gate
 # pyproject). Optional inputs need a minimum engine; the composite fails with an
 # actionable message if the pin is too old, so mismatches never surface as cryptic
 # argparse errors. Minimums:
-#   reusable >= v1.11.0  →  engine any        (base gate)
-#   pytest-shards > 1    →  engine >= v0.9.0  (--shard)
-#   tier set             →  engine >= v0.10.0 (--tier + stage/depends_on parallelism)
+#   reusable >= v1.11.0        →  engine any        (base gate)
+#   pytest-shards > 1          →  engine >= v0.9.0  (--shard)
+#   tier set                   →  engine >= v0.10.0 (--tier + stage/depends_on parallelism)
+#   enforce-new-code-coverage  →  engine >= v0.8.0  (new_code_coverage core check)
 # The default (no shards, no tier) works on any engine >= v0.8.x.
 #
 # Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
@@ -190,6 +191,29 @@ on:
           pytest-shards > 1.
         type: string
         default: ""
+      # ── New-code coverage floor (org-wide CI backstop) ──────────────────
+      enforce-new-code-coverage:
+        description: >-
+          Enforce the changed-line coverage floor in CI — the org backstop for
+          SonarCloud's "Coverage on New Code >= 80%". The engine's
+          `new_code_coverage` core check soft-skips inside `tc-fitness run` (it
+          precedes pytest, so no coverage XML exists yet), so this reusable
+          re-runs it in a dedicated job AFTER the coverage XML is produced and
+          uploaded. Config — floor_pct, roots, base_ref, coverage_report — is the
+          consuming repo's `[tool.tc_fitness.core_checks.new_code_coverage]`
+          block. Needs three-cubes-fitness >= v0.8.0 (the changed-line floor).
+          Default false (backward-compatible); the org-standard caller sets true.
+          Only meaningful with `upload-coverage-artifact: true`.
+        type: boolean
+        default: false
+      new-code-base-ref:
+        description: >-
+          Trunk ref the new-code coverage floor diffs changed lines against. The
+          job fetches this ref so `git merge-base <ref> HEAD` resolves in CI —
+          without it the engine check soft-passes (no protection). Must match the
+          repo's `[tool.tc_fitness.core_checks.new_code_coverage].base_ref`.
+        type: string
+        default: "origin/main"
     secrets:
       gh-token:
         description: "GITHUB_TOKEN override for steps that need authenticated git/gh (engine secret-scan changed-file diff). Falls back to github.token."
@@ -400,6 +424,71 @@ jobs:
           path: ${{ inputs.coverage-xml-path }}
           if-no-files-found: ignore
 
+  # ── New-code coverage floor (org-wide CI backstop) ──────────────────────────
+  # Re-run the engine's new_code_coverage core check AFTER the coverage XML is
+  # produced. Inside `tc-fitness run` the check soft-skips (it is ordered before
+  # pytest, so no report exists yet) and the sharded path only ever has partial
+  # per-shard coverage — so the changed-line floor was, until now, enforced only
+  # in the local make check / pre-push loop. This job downloads the SAME combined
+  # coverage artifact the Sonar handoff uses, restores the trunk ref so the diff
+  # resolves (the check soft-PASSES if `git merge-base <base> HEAD` fails — i.e.
+  # no protection — so the fetch is load-bearing), and runs the HARD floor. Opt-in
+  # via enforce-new-code-coverage; the org-standard caller sets it true.
+  new-code-coverage:
+    name: New-code coverage floor
+    needs: [quality, quality-shard, coverage-combine, detect-changes]
+    if: >-
+      ${{ always() && inputs.enforce-new-code-coverage && inputs.upload-coverage-artifact
+          && needs.detect-changes.outputs.code-changed == 'true'
+          && (needs.quality.result == 'success' || needs.quality-shard.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for the changed-line diff)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Restore the trunk ref (else the floor soft-passes)
+        shell: bash
+        env:
+          BASE_REF: ${{ inputs.new-code-base-ref }}
+        run: |
+          set -euo pipefail
+          # Fetch the base branch as origin/<branch> so the engine's
+          # `git merge-base <base_ref> HEAD` resolves. Without it the check
+          # returns an empty changed-line set and soft-PASSES — silently
+          # providing no protection. Strip a leading `origin/` for the fetch
+          # refspec; ignore a fetch failure so a detached/renamed trunk does not
+          # hard-error (the check then soft-passes, matching pre-change behaviour).
+          base="${BASE_REF#origin/}"
+          git fetch --no-tags origin "+refs/heads/${base}:refs/remotes/origin/${base}" || \
+            echo "::warning::could not fetch ${BASE_REF}; the new-code floor may soft-pass."
+      - name: Locked uv install
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@v1
+        with:
+          uv-version: ${{ inputs.uv-version }}
+          python-version: ${{ inputs.python-version }}
+          sync-args: ${{ inputs.sync-args }}
+          ci-requirements: ${{ inputs.ci-requirements-path }}
+      - name: Download the combined coverage XML
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ inputs.coverage-artifact-name }}
+      - name: Enforce the new-code coverage floor
+        shell: bash
+        env:
+          COVERAGE_XML: ${{ inputs.coverage-xml-path }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f "$COVERAGE_XML" ]]; then
+            echo "::error::new-code coverage floor cannot run — no coverage XML ($COVERAGE_XML) was produced/uploaded; check upload-coverage-artifact + the gate's pytest --cov config."
+            exit 1
+          fi
+          # Reads [tool.tc_fitness.core_checks.new_code_coverage] from the repo:
+          # floor_pct / roots / base_ref / coverage_report. Exit 1 on a below-floor
+          # changed file (hard, non-grandfatherable), 0 when the changed lines clear
+          # the floor or there is no measurable new code.
+          uv run python -m tc_fitness.core_checks.new_code_coverage
+
   # ── The single required-status context (shard-count-independent) ────────────
   # The `quality` job runs only unsharded and `quality-shard` only sharded, so
   # neither name is stable to pin in branch protection: pinning `quality` lets a
@@ -410,7 +499,7 @@ jobs:
   # pins regardless of pytest-shards. Its name never changes with the shard count.
   gate:
     name: Python quality gate result
-    needs: [quality, quality-shard, coverage-combine]
+    needs: [quality, quality-shard, coverage-combine, new-code-coverage]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -419,10 +508,11 @@ jobs:
           R_QUALITY: ${{ needs.quality.result }}
           R_SHARD: ${{ needs.quality-shard.result }}
           R_COMBINE: ${{ needs.coverage-combine.result }}
+          R_NEWCOV: ${{ needs.new-code-coverage.result }}
         run: |
           set -euo pipefail
-          echo "quality=$R_QUALITY quality-shard=$R_SHARD coverage-combine=$R_COMBINE"
-          for r in "$R_QUALITY" "$R_SHARD" "$R_COMBINE"; do
+          echo "quality=$R_QUALITY quality-shard=$R_SHARD coverage-combine=$R_COMBINE new-code-coverage=$R_NEWCOV"
+          for r in "$R_QUALITY" "$R_SHARD" "$R_COMBINE" "$R_NEWCOV"; do
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
               echo "::error::Python quality gate FAILED — a quality lane did not pass ($r)."
               exit 1
