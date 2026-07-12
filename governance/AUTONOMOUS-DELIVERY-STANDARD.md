@@ -22,11 +22,13 @@ Two hard-won lessons shape everything below:
   All agent commits author as the canonical `three-cubes-agent` GitHub App (see `STANDARDS.md` STD-IDENTITY).
 - **D2 — guard forward only.** No git history rewrite; identity remapped via `.mailmap`.
 - **D3 — safe lights-out merge.** 0-review auto-merge on **product** repos *via a merge queue* gated on
-  mutation + independent-verifier + honest coverage; **n+1 human approval on the two CORE repos**
-  (tc-pipelines, tc-fitness); progressive-delivery auto-revert on deploy. (See `STANDARDS.md` STD-MERGE,
-  `gate-hardening.md`, `rulesets/main.json`, `CODEOWNERS`.)
+  the required checks (**`Quality gate`** + **`no-attribution`**) + honest coverage; **n+1 human approval
+  on the two CORE repos** (tc-pipelines, tc-fitness); progressive-delivery auto-revert on deploy. Mutation
+  + independent-verifier are deferred (not yet required). (See `STANDARDS.md` STD-MERGE, `gate-hardening.md`,
+  the org rulesets `rulesets/main-product.json` / `rulesets/main-core.json`, `CODEOWNERS`.)
 - **D4 — Linear is the single control surface.** assignee = human (accountable), delegate = agent; no work
-  without a work item.
+  without a work item — traceability is enforced natively by the `org-branch-naming` ruleset (the branch
+  embeds the Linear id), not a required status check.
 - **Defaults:** loop in committed GitHub-Actions event-dispatch + Stop-hooks (D5); free-first SAST —
   Semgrep OSS + gitleaks, revive CodeQL on public repos (D6); Sigstore/gitsign signing P2 (D7);
   engineering-hub extract-then-remove — its repo is already deleted (D8).
@@ -40,12 +42,14 @@ Two hard-won lessons shape everything below:
   onboards any repo. **Principle: promote prior-work up into CORE, never fork-and-inline.**
 
 ## The gate — "green means correct" (blocking on the merge path)
-lint/format · strict-typing-on-changed · honest coverage (widened scope + carve-outs + monotonic ratchet) ·
-**mutation blocking-on-diff** · architectural fitness that bites (import-linter: layering / banned-import /
-public-API / no-orphan) · secret scan (detect-secrets + gitleaks) · SAST (Semgrep OSS + CodeQL) ·
-determinism (pinned seeds, no network, **no `--reruns`**) · **identity/attribution gate**
-(`no_llm_attribution` + `canonical_commit_identity`) · **independent verifier** (a second fresh-context
-agent checks the diff against the work-item's acceptance criteria).
+Two required contexts — **`Quality gate`** + **`no-attribution`** — cover: lint/format ·
+strict-typing-on-changed · honest coverage (widened scope + carve-outs + monotonic ratchet) ·
+architectural fitness that bites (import-linter: layering / banned-import / public-API / no-orphan) ·
+secret scan (detect-secrets + gitleaks) · SAST (Semgrep OSS + CodeQL) · determinism (pinned seeds, no
+network, **no `--reruns`**) · **identity/attribution gate** (`no_llm_attribution` +
+`canonical_commit_identity`). **Mutation blocking-on-diff** and the **independent verifier** (a second
+fresh-context agent checks the diff against the work-item's acceptance criteria) are **deferred** — not
+required until tc-fitness wires those workflows.
 
 ## The eight pillars → the Linear roadmap
 autonomy topology · green-means-correct · safe lights-out merge · failure-driven next-action ·

@@ -64,7 +64,7 @@ tc-pipelines checkout it sources [`../skeletons/`](../skeletons/) locally.
 | `--kv-name <name>` | `kv-tc-agents` | Azure Key Vault the standard secrets are read from. |
 | `--fitness-tag vX.Y.Z` | the pinned tc-fitness engine tag baked into the script | The immutable tc-fitness tag the rendered `pyproject` pins and the CI no-attribution leg uses. |
 | `--pipelines-tag vN` | the pinned tc-pipelines reusables tag | The tc-pipelines reusable-workflow ref the rendered `ci.yml` / `auto-merge.yml` / `release.yml` call. |
-| `--sonar` / `--no-sonar` | `--sonar` | Emit the SonarCloud jobs and require the two Sonar contexts, or trim both from `ci.yml` and the ruleset. |
+| `--sonar` / `--no-sonar` | `--sonar` | Emit the SonarCloud jobs, or trim them from `ci.yml`. |
 | `--with-release` | off | Also render a `release.yml` caller. |
 | `--sonar-project-key <key>` | `three-cubes_<slug>` | The SonarCloud `projectKey` rendered into `sonar-project.properties`. |
 | `--out-dir <dir>` | a reported temp dir | Where the wiring + affordance payload renders. |
@@ -92,15 +92,16 @@ complete drop-in:
   engine-floor, harness-canon, ci-consumes-shared-gate), dispatched in-process as
   one gate step so the single `uv run tc-fitness run` contract holds.
 - **`.github/workflows/ci.yml`** — the `python-quality-gate.yml` reusable caller
-  plus the aggregator jobs (`Quality gate`, `no-attribution`, and under `--sonar`
-  `SonarCloud scan`) that carry the *bare* required-status-check context names —
-  a reusable call surfaces `<caller> / <reusable job>` checks, never a bare name,
-  so these thin aggregators are what the ruleset resolves against.
+  plus the aggregator jobs (`Quality gate`, `no-attribution`) that carry the
+  *bare* required-status-check context names — a reusable call surfaces
+  `<caller> / <reusable job>` checks, never a bare name, so these thin aggregators
+  are what the org rulesets resolve against.
 - **`.github/workflows/auto-merge.yml`** — arms `gh pr merge --auto` on the green
   `Quality gate` fan-in check.
-- **`.github/rulesets/main.json`** — the `main` ruleset whose required contexts
-  match the jobs `ci.yml` emits (the SonarCloud contexts are trimmed under
-  `--no-sonar`).
+- **`main` branch protection** — enforced org-wide by the rulesets in
+  tc-pipelines `governance/rulesets/` (`main-product` / `main-core` /
+  `main-baseline`); the bootstrap ensures `ci.yml` emits exactly the contexts
+  they require (`Quality gate`, `no-attribution`).
 - **`Makefile`** — `make check` (`uv run tc-fitness run`, the exact gate CI runs)
   and `make setup` (install the local hooks).
 - **`.secrets.baseline`** — a fresh `detect-secrets scan` when the tool is
@@ -118,10 +119,10 @@ Run `--verify` after the render — or `--verify-only --out-dir <dir>` against a
 already-rendered tree — to assert the rendered tree is internally consistent, so
 a bootstrapped repo is never blocked by a ruleset requiring a check nothing emits:
 
-- **Ruleset contexts are a subset of the emitted jobs.** Every
-  required-status-check context in the applied `main` ruleset is a job name
-  `ci.yml` emits, or a known external app check (`SonarCloud Code Analysis`). This
-  catches a `Quality gate`-vs-`CI gate` name drift before it reaches `main`.
+- **Emitted jobs cover the org-required contexts.** Every required-status-check
+  context the org `main` rulesets enforce (`Quality gate`, `no-attribution`) is a
+  job name `ci.yml` emits. This catches a `Quality gate`-vs-`CI gate` name drift
+  before it reaches `main`.
 - **Secrets baseline present.** `.secrets.baseline` exists — the pre-commit hook
   and the gate's secret-scan step both need it.
 - **Pyproject pinned + bound.** The `pyproject` fragment carries the
@@ -136,12 +137,13 @@ exercises the flags, the render, and this self-check end-to-end.
 
 ## Branch strategy
 
-Trunk-based on `main`. The ruleset the bootstrap applies requires the fitness
-contexts — `Quality gate`, `no-attribution`, `SonarCloud scan`, and
-`SonarCloud Code Analysis` (the Sonar pair dropped under `--no-sonar`) — plus a
-code-owner review, and blocks deletion + non-fast-forward. Ship one feature = one
-branch = one PR authored by the three-cubes-agent App; `auto-merge.yml` merges on
-green. See [development-workflow](development-workflow.md).
+Trunk-based on `main`. Branch protection is enforced org-wide by the `main`
+rulesets in tc-pipelines `governance/rulesets/` (`main-product` / `main-core` /
+`main-baseline`), which require the fitness contexts — `Quality gate` and
+`no-attribution` — plus a code-owner review, and block deletion +
+non-fast-forward. Ship one feature = one branch = one PR authored by the
+three-cubes-agent App; `auto-merge.yml` merges on green. See
+[development-workflow](development-workflow.md).
 
 Cut releases the canonical way via [sdlc-release-workflow](sdlc-release-workflow.md);
 render the `release.yml` caller with `--with-release`.

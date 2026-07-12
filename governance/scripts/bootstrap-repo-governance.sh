@@ -5,8 +5,8 @@
 # Given a repo, this sets the standard repo variables, wires the standard
 # secrets from Azure Key Vault, applies the canonical branch ruleset (the
 # contract: the fitness catalogue's required checks — Quality gate + no-attribution
-# + SonarCloud scan + SonarCloud Code Analysis — plus code-owner review + thread
-# resolution), installs the pre-commit hook config + CODEOWNERS + dependabot.yml +
+# — plus code-owner review + thread resolution), installs the pre-commit hook
+# config + CODEOWNERS + dependabot.yml +
 # .gitignore from the template repo, distributes the agent-affordance + harness
 # payload (rendered skeletons + sonar-sqaa hook + safe-commit/preflight), RENDERS
 # the quality-gate wiring (pyproject [tool.tc_fitness] + ci.yml + auto-merge.yml +
@@ -210,7 +210,7 @@ render_ruleset() {
 VERIFY_EXTERNAL_CONTEXTS=("SonarCloud Code Analysis")
 
 run_verify() {
-  local ruleset="${OUT_DIR}/.github/rulesets/main.json"
+  local ruleset="${OUT_DIR}/.github/rulesets/main-product.json"
   local ci="${OUT_DIR}/.github/workflows/ci.yml"
   local pyproject="${OUT_DIR}/pyproject.tc_fitness.toml"
   local baseline="${OUT_DIR}/.secrets.baseline"
@@ -328,19 +328,24 @@ fi
 # ── 3. canonical branch ruleset ─────────────────────────────────────────────
 if [[ "$DO_RULESET" == "1" ]]; then
   echo "-- ruleset (main) --"
+  # Branch protection is enforced org-level by the four rulesets committed in
+  # tc-pipelines governance/rulesets/ (org-main-product / -core / -baseline +
+  # org-branch-naming) — those are the primary enforcement. This per-repo apply
+  # is a compatibility fallback that mirrors the product profile
+  # (main-product.json) onto a repo the org rulesets do not yet cover.
   ruleset_json=""
   cleanup_ruleset=""
-  if [[ -n "$TEMPLATE_DIR" && -f "${TEMPLATE_DIR}/governance/rulesets/main.json" ]]; then
-    ruleset_json="${TEMPLATE_DIR}/governance/rulesets/main.json"
-  elif [[ -f ".github/rulesets/main.json" ]]; then
-    ruleset_json=".github/rulesets/main.json"
+  if [[ -n "$TEMPLATE_DIR" && -f "${TEMPLATE_DIR}/governance/rulesets/main-product.json" ]]; then
+    ruleset_json="${TEMPLATE_DIR}/governance/rulesets/main-product.json"
+  elif [[ -f ".github/rulesets/main-product.json" ]]; then
+    ruleset_json=".github/rulesets/main-product.json"
   else
     ruleset_json="$(mktemp)"
     cleanup_ruleset="$ruleset_json"
-    gh api "repos/${TEMPLATE_REPO}/contents/governance/rulesets/main.json" \
+    gh api "repos/${TEMPLATE_REPO}/contents/governance/rulesets/main-product.json" \
       --jq '.content' 2>/dev/null | base64 -d > "$ruleset_json" || true
     if [[ ! -s "$ruleset_json" ]]; then
-      echo "warn: could not fetch governance/rulesets/main.json from ${TEMPLATE_REPO}" >&2
+      echo "warn: could not fetch governance/rulesets/main-product.json from ${TEMPLATE_REPO}" >&2
       echo "      fix: pass --template-dir <tc-pipelines clone>, or --no-ruleset to skip" >&2
       rm -f "$cleanup_ruleset"; ruleset_json=""; cleanup_ruleset=""
     fi
@@ -357,7 +362,7 @@ if [[ "$DO_RULESET" == "1" ]]; then
     fi
     run gh api "repos/${REPO}/rulesets" --method POST --input "$applied_ruleset"
     if [[ "$DO_SONAR" == "1" ]]; then
-      echo "ok: applied main ruleset (required: Quality gate + no-attribution + SonarCloud scan + SonarCloud Code Analysis)"
+      echo "ok: applied main ruleset (required: Quality gate + no-attribution)"
     else
       echo "ok: applied main ruleset, SonarCloud contexts trimmed (required: Quality gate + no-attribution)"
     fi
@@ -476,7 +481,7 @@ if [[ "$DO_WIRING" == "1" ]]; then
     echo "warn: no local governance/skeletons/ — pass --template-dir <tc-pipelines clone> to render the wiring" >&2
   else
     GOV_DIR="$(cd -- "${SKELETON_DIR}/.." && pwd)"
-    RULESET_SRC="${GOV_DIR}/rulesets/main.json"
+    RULESET_SRC="${GOV_DIR}/rulesets/main-product.json"
     mkdir -p "${OUT_DIR}/.github/workflows" "${OUT_DIR}/.github/rulesets" "${OUT_DIR}/scripts/checks" "${OUT_DIR}/scripts/git-hooks"
 
     # tc-fitness gate + CORE catalogue + the loop targets.
@@ -490,7 +495,7 @@ if [[ "$DO_WIRING" == "1" ]]; then
     render_wiring "workflows/auto-merge.yml.tmpl"  "${OUT_DIR}/.github/workflows/auto-merge.yml"
 
     # The ruleset that MATCHES the emitted contexts (sonar-trimmed under --no-sonar).
-    render_ruleset "$RULESET_SRC" "${OUT_DIR}/.github/rulesets/main.json"
+    render_ruleset "$RULESET_SRC" "${OUT_DIR}/.github/rulesets/main-product.json"
 
     # Secret baseline: prefer a fresh scan; fall back to the shipped empty baseline.
     if command -v detect-secrets >/dev/null 2>&1; then
