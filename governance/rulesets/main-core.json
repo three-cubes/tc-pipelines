@@ -1,7 +1,7 @@
 {
-  "_comment": "CANONICAL org ruleset — PAVED-PATH CORE profile. Applies to the framework repos (tc-pipelines, tc-fitness) via an ORGANIZATION ruleset whose conditions.repository_name includes them. These repos define the gate everyone else consumes, so EVERY PR holds for n+1 HUMAN approval (a framework regression is fleet-wide). See governance/CANONICAL-ORG-RULESET.md.",
+  "_comment": "CANONICAL org ruleset \u2014 PAVED-PATH CORE profile. Applies to the framework repos (tc-pipelines, tc-fitness) via an ORGANIZATION ruleset whose conditions.repository_name includes them. These repos define the gate everyone else consumes, so EVERY PR holds for n+1 HUMAN approval (a framework regression is fleet-wide). See governance/CANONICAL-ORG-RULESET.md.",
   "_comment_review": "required_approving_review_count = 1 + require_code_owner_review = true: framework changes are never lights-out; the author cannot self-approve.",
-  "_comment_required_checks": "Steady-state required set (Sonar DROPPED per Dan 2026-07-12): the three org-wide contexts ('Quality gate', 'require-work-item', 'no-attribution') PLUS the two paved-path-only contexts the consumers do not emit — 'Independent verifier' (independent second-opinion on framework changes) and 'Mutation' (mutation-survival on the engine's own tests), RESTORED per the adversarial review because a framework repo must not ship an un-mutation-tested or un-independently-verified change.",
+  "_comment_required_checks": "Steady-state required set (Sonar DROPPED per Dan 2026-07-12): the three org-wide contexts ('Quality gate', 'require-work-item', 'no-attribution') PLUS the two paved-path-only contexts the consumers do not emit \u2014 'Independent verifier' (independent second-opinion on framework changes) and 'Mutation' (mutation-survival on the engine's own tests), RESTORED per the adversarial review because a framework repo must not ship an un-mutation-tested or un-independently-verified change. NOTE 2026-07-12: Independent verifier + Mutation temporarily DROPPED \u2014 tc-fitness does not yet wire mutation-gate/independent-verifier workflows (tc-pipelines does). Wire them in tc-fitness, then re-add to this required set.",
   "_comment_bypass": "bypass_actors EMPTY. enforce_admins:false leaves the owner break-glass only.",
   "name": "org-main-core",
   "target": "branch",
@@ -9,18 +9,27 @@
   "bypass_actors": [],
   "conditions": {
     "ref_name": {
-      "include": ["~DEFAULT_BRANCH"],
+      "include": [
+        "~DEFAULT_BRANCH"
+      ],
       "exclude": []
     },
     "repository_name": {
-      "include": ["tc-pipelines", "tc-fitness"],
+      "include": [
+        "tc-pipelines",
+        "tc-fitness"
+      ],
       "exclude": [],
       "protected": false
     }
   },
   "rules": [
-    { "type": "deletion" },
-    { "type": "non_fast_forward" },
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
     {
       "type": "pull_request",
       "parameters": {
@@ -30,7 +39,9 @@
         "require_last_push_approval": false,
         "required_review_thread_resolution": true,
         "required_reviewers": [],
-        "allowed_merge_methods": ["squash"]
+        "allowed_merge_methods": [
+          "squash"
+        ]
       }
     },
     {
@@ -39,11 +50,15 @@
         "strict_required_status_checks_policy": false,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
-          { "context": "Quality gate" },
-          { "context": "require-work-item" },
-          { "context": "no-attribution" },
-          { "context": "Independent verifier" },
-          { "context": "Mutation" }
+          {
+            "context": "Quality gate"
+          },
+          {
+            "context": "require-work-item"
+          },
+          {
+            "context": "no-attribution"
+          }
         ]
       }
     }

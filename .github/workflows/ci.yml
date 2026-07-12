@@ -33,3 +33,42 @@ jobs:
     steps:
       - name: Assert the meta self-check succeeded
         run: test "${{ needs.meta.result }}" = "success"
+
+  # no-attribution — the dedicated required-status-check context
+  # (governance/rulesets/main.json gates on the BARE name). The `meta`
+  # reusable-call above also runs a no-attribution leg, but a reusable CALL
+  # only surfaces nested `meta / no-attribution` check-runs, never the bare
+  # name a ruleset points at — so this top-level job carries the bare context.
+  # Read-only: `--scan-file` never rewrites history.
+  no-attribution:
+    name: no-attribution
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # pinned (org standard)
+      - name: Reject AI/LLM self-attribution in commits + PR title/body
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          module="tc_fitness.core_checks.no_llm_attribution"
+          from="git+https://github.com/three-cubes/tc-fitness@v0.14.1"
+          workdir="$(mktemp -d)"; trap 'rm -rf "$workdir"' EXIT; rc=0
+          scan() { if ! uvx --from "$from" python -m "$module" --scan-file "$2"; then echo "::error::no-attribution: residue in $1." >&2; rc=1; fi; }
+          scan_advisory() { if ! uvx --from "$from" python -m "$module" --scan-file "$2"; then echo "::warning::no-attribution: possible residue in $1 (advisory)." >&2; fi; }
+          shas="$(git rev-list "${PR_BASE_SHA}..${PR_HEAD_SHA}")"
+          while IFS= read -r sha; do [[ -z "$sha" ]] && continue; git log -1 --format=%B "$sha" > "$workdir/c-$sha.txt"; scan "commit $sha" "$workdir/c-$sha.txt"; done <<< "$shas"
+          printf '%s' "$PR_TITLE" > "$workdir/t.txt"; scan "PR title" "$workdir/t.txt"
+          printf '%s' "$PR_BODY" > "$workdir/b.txt"; scan_advisory "PR body" "$workdir/b.txt"
+          exit "$rc"
