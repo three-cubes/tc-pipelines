@@ -72,5 +72,6 @@ jobs:
       maintainer-associations: "OWNER MEMBER COLLABORATOR"
       no-work-item-label: hotfix-no-work-item
       escape-requires-approval: false
+      bot-actors: "dependabot[bot] renovate[bot]"
     secrets:
       LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
