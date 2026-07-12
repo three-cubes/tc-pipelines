@@ -7,7 +7,8 @@ name: "Quality gate (PR + push)"
 # runs the SAME `uv run tc-fitness run` that `make check` runs locally — local ==
 # CI by construction.
 #
-# Required-status-check contexts (governance/rulesets/main.json gates on these):
+# Required-status-check contexts (the canonical org ruleset gates on these — see
+# governance/CANONICAL-ORG-RULESET.md, the single source of truth):
 #   * `Quality gate`             — the `check` aggregator below (a reusable call
 #                                   surfaces `<caller> / <reusable job>` checks,
 #                                   never a bare name, so THIS job carries it).
@@ -16,8 +17,9 @@ name: "Quality gate (PR + push)"
 #                                   title/body; bare context, own signal).
 #   * `SonarCloud scan`          — the `sonar` aggregator (only when Sonar is wired).
 #   * `SonarCloud Code Analysis` — posted by the SonarCloud GitHub App itself.
-# Renaming a job means updating governance/rulesets/main.json in lockstep — the
-# bootstrap `--verify` step catches a `Quality gate` vs `CI gate` drift.
+# Renaming a job means updating the canonical ruleset (governance/CANONICAL-ORG-RULESET.md
+# + the profile snapshots) in lockstep — the bootstrap `--verify` step catches a
+# `Quality gate` vs `CI gate` drift.
 
 on:
   push:

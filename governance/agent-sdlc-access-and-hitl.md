@@ -71,20 +71,16 @@ Configured per consuming repo from the templates in this `governance/` dir. Thes
 require `Administration: Write` to apply, which agents do not have — so applying
 them is itself a human action.
 
-1. **`main` ruleset** — [`rulesets/main.json`](rulesets/main.json):
-   - **require CODEOWNERS review** (the core HITL gate) — the required-approval
-     count is per-repo posture, not an org-wide constant: **CORE repos**
-     (`tc-pipelines`, `tc-fitness`) keep **n+1 human approval** (D3), **product
-     repos** run **0-approval auto-merge on green** with CODEOWNERS only on the
-     control plane. See [`AUTONOMOUS-DELIVERY-STANDARD.md`](AUTONOMOUS-DELIVERY-STANDARD.md)
-     (STD-MERGE) and [`README.md`](README.md).
-   - Required status checks: `Quality gate`, `SonarCloud scan`,
-     `SonarCloud Code Analysis`. Private Team-plan repos cannot use a GitHub
-     merge queue; where available (public repos) a merge queue re-runs checks on
-     the combined commit, else strict status checks stand in.
-   - No deletion / no force-push.
-   - `bypass_actors`: the human **admin role only** (emergency override). Agent
-     Apps are **not** admins.
+1. **`main` ruleset** — imported from the two profile snapshots
+   [`rulesets/main-product.json`](rulesets/main-product.json) (product repos:
+   `tc-agent-zone`, `kairix`, `kata`) and
+   [`rulesets/main-core.json`](rulesets/main-core.json) (paved-path core:
+   `tc-pipelines`, `tc-fitness`). See
+   [`CANONICAL-ORG-RULESET.md`](CANONICAL-ORG-RULESET.md) for the required checks,
+   approval counts, merge method, and bypass rules (single source of truth), and
+   [`AUTONOMOUS-DELIVERY-STANDARD.md`](AUTONOMOUS-DELIVERY-STANDARD.md) (STD-MERGE)
+   for the merge model. The ruleset stays the human-owned gate: CODEOWNERS review
+   is the core HITL control, and agent Apps are never in `bypass_actors`.
 2. **CODEOWNERS** — [`CODEOWNERS`](CODEOWNERS): routes review to the human owner,
    and pins gate-critical + canon paths (the gate's own definition — CI,
    `[tool.tc_fitness]`, schemas, validators, dep pins, governance) to the human

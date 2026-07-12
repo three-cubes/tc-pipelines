@@ -24,7 +24,8 @@ Two hard-won lessons shape everything below:
 - **D3 — safe lights-out merge.** 0-review auto-merge on **product** repos *via a merge queue* gated on
   mutation + independent-verifier + honest coverage; **n+1 human approval on the two CORE repos**
   (tc-pipelines, tc-fitness); progressive-delivery auto-revert on deploy. (See `STANDARDS.md` STD-MERGE,
-  `gate-hardening.md`, `rulesets/main.json`, `CODEOWNERS`.)
+  `gate-hardening.md`, [`CANONICAL-ORG-RULESET.md`](CANONICAL-ORG-RULESET.md) for the required checks and
+  review rules (single source of truth), `CODEOWNERS`.)
 - **D4 — Linear is the single control surface.** assignee = human (accountable), delegate = agent; no work
   without a work item.
 - **Defaults:** loop in committed GitHub-Actions event-dispatch + Stop-hooks (D5); free-first SAST —

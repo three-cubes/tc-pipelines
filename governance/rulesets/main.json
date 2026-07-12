@@ -1,4 +1,5 @@
 {
+  "_comment": "TRANSITIONAL, NOT the source of truth. The single source of the RULES is governance/CANONICAL-ORG-RULESET.md (+ the org-level snapshots rulesets/main-product.json / rulesets/main-core.json). This file is the repo-level ruleset that bootstrap-repo-governance.sh applies to a NEW repo before the org ruleset covers it. RETIRE it at rollout phase 3 — once org-main-product/org-main-core are imported, the per-repo bootstrap ruleset is redundant, and the bootstrap should derive the repo-level shape from main-product.json (strip conditions.repository_name, name=main). Keep the rules here consistent with the product profile; Sonar is retained only for the bootstrap --sonar mode and is NOT a canonical required context.",
   "name": "main",
   "target": "branch",
   "enforcement": "active",

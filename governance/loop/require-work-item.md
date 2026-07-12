@@ -66,13 +66,12 @@ defeat the invariant, so we fail closed.
 
 The reusable's single job is named **`require-work-item`**, so a **ruleset** can
 gate `main` on the context **`require-work-item`** — the same discipline as the
-`no-attribution` context (`governance/STANDARDS.md` §4). Add it to
-[`governance/rulesets/main.json`](../rulesets/main.json) alongside the existing
-required checks:
-
-```json
-{ "context": "require-work-item" }
-```
+`no-attribution` context (`governance/STANDARDS.md` §4). `require-work-item` is one
+of the canonical required checks on both profiles; see
+[`CANONICAL-ORG-RULESET.md`](../CANONICAL-ORG-RULESET.md) for the required checks and
+review rules (single source of truth), snapshotted as
+[`rulesets/main-product.json`](../rulesets/main-product.json) and
+[`rulesets/main-core.json`](../rulesets/main-core.json).
 
 **Do not rename the job** without updating the ruleset in lockstep — the context
 name is the job name.

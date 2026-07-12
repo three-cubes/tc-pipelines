@@ -2,7 +2,8 @@
 #
 # Model: AUTONOMOUS work, HITL control plane.
 #   - WORK changes (code, data, docs) are AUTONOMOUS. With
-#     required_approving_review_count = 0 in governance/rulesets/main.json, a PR
+#     required_approving_review_count = 0 (product profile — see
+#     governance/CANONICAL-ORG-RULESET.md, the single source of truth), a PR
 #     that touches NO owned path below merges on a GREEN gate with no human. The
 #     gate is the control — so invest in it (coverage + mutation + fitness + Sonar)
 #     and keep it deterministic. "Green" must be trustworthy because nothing else

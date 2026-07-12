@@ -3,7 +3,9 @@
 Bootstrap a new Three Cubes repo — or bring an existing one up to the org
 standard — with the [`bootstrap-repo-governance.sh`](../scripts/bootstrap-repo-governance.sh)
 onboarding script. One command sets the repo's variables + secrets, applies the
-canonical `main` ruleset, installs the governance files, and renders the full
+canonical org ruleset (product profile — see
+[`CANONICAL-ORG-RULESET.md`](../CANONICAL-ORG-RULESET.md)), installs the governance
+files, and renders the full
 quality-gate baseline (the tc-fitness engine pin + `[tool.tc_fitness]` gate, the
 CORE-check catalogue, the reusable CI + auto-merge callers, the Makefile, and the
 secrets baseline) — so a bootstrapped repo's `main` ruleset only ever requires
@@ -31,9 +33,10 @@ It runs seven sections in order, each independently toggleable via a flag:
 2. **Secrets from Key Vault** — wire `SONAR_TOKEN` + `CODECOV_TOKEN` from
    `kv-tc-agents`, org-inheritance-aware (skips a repo override where the org
    secret already resolves).
-3. **Branch ruleset (`main`)** — apply the canonical ruleset: the required
-   fitness contexts + code-owner review + thread resolution, and block deletion +
-   non-fast-forward.
+3. **Branch ruleset (`main`)** — apply the canonical org ruleset (product
+   profile); see [`CANONICAL-ORG-RULESET.md`](../CANONICAL-ORG-RULESET.md) for the
+   required checks and review rules (single source of truth). Also blocks deletion
+   + non-fast-forward.
 4. **Governance files** — print the fetch+commit sequence for `CODEOWNERS`,
    `dependabot.yml`, the pre-commit config, `.gitignore`, and the repo-local
    `scripts/git-hooks/` (`commit-msg` + `pre-push`).
@@ -98,9 +101,10 @@ complete drop-in:
   so these thin aggregators are what the ruleset resolves against.
 - **`.github/workflows/auto-merge.yml`** — arms `gh pr merge --auto` on the green
   `Quality gate` fan-in check.
-- **`.github/rulesets/main.json`** — the `main` ruleset whose required contexts
-  match the jobs `ci.yml` emits (the SonarCloud contexts are trimmed under
-  `--no-sonar`).
+- **`.github/rulesets/main-product.json`** — the canonical org ruleset's
+  **product** profile (new repos default to product); see
+  [`CANONICAL-ORG-RULESET.md`](../CANONICAL-ORG-RULESET.md) for the required checks
+  and review rules (single source of truth).
 - **`Makefile`** — `make check` (`uv run tc-fitness run`, the exact gate CI runs)
   and `make setup` (install the local hooks).
 - **`.secrets.baseline`** — a fresh `detect-secrets scan` when the tool is
@@ -136,10 +140,9 @@ exercises the flags, the render, and this self-check end-to-end.
 
 ## Branch strategy
 
-Trunk-based on `main`. The ruleset the bootstrap applies requires the fitness
-contexts — `Quality gate`, `no-attribution`, `SonarCloud scan`, and
-`SonarCloud Code Analysis` (the Sonar pair dropped under `--no-sonar`) — plus a
-code-owner review, and blocks deletion + non-fast-forward. Ship one feature = one
+Trunk-based on `main`. The bootstrap applies the canonical org ruleset (product
+profile); see [`CANONICAL-ORG-RULESET.md`](../CANONICAL-ORG-RULESET.md) for the
+required checks and review rules (single source of truth). Ship one feature = one
 branch = one PR authored by the three-cubes-agent App; `auto-merge.yml` merges on
 green. See [development-workflow](development-workflow.md).
 

@@ -1,6 +1,7 @@
 # Gate-Hardening Standard — making "green" trustworthy enough for autonomous merge
 
-Under the two-tier model (`rulesets/main.json`: **0 approvals on work**), the gate is the
+Under the two-tier model (product profile: **0 approvals on work** — see
+[`CANONICAL-ORG-RULESET.md`](CANONICAL-ORG-RULESET.md)), the gate is the
 *only* thing standing between an agent's PR and `main`. So "green" must mean **correct,
 well-tested, secure, and deterministic** — not just "the tests that exist passed."
 
@@ -18,13 +19,11 @@ day-one breakage) and only goes up.
 
 ## The required checks (the merge gate)
 
-`rulesets/main.json` requires these contexts; all must be green to merge:
-
-| Check | Produced by | Enforces |
-|---|---|---|
-| **Quality gate** | `python-quality-gate.yml` → `uv run tc-fitness run` | lint + format + types + security + tests + **coverage floor** + fitness functions + zero-tolerance secret-scan — one binary, repo `[tool.tc_fitness]` config |
-| **SonarCloud scan** / **SonarCloud Code Analysis** | `sonar-scan.yml` (artifact handoff, `qualitygate.wait=true`) | the **new-code** quality gate (below) |
-| **Mutation** *(add to required set)* | `mutation-gate.yml` (diff-scoped, ratcheted) | the test suite actually *kills* mutations on changed lines |
+See [`CANONICAL-ORG-RULESET.md`](CANONICAL-ORG-RULESET.md) for the required checks and
+review rules (single source of truth) — required contexts live in
+[`rulesets/main-product.json`](rulesets/main-product.json) (consumer repos) and
+[`rulesets/main-core.json`](rulesets/main-core.json) (paved-path core). This doc sets the
+*bar* those checks must clear; the sections below detail what "green" must mean.
 
 ## `[tool.tc_fitness]` bar — code repos (kairix, tc-agent-zone)
 
@@ -91,6 +90,8 @@ invariant an agent could currently satisfy with an empty/degenerate artifact).
 
 1. Add the missing legs to the repo's `[tool.tc_fitness]` + Sonar new-code conditions;
    set every threshold to **current** (green on day one).
-2. Add **Mutation** to `rulesets/main.json` `required_status_checks`.
+2. Add **Mutation** to the paved-path core required checks — see
+   [`rulesets/main-core.json`](rulesets/main-core.json) (governed by
+   [`CANONICAL-ORG-RULESET.md`](CANONICAL-ORG-RULESET.md), the single source of truth).
 3. Run the gate; confirm green and **deterministic** (run it ~5× — zero flakes).
 4. Only then apply the 0-review ruleset to that repo. Ratchet thresholds up over time.
