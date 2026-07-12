@@ -40,10 +40,10 @@ Consequences, and the guardrail:
 - For the same reason, the `merge_queue` rule is deliberately **absent** from
   [`governance/rulesets/main-product.json`](../rulesets/main-product.json)
   (which IS API-appliable). Enabling the queue is a separate, manual web-UI step.
-- This mirrors the `_comment` convention already in kairix
-  `.github/rulesets/main.json`, so that **re-applying a JSON snapshot never
-  silently drops the queue** — the operator is reminded the rule lives only in
-  the UI.
+- This mirrors the `_comment` convention carried in the org
+  [`main-product.json`](../rulesets/main-product.json), so that **re-applying a
+  JSON snapshot never silently drops the queue** — the operator is reminded the
+  rule lives only in the UI.
 
 ## `on: merge_group` — the fan-in check must report on queue events
 

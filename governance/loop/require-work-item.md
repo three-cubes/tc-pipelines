@@ -3,6 +3,13 @@
 Reusable workflow: [`.github/workflows/require-work-item.yml`](../../.github/workflows/require-work-item.yml)
 (`on: workflow_call`).
 
+> **Status (2026-07-12): not a required status check.** Work-item traceability is
+> now enforced natively by the org **`org-branch-naming`** ruleset — a branch must
+> embed a Linear id (`<user>/<team>-<number>-<slug>`) or be an operational/bot
+> branch — so a PR is traceable by construction. This reusable and doc are
+> retained as **reference**; the WIF / Key-Vault / Linear require-work-item callers
+> are **not** wired as a required gate.
+
 This is **PLA-313 / SP-C-5** of the
 [Autonomous Delivery Platform](https://linear.app/three-cubes/initiative/autonomous-delivery-platform-dae678e12c5d)
 initiative (Increment-3 "Shape-as-orchestrator + enforcing hooks") — the
@@ -13,8 +20,8 @@ Linear issue id, but a gateway hook **cannot block at the merge boundary** — a
 agent PR can still show up with no traceable work item. This reusable closes that
 gap: a consumer wires it on `pull_request`, and it **FAILS the PR** unless the PR
 is traceable to a **real, open/in-progress** Linear work item. Enforcement is
-**structural** — a required status check a ruleset gates on — **not**
-prompt-convention. So an agent PR with no work item cannot merge.
+**structural** — a status check keyed to the PR, **not** prompt-convention. So an
+agent PR with no work item cannot merge.
 
 It is the merge-side twin of the close-side
 [`verify-and-close`](verify-and-close.md): same Linear GraphQL access, same
@@ -70,18 +77,16 @@ defeat the invariant, so we fail closed.
 
 ## The stable required-status-check context
 
-The reusable's single job is named **`require-work-item`**, so a **ruleset** can
-gate `main` on the context **`require-work-item`** — the same discipline as the
-`no-attribution` context (`governance/STANDARDS.md` §4). Add it to
-[`governance/rulesets/main.json`](../rulesets/main.json) alongside the existing
-required checks:
+The reusable's single job is named **`require-work-item`**, so a **ruleset**
+*could* gate `main` on the context **`require-work-item`** — the same discipline
+as the `no-attribution` context (`governance/STANDARDS.md` §4). It is **not
+currently wired**: the org **`org-branch-naming`** ruleset enforces work-item
+traceability natively (the branch embeds the Linear id, or is an operational/bot
+branch), so `require-work-item` is retained as reference rather than added to the
+org `main` rulesets' required checks.
 
-```json
-{ "context": "require-work-item" }
-```
-
-**Do not rename the job** without updating the ruleset in lockstep — the context
-name is the job name.
+**Do not rename the job** if a repo ever opts to gate on it — the context name is
+the job name.
 
 ## The Linear API key — two paths
 

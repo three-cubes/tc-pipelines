@@ -71,18 +71,19 @@ Configured per consuming repo from the templates in this `governance/` dir. Thes
 require `Administration: Write` to apply, which agents do not have — so applying
 them is itself a human action.
 
-1. **`main` ruleset** — [`rulesets/main.json`](rulesets/main.json):
+1. **`main` rulesets** — the org-level [`main-product.json`](rulesets/main-product.json) / [`main-core.json`](rulesets/main-core.json) rulesets:
    - **require CODEOWNERS review** (the core HITL gate) — the required-approval
      count is per-repo posture, not an org-wide constant: **CORE repos**
      (`tc-pipelines`, `tc-fitness`) keep **n+1 human approval** (D3), **product
      repos** run **0-approval auto-merge on green** with CODEOWNERS only on the
      control plane. See [`AUTONOMOUS-DELIVERY-STANDARD.md`](AUTONOMOUS-DELIVERY-STANDARD.md)
      (STD-MERGE) and [`README.md`](README.md).
-   - Required status checks: `Quality gate`, `SonarCloud scan`,
-     `SonarCloud Code Analysis`. Private Team-plan repos cannot use a GitHub
-     merge queue; where available (public repos) a merge queue re-runs checks on
-     the combined commit, else strict status checks stand in.
-   - No deletion / no force-push.
+   - Required status checks: `Quality gate` and `no-attribution`. Private
+     Team-plan repos cannot use a GitHub merge queue; where available (public
+     repos) a merge queue re-runs checks on the combined commit, else strict
+     status checks stand in.
+   - No deletion / no force-push; **not strict** (no forced rebase) and **no
+     stale-dismiss** (an approval persists through pushes).
    - `bypass_actors`: the human **admin role only** (emergency override). Agent
      Apps are **not** admins.
 2. **CODEOWNERS** — [`CODEOWNERS`](CODEOWNERS): routes review to the human owner,

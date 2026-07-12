@@ -1,0 +1,40 @@
+{
+  "name": "org-branch-naming",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [
+    {
+      "actor_id": 18141275,
+      "actor_type": "Team",
+      "bypass_mode": "always"
+    }
+  ],
+  "conditions": {
+    "ref_name": {
+      "exclude": [
+        "refs/heads/main"
+      ],
+      "include": [
+        "~ALL"
+      ]
+    },
+    "repository_name": {
+      "exclude": [],
+      "include": [
+        "~ALL"
+      ],
+      "protected": false
+    }
+  },
+  "rules": [
+    {
+      "type": "branch_name_pattern",
+      "parameters": {
+        "operator": "regex",
+        "pattern": "^((feat|feature|fix|bugfix|hotfix|release|docs|chore|ci|build|refactor|test|perf|style|revert|experiment|deps|dependabot|renovate)/.+|[a-z][a-z0-9._-]*/[a-z]{2,}-[0-9]+(-.*)?)$",
+        "negate": false,
+        "name": "operational <type>/<slug> (Conventional Branch/Commits: feat|fix|docs|chore|ci|build|refactor|test|perf|style|hotfix|release|revert|experiment|deps) OR work-item <user>/<team>-<number>-<slug> (Linear, e.g. dan/sgo-305-...); dependabot/renovate exempt"
+      }
+    }
+  ]
+}

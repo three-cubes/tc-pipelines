@@ -1,6 +1,6 @@
 # Gate-Hardening Standard — making "green" trustworthy enough for autonomous merge
 
-Under the two-tier model (`rulesets/main.json`: **0 approvals on work**), the gate is the
+Under the two-tier model (`rulesets/main-product.json`: **0 approvals on work**), the gate is the
 *only* thing standing between an agent's PR and `main`. So "green" must mean **correct,
 well-tested, secure, and deterministic** — not just "the tests that exist passed."
 
@@ -18,13 +18,14 @@ day-one breakage) and only goes up.
 
 ## The required checks (the merge gate)
 
-`rulesets/main.json` requires these contexts; all must be green to merge:
+The org rulesets (`rulesets/main-product.json` + `rulesets/main-core.json`) require these contexts; all must be green to merge:
 
 | Check | Produced by | Enforces |
 |---|---|---|
 | **Quality gate** | `python-quality-gate.yml` → `uv run tc-fitness run` | lint + format + types + security + tests + **coverage floor** + fitness functions + zero-tolerance secret-scan — one binary, repo `[tool.tc_fitness]` config |
-| **SonarCloud scan** / **SonarCloud Code Analysis** | `sonar-scan.yml` (artifact handoff, `qualitygate.wait=true`) | the **new-code** quality gate (below) |
-| **Mutation** *(add to required set)* | `mutation-gate.yml` (diff-scoped, ratcheted) | the test suite actually *kills* mutations on changed lines |
+| **no-attribution** | `meta-quality-gate.yml` / `python-quality-gate.yml` (`run-no-attribution`) | zero AI/LLM self-attribution residue in every PR commit message + the PR title/body |
+
+**Mutation** and the **independent verifier** are **deferred** — not required until tc-fitness wires those workflows. SonarCloud is **decommissioned**; a free two-tier gate (deterministic OSS checks + a self-hosted Foundry LLM judge) replaces it and is **not** a required status check.
 
 ## `[tool.tc_fitness]` bar — code repos (kairix, tc-agent-zone)
 
@@ -44,15 +45,6 @@ Each leg is **blocking** (a finding fails the gate), run by the engine in order:
   layering, banned-import rules, public-API/schema conformance, no orphan/unreferenced
   modules. These are the structural guarantees that constrain autonomous work *even where a
   single change's own tests are thin*.
-
-## Sonar new-code quality gate (clean-as-you-code conditions)
-
-On **new code** (the agent's diff), set `sonar.qualitygate.wait=true` and require:
-
-- coverage on new code **≥ 80%**
-- **0** new bugs, **0** new vulnerabilities, **0** unreviewed new security hotspots
-- new-code maintainability rating **A**; **0** new blocker/critical smells
-- duplicated lines on new code **< 3%**
 
 ## Mutation (diff-scoped, ratcheted)
 
@@ -89,8 +81,6 @@ invariant an agent could currently satisfy with an empty/degenerate artifact).
 
 ## Rollout per repo
 
-1. Add the missing legs to the repo's `[tool.tc_fitness]` + Sonar new-code conditions;
-   set every threshold to **current** (green on day one).
-2. Add **Mutation** to `rulesets/main.json` `required_status_checks`.
-3. Run the gate; confirm green and **deterministic** (run it ~5× — zero flakes).
-4. Only then apply the 0-review ruleset to that repo. Ratchet thresholds up over time.
+1. Add the missing legs to the repo's `[tool.tc_fitness]`; set every threshold to **current** (green on day one).
+2. Run the gate; confirm green and **deterministic** (run it ~5× — zero flakes).
+3. Only then add the repo to the appropriate org ruleset tier — `org-main-product` (0-review, product repos) or `org-main-core` (1 review, CORE repos). Branch protection + the required `Quality gate` + `no-attribution` contexts are applied centrally, not via a per-repo `main.json`. Ratchet thresholds up over time.
