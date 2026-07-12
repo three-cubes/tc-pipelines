@@ -240,9 +240,10 @@ jobs:
     steps:
       - name: Decide code-changed
         id: detect
-        # repin to an immutable SHA at release (SGO-280); branch ref bootstraps a
-        # new internal action so the self-test resolves it on the branch.
-        uses: three-cubes/tc-pipelines/actions/detect-code-changes@dan/sgo-280-reusable-ci-standard
+        # Immutable SHA pin (SGO-280 shipped the action to main; its bootstrap
+        # branch ref was left dangling after the branch was deleted, breaking the
+        # self-test — SGO-303 repins it as the release step intended).
+        uses: three-cubes/tc-pipelines/actions/detect-code-changes@8ce215d297553b5ac616602dbba01ee6e396b4dd
         with:
           code-change-filter: ${{ inputs.code-change-filter }}
           fetch-depth: ${{ inputs.fetch-depth }}
