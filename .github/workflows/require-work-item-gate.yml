@@ -1,0 +1,45 @@
+name: require-work-item gate
+
+# Consumer of the local require-work-item.yml reusable — enforces "no work
+# without a work item" on tc-pipelines' own PRs. The aggregator job below is
+# named `require-work-item` so it surfaces the BARE status context the org
+# ruleset (org-main-core) gates on. The reusable is referenced by its LOCAL
+# path (tc-pipelines defines it), so actionlint validates the call in-repo.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    uses: ./.github/workflows/require-work-item.yml
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write # federate to Azure (WIF) to read the Linear key from Key Vault
+    with:
+      linear-key-vault: kv-tc-agents
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+  require-work-item:
+    name: require-work-item
+    needs: [gate]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Gate on the work-item result
+        env:
+          R: ${{ needs.gate.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$R" != "success" ]]; then
+            echo "::error::require-work-item: the work-item gate did not pass ($R)."
+            exit 1
+          fi
+          echo "require-work-item: PASS."

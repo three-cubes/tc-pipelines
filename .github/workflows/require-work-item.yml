@@ -1,45 +1,464 @@
 name: require-work-item
 
-# Enforce "no work without a work item" at the merge boundary (SP-C-5,
-# fail-closed). Calls the canonical tc-pipelines reusable over the secret-free
-# Key Vault (WIF) path; a thin aggregator surfaces the BARE `require-work-item`
-# status context the org ruleset gates on (a reusable call only surfaces
-# `<job> / require-work-item`, never a bare name).
+# Reusable (workflow_call) — the FAIL-CLOSED enforcement of the invariant
+# "NO WORK WITHOUT A WORK ITEM" at the MERGE boundary (Autonomous Delivery
+# Platform initiative · SP-C "Failure-Driven Loop" · Increment-3
+# "Shape-as-orchestrator + enforcing hooks" · PLA-313 / SP-C-5).
+#
+# A gateway (subagent_spawning) hook can refuse a spawn without a work item, but
+# it cannot block at the merge boundary — an agent PR can still appear with no
+# traceable work item. This reusable closes that gap: a consumer wires it on
+# `pull_request` and it FAILS the PR unless the PR is traceable to a REAL,
+# OPEN/IN-PROGRESS Linear work item. Enforcement is STRUCTURAL (a required status
+# check a ruleset gates on), not prompt-convention — so an agent PR with no work
+# item cannot merge.
+#
+# Decision, in order:
+#
+#   1. Resolve the linked Linear issue id. Precedence:
+#        (a) the `issue-id` input, if set;
+#        (b) the PR head branch, parsed against the org convention
+#            `<user>/<team>-<number>-<slug>` (e.g. `dan/pla-313-...` => PLA-313);
+#        (c) the PR body, scanned for an explicit identifier (e.g. `PLA-313`).
+#   2. BYPASS 1 — a PR authored by a HUMAN MAINTAINER (the author is a real user,
+#      not a bot/App, AND their `author_association` is in `maintainer-associations`,
+#      default OWNER/MEMBER). The invariant targets agent PRs; a human maintainer
+#      is trusted to open a PR without a work item.
+#   3. BYPASS 2 — an explicit `no-work-item` escape hatch for genuine hotfixes:
+#      the PR carries the `no-work-item` label AND a `no-work-item: <why>`
+#      rationale line in its body AND (by default) a CODE-OWNER approving review
+#      (a maintainer-association APPROVED review). This makes the escape
+#      CODEOWNERS-gated STRUCTURALLY — a bot cannot self-grant it; a human
+#      maintainer must sign off. An INCOMPLETE escape is NOT honoured (it falls
+#      back to the work-item requirement, never a silent pass).
+#   4. Otherwise VERIFY the resolved issue EXISTS and is OPEN/IN-PROGRESS via the
+#      Linear GraphQL API. A non-existent, Done, or Cancelled issue FAILS the
+#      check — a closed issue cannot launder new work.
+#
+# FAIL-CLOSED: if no work item resolves, OR the work-item source is UNREADABLE
+# (Key Vault / Linear API / network error), the check FAILS. Unreadable never
+# means "pass" (SP-C-5).
+#
+# STABLE required-status-check context: the single job is named `require-work-item`
+# so a ruleset (governance/rulesets/main.json) can gate `main` on the context
+# `require-work-item`. Do NOT rename the job without updating the ruleset in
+# lockstep (same discipline as the `no-attribution` context — STANDARDS.md §4).
+#
+# Injection-safe per the org standard: every caller input and every
+# `github.event.*` field is env-bound before it reaches a shell body (never
+# interpolated into a `run:` string); all PR facts are parsed from API JSON via
+# jq, and every dynamic value injected into GraphQL goes through `jq --arg`
+# (JSON-encoded), never string-spliced into a query. The Linear API key is scoped
+# to ONLY the Linear step and never written to a job or step output.
+#
+# Key provisioning mirrors verify-and-close.yml (two paths, RECOMMENDED first):
+#   * SECRET-FREE (recommended): set `linear-key-vault` to an Azure Key Vault
+#     name; the job federates to Azure via Workload Identity Federation (OIDC, no
+#     stored credential) and reads the key from Key Vault at run time inside the
+#     Linear step. The consumer stores NO GitHub secret.
+#   * FALLBACK: pass `secrets.LINEAR_API_KEY`, used only when `linear-key-vault`
+#     is empty.
+#
+# Part of the Autonomous Delivery Platform initiative (SP-C · PLA-313).
 
 on:
-  pull_request:
-    branches: [main]
+  workflow_call:
+    inputs:
+      pr-number:
+        description: >-
+          PR number to gate. Default empty => github.event.pull_request.number
+          (the triggering pull_request). Override only for testing.
+        type: string
+        default: ""
+      branch-name:
+        description: >-
+          Override the PR head branch used to resolve the issue id. Default empty
+          => the PR's head ref (from the API, falling back to github.head_ref).
+        type: string
+        default: ""
+      pr-body:
+        description: >-
+          Override the PR body scanned as the fallback issue-id source. Default
+          empty => the PR's body (from the API, falling back to the event).
+        type: string
+        default: ""
+      issue-id:
+        description: >-
+          Explicit Linear issue identifier (e.g. PLA-313). Highest precedence;
+          skips branch/PR-body resolution when set.
+        type: string
+        default: ""
+      allowed-state-types:
+        description: >-
+          Space-separated Linear workflow-state TYPES that count as an open/
+          in-progress work item. Default accepts everything that is not terminal;
+          `completed` and `canceled` are deliberately absent, so a Done/Cancelled
+          issue cannot satisfy the gate.
+        type: string
+        default: "triage backlog unstarted started"
+      no-work-item-label:
+        description: >-
+          PR label that opens the genuine-hotfix escape hatch (with a rationale +
+          a code-owner approval).
+        type: string
+        default: "no-work-item"
+      rationale-marker:
+        description: >-
+          Body-line prefix that carries the escape-hatch rationale. A line
+          `<marker> <why>` with non-empty text is required for the escape hatch.
+        type: string
+        default: "no-work-item:"
+      escape-requires-approval:
+        description: >-
+          When true (default) the escape hatch also requires a CODE-OWNER
+          approving review (a maintainer-association APPROVED review) so a bot
+          cannot self-grant it — the CODEOWNERS gate on the escape. Set false to
+          require only the label + rationale.
+        type: boolean
+        default: true
+      maintainer-associations:
+        description: >-
+          Space-separated GitHub author_association values that count as a human
+          maintainer / code owner (matched case-insensitively). Default OWNER +
+          MEMBER; add COLLABORATOR to include repo collaborators.
+        type: string
+        default: "OWNER MEMBER"
+      runs-on:
+        description: "Runner label for the gate job."
+        type: string
+        default: "ubuntu-latest"
+      linear-api-url:
+        description: "Linear GraphQL endpoint (override for testing/proxies)."
+        type: string
+        default: "https://api.linear.app/graphql"
+      linear-key-vault:
+        description: >-
+          RECOMMENDED secret-free path. When set to an Azure Key Vault NAME, the
+          Linear API key is fetched at run time from that vault via Workload
+          Identity Federation (OIDC) — the consumer stores NO GitHub secret.
+          Requires `id-token: write` on the caller job and the azure-* inputs.
+          Leave empty to fall back to secrets.LINEAR_API_KEY.
+        type: string
+        default: ""
+      linear-key-secret-name:
+        description: >-
+          Key Vault secret NAME holding the Linear API key, read when
+          linear-key-vault is set. Passed to `az keyvault secret show` via env
+          (never interpolated). Default is the org's `ci-verify-and-close` secret,
+          reused so one KV secret serves both loop workflows.
+        type: string
+        default: "ci-verify-and-close"
+      azure-client-id:
+        description: >-
+          User-assigned managed-identity client ID for the WIF login (typically
+          vars.AZURE_CLIENT_ID). Required only when linear-key-vault is set.
+        type: string
+        default: ""
+      azure-tenant-id:
+        description: >-
+          Azure AD tenant ID for the WIF login (typically vars.AZURE_TENANT_ID).
+          Required only when linear-key-vault is set.
+        type: string
+        default: ""
+      azure-subscription-id:
+        description: >-
+          Subscription ID for the WIF login (typically vars.AZURE_SUBSCRIPTION_ID).
+          Required only when linear-key-vault is set.
+        type: string
+        default: ""
+    secrets:
+      LINEAR_API_KEY:
+        description: >-
+          FALLBACK Linear API key, used ONLY when `linear-key-vault` is empty.
+          Applied verbatim as the `Authorization` header for the GraphQL issue
+          lookup (a personal/workspace API key, NO `Bearer` prefix per the Linear
+          API). Prefer the secret-free `linear-key-vault` path; see
+          governance/loop/require-work-item.md.
+        required: false
 
+# The reusable declares the least it needs; the effective grant is the
+# intersection with the caller job. `pull-requests: read` reads the PR facts
+# (branch, body, author, labels, reviews); `id-token: write` is the MAXIMUM the
+# reusable can hold and is exercised ONLY on the optional Key Vault (WIF) path.
+# A consumer on the fallback-secret path simply does not grant id-token, so the
+# intersection drops it and the WIF login step is skipped.
 permissions:
   contents: read
+  pull-requests: read
+  id-token: write
 
 jobs:
-  gate:
-    uses: three-cubes/tc-pipelines/.github/workflows/require-work-item.yml@v1.15.0
-    permissions:
-      contents: read
-      pull-requests: read
-      id-token: write # federate to Azure (WIF) to read the Linear key from Key Vault
-    with:
-      linear-key-vault: kv-tc-agents
-      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
   require-work-item:
+    # Stable required-status-check context (a ruleset gates `main` on the context
+    # `require-work-item`; see governance/rulesets/main.json + STANDARDS.md §4).
+    # Do NOT rename without updating the ruleset in lockstep.
     name: require-work-item
-    needs: [gate]
-    if: always()
-    runs-on: ubuntu-latest
-    permissions: {}
+    runs-on: ${{ inputs.runs-on }}
     steps:
-      - name: Gate on the work-item result
+      - name: Resolve PR context + linked work item
+        id: context
+        # github.token + repository, the PR number, and the caller overrides reach
+        # the script ONLY as env values (never interpolated) — injection-safe.
         env:
-          R: ${{ needs.gate.result }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number || github.event.pull_request.number }}
+          ISSUE_ID_INPUT: ${{ inputs.issue-id }}
+          BRANCH_INPUT: ${{ inputs.branch-name }}
+          PR_BODY_INPUT: ${{ inputs.pr-body }}
+          EVENT_BRANCH: ${{ github.event.pull_request.head.ref || github.head_ref }}
+          EVENT_BODY: ${{ github.event.pull_request.body }}
+          EVENT_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+          EVENT_AUTHOR_ASSOC: ${{ github.event.pull_request.author_association }}
+          NO_WORK_ITEM_LABEL: ${{ inputs.no-work-item-label }}
+          RATIONALE_MARKER: ${{ inputs.rationale-marker }}
+          ESCAPE_REQUIRES_APPROVAL: ${{ inputs.escape-requires-approval }}
+          MAINTAINER_ASSOCIATIONS: ${{ inputs.maintainer-associations }}
+        shell: bash
         run: |
           set -euo pipefail
-          if [[ "$R" != "success" ]]; then
-            echo "::error::require-work-item: the work-item gate did not pass ($R)."
+
+          branch="$BRANCH_INPUT"
+          pr_body="$PR_BODY_INPUT"
+          issue_id="$ISSUE_ID_INPUT"
+          author_type="$EVENT_AUTHOR_TYPE"
+          author_assoc="$EVENT_AUTHOR_ASSOC"
+          labels=""
+          reviews_json="[]"
+
+          # Authoritative PR facts from the API (handles re-runs, and the labels /
+          # reviews the event payload lacks). Every value is parsed with jq —
+          # never interpolated into a shell body.
+          if [[ "$PR_NUMBER" =~ ^[0-9]+$ && -n "${GH_TOKEN:-}" ]]; then
+            if pr_json="$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" 2>/dev/null)"; then
+              [[ -z "$branch" ]]  && branch="$(jq -r '.head.ref // ""' <<<"$pr_json")"
+              [[ -z "$pr_body" ]] && pr_body="$(jq -r '.body // ""' <<<"$pr_json")"
+              author_type="$(jq -r '.user.type // ""' <<<"$pr_json")"
+              author_assoc="$(jq -r '.author_association // ""' <<<"$pr_json")"
+              labels="$(jq -r '.labels[]? | .name' <<<"$pr_json")"
+              reviews_json="$(gh api --paginate "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews" 2>/dev/null || echo '[]')"
+            else
+              echo "context: could not fetch PR #${PR_NUMBER} — falling back to the event payload."
+            fi
+          fi
+
+          # Fall back to the event payload for branch/body when the API did not
+          # fill them (a non-standard trigger, or a missing token).
+          [[ -z "$branch" ]]  && branch="$EVENT_BRANCH"
+          [[ -z "$pr_body" ]] && pr_body="$EVENT_BODY"
+
+          # ---- resolve the linked Linear issue id ------------------------------
+          # (2) branch <user>/<team>-<number>-<slug> => <TEAM>-<number>.
+          if [[ -z "$issue_id" && -n "$branch" ]]; then
+            rest="${branch#*/}"
+            if [[ "$rest" =~ ^([A-Za-z]+)-([0-9]+)(-|$) ]]; then
+              team="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')"
+              issue_id="${team}-${BASH_REMATCH[2]}"
+            fi
+          fi
+          # (3) fallback: an explicit identifier in the PR body.
+          if [[ -z "$issue_id" && -n "$pr_body" ]]; then
+            issue_id="$(grep -oE '[A-Z]{2,}-[0-9]+' <<<"$pr_body" | head -n1 || true)"
+          fi
+          resolved=false
+          [[ -n "$issue_id" ]] && resolved=true
+
+          # ---- normalise maintainer associations to UPPER ----------------------
+          read -ra maint_arr <<<"$MAINTAINER_ASSOCIATIONS"
+          author_assoc_u="$(printf '%s' "$author_assoc" | tr '[:lower:]' '[:upper:]')"
+          author_type_u="$(printf '%s' "$author_type" | tr '[:lower:]' '[:upper:]')"
+
+          # ---- BYPASS 1: authored by a HUMAN maintainer ------------------------
+          is_maintainer=false
+          if [[ "$author_type_u" == "USER" ]]; then
+            for m in "${maint_arr[@]}"; do
+              [[ "$author_assoc_u" == "$(printf '%s' "$m" | tr '[:lower:]' '[:upper:]')" ]] && is_maintainer=true
+            done
+          fi
+
+          # ---- BYPASS 2: the explicit no-work-item escape hatch ----------------
+          label_lc="$(printf '%s' "$NO_WORK_ITEM_LABEL" | tr '[:upper:]' '[:lower:]')"
+          escape_label=false
+          while IFS= read -r ln; do
+            [[ -z "$ln" ]] && continue
+            [[ "$(printf '%s' "$ln" | tr '[:upper:]' '[:lower:]')" == "$label_lc" ]] && escape_label=true
+          done <<<"$labels"
+
+          # rationale: a body line `<marker> <non-empty text>`.
+          marker_lc="$(printf '%s' "$RATIONALE_MARKER" | tr '[:upper:]' '[:lower:]')"
+          rationale=false
+          if [[ "$escape_label" == true ]]; then
+            while IFS= read -r ln; do
+              trimmed="${ln#"${ln%%[![:space:]]*}"}"
+              lower="$(printf '%s' "$trimmed" | tr '[:upper:]' '[:lower:]')"
+              if [[ "$lower" == "$marker_lc"* ]]; then
+                after="${trimmed:${#RATIONALE_MARKER}}"
+                after_trim="${after#"${after%%[![:space:]]*}"}"
+                [[ -n "$after_trim" ]] && rationale=true
+              fi
+            done <<<"$pr_body"
+          fi
+
+          # code-owner sign-off: a maintainer-association APPROVED review.
+          codeowner_approved=false
+          if [[ "$escape_label" == true ]]; then
+            mapfile -t approvers < <(jq -r '.[]? | select(.state=="APPROVED") | (.author_association // "")' <<<"$reviews_json" | tr '[:lower:]' '[:upper:]' | sort -u)
+            for a in "${approvers[@]}"; do
+              for m in "${maint_arr[@]}"; do
+                [[ "$a" == "$(printf '%s' "$m" | tr '[:lower:]' '[:upper:]')" ]] && codeowner_approved=true
+              done
+            done
+          fi
+
+          # ---- decide the bypass ----------------------------------------------
+          bypass="none"
+          reason=""
+          if [[ "$is_maintainer" == true ]]; then
+            bypass="maintainer"
+            reason="authored by a human maintainer (association '${author_assoc}') — the work-item invariant targets agent PRs."
+          elif [[ "$escape_label" == true ]]; then
+            approval_ok=true
+            if [[ "$ESCAPE_REQUIRES_APPROVAL" == "true" && "$codeowner_approved" != true ]]; then
+              approval_ok=false
+            fi
+            if [[ "$rationale" == true && "$approval_ok" == true ]]; then
+              bypass="escape"
+              reason="explicit '${NO_WORK_ITEM_LABEL}' hotfix escape hatch (rationale + code-owner approval)."
+            else
+              missing=""
+              [[ "$rationale" != true ]] && missing="a '${RATIONALE_MARKER} <why>' rationale line in the PR body"
+              if [[ "$approval_ok" != true ]]; then
+                [[ -n "$missing" ]] && missing="${missing} and "
+                missing="${missing}a code-owner approving review"
+              fi
+              echo "::warning::require-work-item: '${NO_WORK_ITEM_LABEL}' label present but the escape hatch is INCOMPLETE — it still needs ${missing}. Falling back to the work-item requirement."
+            fi
+          fi
+
+          {
+            echo "issue-id=$issue_id"
+            echo "resolved=$resolved"
+            echo "branch=$branch"
+            echo "bypass=$bypass"
+            echo "bypass-reason=$reason"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "context: branch='${branch}' issue='${issue_id}' resolved=${resolved} bypass=${bypass}"
+          echo "context: author_type='${author_type}' association='${author_assoc}' maintainer=${is_maintainer} escape_label=${escape_label} rationale=${rationale} codeowner_approved=${codeowner_approved}"
+
+      - name: Gate bypassed
+        if: steps.context.outputs.bypass != 'none'
+        env:
+          BYPASS: ${{ steps.context.outputs.bypass }}
+          REASON: ${{ steps.context.outputs.bypass-reason }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "require-work-item: gate BYPASSED (${BYPASS}). ${REASON}"
+
+      - name: Require a resolvable work item (fail-closed)
+        if: steps.context.outputs.bypass == 'none' && steps.context.outputs.resolved != 'true'
+        env:
+          BRANCH: ${{ steps.context.outputs.branch }}
+          LABEL: ${{ inputs.no-work-item-label }}
+          MARKER: ${{ inputs.rationale-marker }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::error::require-work-item: this PR does not trace to a Linear work item — NO WORK WITHOUT A WORK ITEM (PLA-313 / SP-C-5, fail-closed). The head branch '${BRANCH}' does not match the org convention <user>/<team>-<number>-<slug> and no Linear id (e.g. ABC-123) was found in the PR body. fix (pick one): (1) rebranch off the work item, e.g. dan/pla-313-slug, and repush; (2) add the issue id (e.g. PLA-313) to the PR body; (3) genuine hotfix with no work item — add the '${LABEL}' label, put a '${MARKER} <why>' line in the PR body, and get a code-owner approval." >&2
+          exit 1
+
+      - name: Azure login for Key Vault (WIF — optional secret-free path)
+        # Only when the work-item check will run AND the consumer opted into the
+        # KV-fetch path. Federates to Azure via OIDC (no stored credential) so the
+        # Linear step can read the key from Key Vault at run time.
+        if: steps.context.outputs.bypass == 'none' && steps.context.outputs.resolved == 'true' && inputs.linear-key-vault != ''
+        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@v1
+        with:
+          client-id: ${{ inputs.azure-client-id }}
+          tenant-id: ${{ inputs.azure-tenant-id }}
+          subscription-id: ${{ inputs.azure-subscription-id }}
+
+      - name: Verify the linked Linear issue is real and open (fail-closed)
+        if: steps.context.outputs.bypass == 'none' && steps.context.outputs.resolved == 'true'
+        # The Linear API key is scoped to THIS step only — never in the environment
+        # of any other step, and never written to a job/step output. On the
+        # secret-free path the key is fetched from Key Vault INSIDE this step
+        # (env-bound vault + name, then masked). Every dynamic value injected into
+        # GraphQL goes through jq --arg (JSON-encoded), never spliced into a query.
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          LINEAR_KEY_VAULT: ${{ inputs.linear-key-vault }}
+          LINEAR_KEY_SECRET_NAME: ${{ inputs.linear-key-secret-name }}
+          LINEAR_API_URL: ${{ inputs.linear-api-url }}
+          ISSUE_ID: ${{ steps.context.outputs.issue-id }}
+          BRANCH: ${{ steps.context.outputs.branch }}
+          ALLOWED_STATE_TYPES: ${{ inputs.allowed-state-types }}
+        shell: bash
+        run: |
+          # NOTE: the GraphQL query string below is single-quoted ON PURPOSE — its
+          # `$id` is a GraphQL variable bound via jq --arg, NOT a shell expansion.
+          set -euo pipefail
+          api="${LINEAR_API_URL:-https://api.linear.app/graphql}"
+
+          # Resolve the Linear API key. Secret-free path (linear-key-vault set):
+          # fetch from Key Vault via the WIF session; masked immediately, kept a
+          # local shell variable (never a job/step output). Fallback: the secret.
+          if [[ -n "${LINEAR_KEY_VAULT:-}" ]]; then
+            linear_key="$(az keyvault secret show \
+              --vault-name "$LINEAR_KEY_VAULT" \
+              --name "$LINEAR_KEY_SECRET_NAME" \
+              --query value -o tsv)"
+            echo "::add-mask::$linear_key"
+          else
+            linear_key="${LINEAR_API_KEY:-}"
+          fi
+          if [[ -z "$linear_key" ]]; then
+            echo "::error::require-work-item: no Linear API key available (fail-closed) — cannot verify the work item. fix: set linear-key-vault (recommended, secret-free) or pass secrets.LINEAR_API_KEY." >&2
             exit 1
           fi
-          echo "require-work-item: PASS."
+
+          # Minimal GraphQL client. GraphQL-level errors return HTTP 200 with an
+          # `errors` array, so we check that (not just the HTTP status). Any error
+          # returns non-zero => fail-closed on an unreadable work-item source.
+          gql() {
+            local resp
+            resp="$(jq -n --arg q "$1" --argjson v "$2" '{query:$q,variables:$v}' \
+              | curl -sS -X POST "$api" \
+                  -H "Authorization: $linear_key" \
+                  -H "Content-Type: application/json" \
+                  --data @-)"
+            if [[ -z "$resp" ]] || jq -e '.errors' >/dev/null 2>&1 <<<"$resp"; then
+              echo "::error::require-work-item: Linear GraphQL call failed (fail-closed): ${resp:-<empty response>}" >&2
+              return 1
+            fi
+            printf '%s' "$resp"
+          }
+
+          # Resolve the issue + its state. Linear's `issue(id:)` accepts the human
+          # identifier (e.g. PLA-313). A failed call exits non-zero (set -e on the
+          # command substitution) => the check goes red (fail-closed).
+          # shellcheck disable=SC2016
+          q_issue='query($id:String!){ issue(id:$id){ id identifier state{ type name } } }'
+          issue_json="$(gql "$q_issue" "$(jq -n --arg id "$ISSUE_ID" '{id:$id}')")"
+
+          uuid="$(jq -r '.data.issue.id // empty' <<<"$issue_json")"
+          if [[ -z "$uuid" ]]; then
+            echo "::error::require-work-item: Linear issue '${ISSUE_ID}' (resolved from branch '${BRANCH}') does not exist. NO WORK WITHOUT A WORK ITEM (PLA-313 / SP-C-5). fix: branch off a REAL Linear issue using <user>/<team>-<number>-<slug> (e.g. dan/pla-313-slug), or reference the correct id in the PR body." >&2
+            exit 1
+          fi
+
+          state_type="$(jq -r '.data.issue.state.type // empty' <<<"$issue_json")"
+          state_name="$(jq -r '.data.issue.state.name // empty' <<<"$issue_json")"
+
+          ok=false
+          read -ra allowed_arr <<<"$ALLOWED_STATE_TYPES"
+          for t in "${allowed_arr[@]}"; do
+            [[ "$state_type" == "$t" ]] && ok=true
+          done
+          if [[ "$ok" != true ]]; then
+            echo "::error::require-work-item: Linear issue '${ISSUE_ID}' is '${state_name}' (state type '${state_type}'), not open/in-progress. A PR must trace to an OPEN work item — a Done/Cancelled issue cannot launder new work (PLA-313 / SP-C-5). allowed state types: ${ALLOWED_STATE_TYPES}. fix: reopen the issue, or open a new one and rebranch." >&2
+            exit 1
+          fi
+
+          echo "require-work-item: '${ISSUE_ID}' is '${state_name}' (type '${state_type}') — open work item confirmed on branch '${BRANCH}'."
