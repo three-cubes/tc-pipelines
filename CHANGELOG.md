@@ -8,6 +8,20 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`auto-merge-on-green.yml` resolves the PR from `head-sha` itself.** A
+  `workflow_run` caller has no `github.event.pull_request`, so it previously ran
+  a local `resolve` job to map commit→PR via `commits/{sha}/pulls` — but that job
+  used the default `GITHUB_TOKEN` scoped to `contents: read`, so the PR lookup
+  `403`'d ("Resource not accessible by integration"), `resolve` failed, the merge
+  job was skipped, and every PR silently fell back to **manual merge**. The
+  reusable now performs the lookup itself when `pr-number` is empty, using the
+  three-cubes-agent App token it already mints (which carries `pull-requests`
+  access). Callers drop their local `resolve` job and pass only
+  `head-sha: ${{ github.event.workflow_run.head_sha }}`. **Backward compatible:**
+  a caller that still passes `pr-number` skips the lookup unchanged.
+
 ### Added
 
 - **`python-quality-gate.yml` change-gated pytest shards (SGO-280).** A new
