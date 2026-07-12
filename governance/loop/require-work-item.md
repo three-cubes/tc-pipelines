@@ -29,11 +29,17 @@ On each PR the gate resolves, then decides, in order:
    2. the PR **head branch**, parsed against the org convention
       `<user>/<team>-<number>-<slug>` (e.g. `dan/pla-313-...` => `PLA-313`);
    3. the PR **body**, scanned for an explicit identifier (e.g. `PLA-313`).
-2. **BYPASS 1 — human maintainer.** If the PR author is a real user (not a
+2. **BYPASS 0 — exempt dependency-update bot.** If the PR author is a **Bot**
+   **and** its login is in `bot-actors` (default `dependabot[bot]` /
+   `renovate[bot]`), the gate passes. These bots open PRs mechanically with no
+   Linear work item. The autonomous delivery App is deliberately **not** in
+   `bot-actors` — agent PRs are exactly what the invariant targets, so they still
+   require a work item.
+3. **BYPASS 1 — human maintainer.** If the PR author is a real user (not a
    bot/App) **and** their `author_association` is in `maintainer-associations`
    (default `OWNER` / `MEMBER`), the gate passes. The invariant targets **agent**
    PRs; a human maintainer is trusted to open a PR without a work item.
-3. **BYPASS 2 — explicit `no-work-item` escape hatch** (genuine hotfixes). The PR
+4. **BYPASS 2 — explicit `no-work-item` escape hatch** (genuine hotfixes). The PR
    passes only if **all** of:
    - it carries the `no-work-item` label; **and**
    - its body has a `no-work-item: <why>` **rationale** line (non-empty text);
@@ -47,7 +53,7 @@ On each PR the gate resolves, then decides, in order:
    (label but no rationale / no approval) is **not** honoured; it falls back to
    the work-item requirement (never a silent pass) and the run logs exactly
    what is missing.
-4. **Otherwise VERIFY via the Linear GraphQL API** that the resolved issue
+5. **Otherwise VERIFY via the Linear GraphQL API** that the resolved issue
    **EXISTS** and is **OPEN/IN-PROGRESS** (its workflow-state `type` is in
    `allowed-state-types`, default everything except the terminal `completed` /
    `canceled`). A non-existent, Done, or Cancelled issue **FAILS** — a closed
@@ -149,6 +155,7 @@ Common overrides:
 | `azure-client-id` / `-tenant-id` / `-subscription-id` | *(empty)* | the WIF identity, required with `linear-key-vault` |
 | `allowed-state-types` | `triage backlog unstarted started` | tighten (e.g. drop `backlog`) to require an already-started item |
 | `maintainer-associations` | `OWNER MEMBER` | add `COLLABORATOR` to trust repo collaborators as human maintainers |
+| `bot-actors` | `dependabot[bot] renovate[bot]` | dependency-update bot logins exempt from the work-item requirement (Bot authors only) |
 | `no-work-item-label` | `no-work-item` | your escape-hatch label name |
 | `rationale-marker` | `no-work-item:` | the body prefix that carries the hotfix rationale |
 | `escape-requires-approval` | `true` | `false` to let the label + rationale bypass without a code-owner approval |

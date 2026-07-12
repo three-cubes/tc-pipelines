@@ -20,6 +20,10 @@ name: require-work-item
 #        (b) the PR head branch, parsed against the org convention
 #            `<user>/<team>-<number>-<slug>` (e.g. `dan/pla-313-...` => PLA-313);
 #        (c) the PR body, scanned for an explicit identifier (e.g. `PLA-313`).
+#   2. BYPASS 0 — a PR authored by an exempt DEPENDENCY-UPDATE BOT (the author is a
+#      Bot AND its login is in `bot-actors`, default dependabot/renovate). These
+#      bots open PRs mechanically with no Linear work item. The autonomous delivery
+#      App is deliberately NOT in `bot-actors` — agent PRs still need a work item.
 #   2. BYPASS 1 — a PR authored by a HUMAN MAINTAINER (the author is a real user,
 #      not a bot/App, AND their `author_association` is in `maintainer-associations`,
 #      default OWNER/MEMBER). The invariant targets agent PRs; a human maintainer
@@ -123,6 +127,16 @@ on:
           MEMBER; add COLLABORATOR to include repo collaborators.
         type: string
         default: "OWNER MEMBER"
+      bot-actors:
+        description: >-
+          Space-separated GitHub login(s) of dependency-update bots that are
+          EXEMPT from the work-item requirement (matched case-insensitively, only
+          when the PR author is a Bot). These bots open PRs mechanically and have
+          no Linear work item. Default dependabot + renovate. The autonomous
+          delivery App is deliberately NOT here — agent PRs are exactly what the
+          invariant targets, so they still need a work item.
+        type: string
+        default: "dependabot[bot] renovate[bot]"
       runs-on:
         description: "Runner label for the gate job."
         type: string
@@ -214,6 +228,8 @@ jobs:
           RATIONALE_MARKER: ${{ inputs.rationale-marker }}
           ESCAPE_REQUIRES_APPROVAL: ${{ inputs.escape-requires-approval }}
           MAINTAINER_ASSOCIATIONS: ${{ inputs.maintainer-associations }}
+          BOT_ACTORS: ${{ inputs.bot-actors }}
+          EVENT_AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
         shell: bash
         run: |
           set -euo pipefail
@@ -223,6 +239,7 @@ jobs:
           issue_id="$ISSUE_ID_INPUT"
           author_type="$EVENT_AUTHOR_TYPE"
           author_assoc="$EVENT_AUTHOR_ASSOC"
+          author_login="$EVENT_AUTHOR_LOGIN"
           labels=""
           reviews_json="[]"
 
@@ -235,6 +252,7 @@ jobs:
               [[ -z "$pr_body" ]] && pr_body="$(jq -r '.body // ""' <<<"$pr_json")"
               author_type="$(jq -r '.user.type // ""' <<<"$pr_json")"
               author_assoc="$(jq -r '.author_association // ""' <<<"$pr_json")"
+              author_login="$(jq -r '.user.login // ""' <<<"$pr_json")"
               labels="$(jq -r '.labels[]? | .name' <<<"$pr_json")"
               reviews_json="$(gh api --paginate "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews" 2>/dev/null || echo '[]')"
             else
@@ -267,6 +285,20 @@ jobs:
           read -ra maint_arr <<<"$MAINTAINER_ASSOCIATIONS"
           author_assoc_u="$(printf '%s' "$author_assoc" | tr '[:lower:]' '[:upper:]')"
           author_type_u="$(printf '%s' "$author_type" | tr '[:lower:]' '[:upper:]')"
+
+          # ---- BYPASS 0: an exempt dependency-update bot -----------------------
+          # dependabot / renovate open PRs mechanically with no Linear work item.
+          # Exempt ONLY when the author is a Bot AND its login is in bot-actors —
+          # the autonomous delivery App is deliberately absent, so agent PRs still
+          # require a work item (they are exactly what the invariant targets).
+          is_bot=false
+          if [[ "$author_type_u" == "BOT" ]]; then
+            login_lc="$(printf '%s' "$author_login" | tr '[:upper:]' '[:lower:]')"
+            read -ra bot_arr <<<"$BOT_ACTORS"
+            for b in "${bot_arr[@]}"; do
+              [[ "$login_lc" == "$(printf '%s' "$b" | tr '[:upper:]' '[:lower:]')" ]] && is_bot=true
+            done
+          fi
 
           # ---- BYPASS 1: authored by a HUMAN maintainer ------------------------
           is_maintainer=false
@@ -313,7 +345,10 @@ jobs:
           # ---- decide the bypass ----------------------------------------------
           bypass="none"
           reason=""
-          if [[ "$is_maintainer" == true ]]; then
+          if [[ "$is_bot" == true ]]; then
+            bypass="bot"
+            reason="authored by an exempt dependency-update bot ('${author_login}') — a mechanical PR with no work item."
+          elif [[ "$is_maintainer" == true ]]; then
             bypass="maintainer"
             reason="authored by a human maintainer (association '${author_assoc}') — the work-item invariant targets agent PRs."
           elif [[ "$escape_label" == true ]]; then
@@ -344,7 +379,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           echo "context: branch='${branch}' issue='${issue_id}' resolved=${resolved} bypass=${bypass}"
-          echo "context: author_type='${author_type}' association='${author_assoc}' maintainer=${is_maintainer} escape_label=${escape_label} rationale=${rationale} codeowner_approved=${codeowner_approved}"
+          echo "context: author_type='${author_type}' login='${author_login}' association='${author_assoc}' bot=${is_bot} maintainer=${is_maintainer} escape_label=${escape_label} rationale=${rationale} codeowner_approved=${codeowner_approved}"
 
       - name: Gate bypassed
         if: steps.context.outputs.bypass != 'none'
