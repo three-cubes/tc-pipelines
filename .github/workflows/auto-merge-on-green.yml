@@ -130,10 +130,14 @@ jobs:
           fi
 
           echo "auto-merge-on-green: fan-in '$CHECK_NAME' is success — enabling auto-merge on PR #$PR."
+          # `-R` is required: this runs in a workflow_run context with no checkout,
+          # so gh cannot infer the repo from a local .git and otherwise fails with
+          # "fatal: not a git repository", leaving auto-merge un-armed (the PR then
+          # sits green-but-unmerged, forcing a manual merge on every PR).
           if [ "$ENQUEUE" = "true" ]; then
             # Queue mode: the branch's merge_queue ruleset re-tests vs the latest
             # tip and applies its configured method (governance/rulesets/merge-queue.json).
-            gh pr merge "$PR" --auto
+            gh pr merge "$PR" --auto -R "$GITHUB_REPOSITORY"
           else
-            gh pr merge "$PR" --auto "--$MERGE_METHOD"
+            gh pr merge "$PR" --auto "--$MERGE_METHOD" -R "$GITHUB_REPOSITORY"
           fi
