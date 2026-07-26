@@ -72,6 +72,17 @@ runs:
         STAMP=$(date -u +%Y%m%d-%H%M%S)
         NAMES=""
         IDS=""
+        publish_outputs() {
+          {
+            echo "snapshot-names<<EOF"
+            echo "${NAMES}"
+            echo "EOF"
+            echo "snapshot-resource-ids<<EOF"
+            echo "${IDS}"
+            echo "EOF"
+          } >>"$GITHUB_OUTPUT"
+        }
+        trap publish_outputs EXIT
         IFS=',' read -ra VM_LIST <<< "${VMS}"
         for vm in "${VM_LIST[@]}"; do
           vm=$(echo "$vm" | xargs)   # trim whitespace
@@ -102,11 +113,3 @@ runs:
           NAMES="${NAMES}${NAME}"$'\n'
           IDS="${IDS}${SNAPSHOT_ID}"$'\n'
         done
-        {
-          echo "snapshot-names<<EOF"
-          echo "${NAMES}"
-          echo "EOF"
-          echo "snapshot-resource-ids<<EOF"
-          echo "${IDS}"
-          echo "EOF"
-        } >>"$GITHUB_OUTPUT"

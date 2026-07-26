@@ -65,9 +65,12 @@ def test_failure_cleanup_runs_after_preflight_when_snapshot_or_apply_fails() -> 
     steps = _workflow()["jobs"]["deploy"]["steps"]
     cleanup = next(step for step in steps if step.get("name") == "Failure cleanup")
 
-    assert "failure()" in cleanup["if"]
+    assert "always()" in cleanup["if"]
+    assert "failure() || cancelled()" in cleanup["if"]
     assert "steps.preflight.outputs.status == 'passed'" in cleanup["if"]
     assert "inputs.failure-cleanup-script != ''" in cleanup["if"]
+    assert "CLEANUP_FAILED=1" in cleanup["run"]
+    assert "TC_CLEANUP_REMOTE_SUCCESS_" in cleanup["run"]
 
 
 def test_preflight_requires_one_content_addressed_receipt_marker() -> None:
@@ -76,6 +79,9 @@ def test_preflight_requires_one_content_addressed_receipt_marker() -> None:
     assert "PREFLIGHT_RECEIPT_DIGEST=sha256:" in text
     assert "preflight produced no valid receipt digest" in text
     assert "preflight produced multiple receipt digests" in text
+    assert "TC_PREFLIGHT_REMOTE_SUCCESS_" in text
+    assert "did not prove success" in text
+    assert "run_with_retry" in text
 
 
 def test_snapshot_action_surfaces_created_resource_ids() -> None:
@@ -89,3 +95,4 @@ def test_snapshot_action_surfaces_created_resource_ids() -> None:
     run = action["runs"]["steps"][0]["run"]
     assert "--query '{state:provisioningState,id:id}'" in run
     assert "snapshot-resource-ids<<EOF" in run
+    assert "trap publish_outputs EXIT" in run

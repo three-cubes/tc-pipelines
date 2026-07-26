@@ -160,15 +160,39 @@ jobs:
 
           PREFLIGHT_ACC="$(mktemp)"
           trap 'rm -f "$PREFLIGHT_ACC"' EXIT
+          run_with_retry() {
+            local description="$1"; shift
+            local attempt=1
+            local max_attempts=5
+            local wait_seconds=10
+            while [[ $attempt -le $max_attempts ]]; do
+              if OUT=$("$@" 2>&1); then
+                printf '%s\n' "$OUT"
+                return 0
+              fi
+              if grep -q "(Conflict)" <<<"$OUT"; then
+                echo "::warning::${description}: attempt ${attempt}/${max_attempts} hit (Conflict); retrying in ${wait_seconds}s" >&2
+                sleep "$wait_seconds"
+                wait_seconds=$((wait_seconds * 2))
+                attempt=$((attempt + 1))
+                continue
+              fi
+              printf '%s\n' "$OUT"
+              return 1
+            done
+            echo "::error::${description}: exhausted ${max_attempts} retries on (Conflict)" >&2
+            return 1
+          }
           COUNT=$(echo "$TARGETS_YAML" | yq 'length' -)
           for i in $(seq 0 $((COUNT - 1))); do
             VM=$(echo "$TARGETS_YAML" | yq ".[${i}].vm-name" -)
+            REMOTE_SUCCESS_TOKEN="TC_PREFLIGHT_REMOTE_SUCCESS_${GITHUB_RUN_ID}_${i}_${RANDOM}"
             set +e
-            MSG=$(az vm run-command invoke \
+            MSG=$(run_with_retry "preflight on ${VM}" az vm run-command invoke \
               --resource-group "$RG" \
               --name "$VM" \
               --command-id RunShellScript \
-              --scripts "set -e; export HOME=/root; ${PREFLIGHT_SCRIPT}" \
+              --scripts "set -e; export HOME=/root; ${PREFLIGHT_SCRIPT}; printf '%s\n' '${REMOTE_SUCCESS_TOKEN}'" \
               --query 'value[0].message' -o tsv 2>&1)
             RC=$?
             set -e
@@ -177,7 +201,7 @@ jobs:
             echo "----- END ${VM} preflight output -----"
             printf '%s\n' "$MSG" >>"$PREFLIGHT_ACC"
             mapfile -t RECEIPTS < <(
-              grep -oE 'PREFLIGHT_RECEIPT_DIGEST=sha256:[0-9a-f]{64}' "$PREFLIGHT_ACC" |
+              grep -oE 'PREFLIGHT_RECEIPT_DIGEST=sha256:[0-9a-f]{64}' <<<"$MSG" |
                 sed 's/^PREFLIGHT_RECEIPT_DIGEST=//'
             )
             if [[ "${#RECEIPTS[@]}" -eq 1 ]]; then
@@ -186,12 +210,16 @@ jobs:
               # treating the failed preflight as admitted.
               echo "receipt-digest=${RECEIPTS[0]}" >>"$GITHUB_OUTPUT"
             elif [[ "${#RECEIPTS[@]}" -gt 1 ]]; then
-              echo "::error::preflight produced multiple receipt digests"
+              echo "::error::preflight on ${VM} produced multiple receipt digests"
               exit 1
             fi
             if [[ "$RC" -ne 0 ]]; then
               echo "::error::remote preflight failed on ${VM} (rc=${RC}); no snapshot or apply ran"
               exit "$RC"
+            fi
+            if [[ $(grep -Fxc "$REMOTE_SUCCESS_TOKEN" <<<"$MSG") -ne 1 ]]; then
+              echo "::error::remote preflight did not prove success on ${VM}; no snapshot or apply ran"
+              exit 1
             fi
             MSG_FILE="$(mktemp)"
             printf '%s\n' "$MSG" >"$MSG_FILE"
@@ -222,7 +250,8 @@ jobs:
 
           mapfile -t RECEIPTS < <(
             grep -oE 'PREFLIGHT_RECEIPT_DIGEST=sha256:[0-9a-f]{64}' "$PREFLIGHT_ACC" |
-              sed 's/^PREFLIGHT_RECEIPT_DIGEST=//'
+              sed 's/^PREFLIGHT_RECEIPT_DIGEST=//' |
+              sort -u
           )
           if [[ "${#RECEIPTS[@]}" -eq 0 ]]; then
             echo "::error::preflight produced no valid receipt digest"
@@ -387,7 +416,7 @@ jobs:
           fi
 
       - name: Failure cleanup
-        if: ${{ failure() && steps.preflight.outputs.status == 'passed' && inputs.failure-cleanup-script != '' }}
+        if: ${{ always() && (failure() || cancelled()) && steps.preflight.outputs.status == 'passed' && inputs.failure-cleanup-script != '' }}
         shell: bash
         env:
           CLEANUP_SCRIPT: ${{ inputs.failure-cleanup-script }}
@@ -395,14 +424,48 @@ jobs:
           RG: ${{ inputs.resource-group }}
         run: |
           set -euo pipefail
+          run_with_retry() {
+            local description="$1"; shift
+            local attempt=1
+            local max_attempts=5
+            local wait_seconds=10
+            while [[ $attempt -le $max_attempts ]]; do
+              if OUT=$("$@" 2>&1); then
+                printf '%s\n' "$OUT"
+                return 0
+              fi
+              if grep -q "(Conflict)" <<<"$OUT"; then
+                echo "::warning::${description}: attempt ${attempt}/${max_attempts} hit (Conflict); retrying in ${wait_seconds}s" >&2
+                sleep "$wait_seconds"
+                wait_seconds=$((wait_seconds * 2))
+                attempt=$((attempt + 1))
+                continue
+              fi
+              printf '%s\n' "$OUT"
+              return 1
+            done
+            echo "::error::${description}: exhausted ${max_attempts} retries on (Conflict)" >&2
+            return 1
+          }
+          CLEANUP_FAILED=0
           COUNT=$(echo "$TARGETS_YAML" | yq 'length' -)
           for i in $(seq 0 $((COUNT - 1))); do
             VM=$(echo "$TARGETS_YAML" | yq ".[${i}].vm-name" -)
+            REMOTE_SUCCESS_TOKEN="TC_CLEANUP_REMOTE_SUCCESS_${GITHUB_RUN_ID}_${i}_${RANDOM}"
             echo "=== Failure cleanup ${VM} ==="
-            az vm run-command invoke \
+            set +e
+            MSG=$(run_with_retry "failure cleanup on ${VM}" az vm run-command invoke \
               --resource-group "$RG" \
               --name "$VM" \
               --command-id RunShellScript \
-              --scripts "set -e; export HOME=/root; ${CLEANUP_SCRIPT}" \
-              --query 'value[0].message' -o tsv
+              --scripts "set -e; export HOME=/root; ${CLEANUP_SCRIPT}; printf '%s\n' '${REMOTE_SUCCESS_TOKEN}'" \
+              --query 'value[0].message' -o tsv 2>&1)
+            RC=$?
+            set -e
+            printf '%s\n' "$MSG"
+            if [[ "$RC" -ne 0 ]] || [[ $(grep -Fxc "$REMOTE_SUCCESS_TOKEN" <<<"$MSG") -ne 1 ]]; then
+              echo "::error::failure cleanup did not prove success on ${VM}"
+              CLEANUP_FAILED=1
+            fi
           done
+          exit "$CLEANUP_FAILED"
