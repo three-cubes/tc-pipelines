@@ -46,6 +46,9 @@ outputs:
   snapshot-names:
     description: Newline-separated list of snapshot resource names created.
     value: ${{ steps.snap.outputs.snapshot-names }}
+  snapshot-resource-ids:
+    description: Newline-separated Azure resource IDs for snapshots created.
+    value: ${{ steps.snap.outputs.snapshot-resource-ids }}
 
 runs:
   using: composite
@@ -63,10 +66,23 @@ runs:
         if [[ "${SKIP}" == "true" ]]; then
           echo "::warning::SKIP_SNAPSHOT=true — refusing to snapshot. Dev override only; production deploys MUST snapshot."
           echo "snapshot-names=" >>"$GITHUB_OUTPUT"
+          echo "snapshot-resource-ids=" >>"$GITHUB_OUTPUT"
           exit 0
         fi
         STAMP=$(date -u +%Y%m%d-%H%M%S)
         NAMES=""
+        IDS=""
+        publish_outputs() {
+          {
+            echo "snapshot-names<<EOF"
+            echo "${NAMES}"
+            echo "EOF"
+            echo "snapshot-resource-ids<<EOF"
+            echo "${IDS}"
+            echo "EOF"
+          } >>"$GITHUB_OUTPUT"
+        }
+        trap publish_outputs EXIT
         IFS=',' read -ra VM_LIST <<< "${VMS}"
         for vm in "${VM_LIST[@]}"; do
           vm=$(echo "$vm" | xargs)   # trim whitespace
@@ -79,19 +95,21 @@ runs:
           fi
           NAME="${vm}-osdisk-pre-${OP}-${STAMP}"
           echo "Creating snapshot: ${NAME}"
-          STATE=$(az snapshot create \
+          SNAPSHOT_JSON=$(az snapshot create \
             -g "$RG" \
             -n "$NAME" \
             --source "$OSDISK_ID" \
-            --query 'provisioningState' -o tsv)
+            --query '{state:provisioningState,id:id}' -o json)
+          STATE=$(jq -r '.state' <<<"$SNAPSHOT_JSON")
+          SNAPSHOT_ID=$(jq -r '.id' <<<"$SNAPSHOT_JSON")
           if [[ "$STATE" != "Succeeded" ]]; then
             echo "::error::Snapshot ${NAME} did not reach Succeeded (state: ${STATE})"
             exit 1
           fi
+          if [[ ! "$SNAPSHOT_ID" =~ ^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft.Compute/snapshots/[^/]+$ ]]; then
+            echo "::error::Snapshot ${NAME} returned an invalid resource ID"
+            exit 1
+          fi
           NAMES="${NAMES}${NAME}"$'\n'
+          IDS="${IDS}${SNAPSHOT_ID}"$'\n'
         done
-        {
-          echo "snapshot-names<<EOF"
-          echo "${NAMES}"
-          echo "EOF"
-        } >>"$GITHUB_OUTPUT"

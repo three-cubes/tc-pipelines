@@ -8,6 +8,18 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+### Added
+
+- **Pre-snapshot remote admission for `azure-vm-deploy.yml` (EXE-61).** Consumers
+  can opt into a `preflight-script` that runs on every target before the first
+  snapshot or apply and must emit one content-addressed
+  `PREFLIGHT_RECEIPT_DIGEST`. A failed preflight blocks all mutation while
+  retaining its receipt for reporting. The paired optional
+  `failure-cleanup-script` thaws resources when snapshot/apply fails after a
+  successful preflight. The reusable now surfaces preflight status, receipt
+  digest, and exact snapshot resource IDs. Existing callers remain unchanged
+  because both scripts default to empty.
+
 ### Fixed
 
 - **`auto-merge-on-green.yml` resolves the PR from `head-sha` itself.** A

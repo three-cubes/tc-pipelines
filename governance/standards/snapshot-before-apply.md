@@ -1,6 +1,6 @@
 # Snapshot-before-apply
 
-Every apply script that mutates live infrastructure MUST take a recovery point before its first destructive op — the concrete example throughout this doc is an Azure VM OS-disk snapshot. The snapshot is the last-known-good the rollback drill reverts to.
+Every apply script that mutates deployed application, configuration, data, or infrastructure bytes MUST take a recovery point before its first destructive op — the concrete example throughout this doc is an Azure VM OS-disk snapshot. The snapshot is the last-known-good the rollback drill reverts to. The only pre-snapshot mutation allowed is the bounded admission exception below.
 
 ## Why
 
@@ -16,7 +16,7 @@ A snapshot lets the operator revert to the last-known-good in ~5 minutes. Withou
 
 **Snapshots are taken from the CI runner, NOT from the VM itself.** The runner has a WIF-bound identity with `Disk Snapshot Contributor` narrowly scoped to `RG-AGENTS-CORE`; the VM-local managed identities deliberately don't have this role (granting it would also grant snapshot-delete + storage-delete rights per the built-in role definition, which is too broad for a runtime identity that runs untrusted skill code).
 
-The consumer's `deploy-on-merge.yml` calls the tc-pipelines [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable, whose [`snapshot-azure-vm-disk`](../../.github/actions/snapshot-azure-vm-disk/action.yml) composite runs the canonical snapshot shape before the apply:
+The consumer's `deploy-on-merge.yml` calls the tc-pipelines [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable. When no remote admission is configured, its [`snapshot-azure-vm-disk`](../../.github/actions/snapshot-azure-vm-disk/action.yml) composite runs the canonical snapshot shape before the apply:
 
 ```yaml
 - name: Snapshot vm-openclaw + vm-hermes-poc
@@ -33,6 +33,29 @@ The consumer's `deploy-on-merge.yml` calls the tc-pipelines [`azure-vm-deploy.ym
 ```
 
 After the snapshot succeeds, the workflow invokes the apply scripts with `--no-snapshot` so the in-script attempt below is skipped.
+
+### Reversible pre-snapshot admission exception
+
+The reusable may run an explicitly configured remote admission preflight before
+the snapshot when the deploy must freeze writers or acquire a lease before it
+can prove that runtime-authored state has been captured. This is a narrow
+coordination exception, not permission to apply early:
+
+- Preflight must not change deployed application or configuration bytes, publish
+  a tree, restart a service, replace an image, or alter durable business data.
+- Any freeze or lease must be exactly reversible by the declared
+  `failure-cleanup-script`; cleanup must be safe to run on every target.
+- The workflow records the cleanup obligation before the first remote
+  invocation. A partial preflight or failed later target must therefore run
+  cleanup on failure or cancellation, even when aggregate admission never
+  passed.
+- Admission evidence is published only after every target succeeds and the
+  target set agrees on one content-addressed receipt digest.
+- The recovery-point snapshot still completes before the first change to
+  deployed application, configuration, data, image, service, or infrastructure
+  state.
+
+If a preflight cannot meet every condition, take the recovery point before it.
 
 ### Apply scripts — best-effort fallback
 
@@ -87,7 +110,7 @@ The current convention is to keep snapshots for 14 days; a dedicated prune cron 
 
 ## CI-driven apply integration
 
-The consumer's CI apply workflow (`.github/workflows/deploy-on-merge.yml`) inherits this discipline. It calls the tc-pipelines [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable, whose [`snapshot-azure-vm-disk`](../../.github/actions/snapshot-azure-vm-disk/action.yml) composite step takes the recovery point from the pipeline (WIF) identity before the apply and passes `--no-snapshot` to the apply script — so the in-script `take_snapshot` fallback (above) is skipped on the CI path and fires only for operator-driven runs.
+The consumer's CI apply workflow (`.github/workflows/deploy-on-merge.yml`) inherits this discipline. It calls the tc-pipelines [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable. The optional reversible admission preflight runs first under the exception above; the [`snapshot-azure-vm-disk`](../../.github/actions/snapshot-azure-vm-disk/action.yml) composite then takes the recovery point from the pipeline (WIF) identity before apply and passes `--no-snapshot` to the apply script. The in-script `take_snapshot` fallback (above) is skipped on the CI path and fires only for operator-driven runs.
 
 For pure infrastructure changes (Bicep applies), the snapshot lives in the runbook — Bicep applies use a different rollback shape (`az deployment ... what-if` + redeploy from prior template), not OS-disk revert.
 
