@@ -61,13 +61,17 @@ def test_workflow_surfaces_preflight_and_snapshot_evidence() -> None:
     )
 
 
-def test_failure_cleanup_runs_after_preflight_when_snapshot_or_apply_fails() -> None:
+def test_failure_cleanup_runs_after_any_preflight_attempt_when_later_work_fails() -> None:
     steps = _workflow()["jobs"]["deploy"]["steps"]
+    preflight = next(step for step in steps if step.get("name") == "Remote preflight")
     cleanup = next(step for step in steps if step.get("name") == "Failure cleanup")
 
+    assert "cleanup-required=false" in preflight["run"]
+    assert "cleanup-required=true" in preflight["run"]
     assert "always()" in cleanup["if"]
     assert "failure() || cancelled()" in cleanup["if"]
-    assert "steps.preflight.outputs.status == 'passed'" in cleanup["if"]
+    assert "steps.preflight.outputs.cleanup-required == 'true'" in cleanup["if"]
+    assert "steps.preflight.outputs.status == 'passed'" not in cleanup["if"]
     assert "inputs.failure-cleanup-script != ''" in cleanup["if"]
     assert "CLEANUP_FAILED=1" in cleanup["run"]
     assert "TC_CLEANUP_REMOTE_SUCCESS_" in cleanup["run"]
@@ -75,6 +79,11 @@ def test_failure_cleanup_runs_after_preflight_when_snapshot_or_apply_fails() -> 
 
 def test_preflight_requires_one_content_addressed_receipt_marker() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
+    preflight = next(
+        step
+        for step in _workflow()["jobs"]["deploy"]["steps"]
+        if step.get("name") == "Remote preflight"
+    )["run"]
 
     assert "PREFLIGHT_RECEIPT_DIGEST=sha256:" in text
     assert "preflight produced no valid receipt digest" in text
@@ -82,6 +91,36 @@ def test_preflight_requires_one_content_addressed_receipt_marker() -> None:
     assert "TC_PREFLIGHT_REMOTE_SUCCESS_" in text
     assert "did not prove success" in text
     assert "run_with_retry" in text
+    assert preflight.count('echo "receipt-digest=${RECEIPTS[0]}"') == 1
+    assert preflight.index("preflight produced multiple receipt digests") < preflight.index(
+        'echo "receipt-digest=${RECEIPTS[0]}"'
+    )
+
+
+def test_terminal_conflict_does_not_sleep_before_failure() -> None:
+    steps = _workflow()["jobs"]["deploy"]["steps"]
+    preflight = next(step for step in steps if step.get("name") == "Remote preflight")[
+        "run"
+    ]
+    cleanup = next(step for step in steps if step.get("name") == "Failure cleanup")[
+        "run"
+    ]
+
+    for script in (preflight, cleanup):
+        terminal_guard = "if (( attempt >= max_attempts )); then"
+        assert terminal_guard in script
+        assert script.index(terminal_guard) < script.index('sleep "$wait_seconds"')
+
+
+def test_snapshot_standard_documents_reversible_preflight_exception() -> None:
+    standard = (
+        REPO_ROOT / "governance" / "standards" / "snapshot-before-apply.md"
+    ).read_text(encoding="utf-8")
+
+    assert "Reversible pre-snapshot admission exception" in standard
+    assert "must not change deployed application or configuration bytes" in standard
+    assert "partial preflight" in standard
+    assert "failure or cancellation" in standard
 
 
 def test_snapshot_action_surfaces_created_resource_ids() -> None:

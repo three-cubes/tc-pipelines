@@ -88,9 +88,9 @@ on:
       failure-cleanup-script:
         description: |
           Optional remote cleanup script executed on every target when
-          snapshot or apply fails after a successful preflight. Use it to thaw
-          resources frozen by preflight; it is never run after a skipped or
-          failed preflight.
+          preflight begins and preflight, snapshot, or apply later fails or is
+          cancelled. Use it to thaw resources frozen by a complete or partial
+          preflight; it is never run when preflight is skipped.
         required: false
         type: string
         default: ''
@@ -151,8 +151,11 @@ jobs:
           RG: ${{ inputs.resource-group }}
         run: |
           set -euo pipefail
-          echo "status=failed" >>"$GITHUB_OUTPUT"
-          echo "receipt-digest=" >>"$GITHUB_OUTPUT"
+          {
+            echo "status=failed"
+            echo "receipt-digest="
+            echo "cleanup-required=false"
+          } >>"$GITHUB_OUTPUT"
           if [[ -z "$PREFLIGHT_SCRIPT" ]]; then
             echo "status=skipped" >>"$GITHUB_OUTPUT"
             exit 0
@@ -171,6 +174,9 @@ jobs:
                 return 0
               fi
               if grep -q "(Conflict)" <<<"$OUT"; then
+                if (( attempt >= max_attempts )); then
+                  break
+                fi
                 echo "::warning::${description}: attempt ${attempt}/${max_attempts} hit (Conflict); retrying in ${wait_seconds}s" >&2
                 sleep "$wait_seconds"
                 wait_seconds=$((wait_seconds * 2))
@@ -184,6 +190,10 @@ jobs:
             return 1
           }
           COUNT=$(echo "$TARGETS_YAML" | yq 'length' -)
+          # From this point at least one remote preflight may freeze resources.
+          # Persist the cleanup obligation before the first Run Command so a
+          # later target failure or cancellation cannot strand earlier targets.
+          echo "cleanup-required=true" >>"$GITHUB_OUTPUT"
           for i in $(seq 0 $((COUNT - 1))); do
             VM=$(echo "$TARGETS_YAML" | yq ".[${i}].vm-name" -)
             REMOTE_SUCCESS_TOKEN="TC_PREFLIGHT_REMOTE_SUCCESS_${GITHUB_RUN_ID}_${i}_${RANDOM}"
@@ -204,12 +214,7 @@ jobs:
               grep -oE 'PREFLIGHT_RECEIPT_DIGEST=sha256:[0-9a-f]{64}' <<<"$MSG" |
                 sed 's/^PREFLIGHT_RECEIPT_DIGEST=//'
             )
-            if [[ "${#RECEIPTS[@]}" -eq 1 ]]; then
-              # Persist the evidence even when the remote script then exits
-              # nonzero. Callers can report the blocking receipt without
-              # treating the failed preflight as admitted.
-              echo "receipt-digest=${RECEIPTS[0]}" >>"$GITHUB_OUTPUT"
-            elif [[ "${#RECEIPTS[@]}" -gt 1 ]]; then
+            if [[ "${#RECEIPTS[@]}" -gt 1 ]]; then
               echo "::error::preflight on ${VM} produced multiple receipt digests"
               exit 1
             fi
@@ -416,7 +421,7 @@ jobs:
           fi
 
       - name: Failure cleanup
-        if: ${{ always() && (failure() || cancelled()) && steps.preflight.outputs.status == 'passed' && inputs.failure-cleanup-script != '' }}
+        if: ${{ always() && (failure() || cancelled()) && steps.preflight.outputs.cleanup-required == 'true' && inputs.failure-cleanup-script != '' }}
         shell: bash
         env:
           CLEANUP_SCRIPT: ${{ inputs.failure-cleanup-script }}
@@ -435,6 +440,9 @@ jobs:
                 return 0
               fi
               if grep -q "(Conflict)" <<<"$OUT"; then
+                if (( attempt >= max_attempts )); then
+                  break
+                fi
                 echo "::warning::${description}: attempt ${attempt}/${max_attempts} hit (Conflict); retrying in ${wait_seconds}s" >&2
                 sleep "$wait_seconds"
                 wait_seconds=$((wait_seconds * 2))
