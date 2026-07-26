@@ -76,6 +76,34 @@ on:
         required: false
         type: string
         default: 'false'
+      preflight-script:
+        description: |
+          Optional remote script executed on every target before any snapshot
+          or apply. A non-empty script must print exactly one
+          PREFLIGHT_RECEIPT_DIGEST=sha256:<64 lowercase hex> marker across the
+          target set. A failure blocks snapshot and apply.
+        required: false
+        type: string
+        default: ''
+      failure-cleanup-script:
+        description: |
+          Optional remote cleanup script executed on every target when
+          snapshot or apply fails after a successful preflight. Use it to thaw
+          resources frozen by preflight; it is never run after a skipped or
+          failed preflight.
+        required: false
+        type: string
+        default: ''
+    outputs:
+      preflight-status:
+        description: 'Preflight result: skipped, passed, or failed.'
+        value: ${{ jobs.deploy.outputs.preflight-status }}
+      preflight-receipt-digest:
+        description: Content-addressed receipt printed by the remote preflight.
+        value: ${{ jobs.deploy.outputs.preflight-receipt-digest }}
+      snapshot-resource-id:
+        description: Newline-separated Azure resource IDs for created snapshots.
+        value: ${{ jobs.deploy.outputs.snapshot-resource-id }}
 
 permissions:
   contents: read
@@ -86,6 +114,9 @@ jobs:
     name: WIF → snapshot → apply → smoke
     runs-on: ubuntu-latest
     outputs:
+      preflight-status: ${{ steps.preflight.outputs.status }}
+      preflight-receipt-digest: ${{ steps.preflight.outputs.receipt-digest }}
+      snapshot-resource-id: ${{ steps.snapshot.outputs.snapshot-resource-ids }}
       # Concatenated apply-script output across all targets. Empty unless the
       # caller sets `surface-apply-output: 'true'`. Lets a downstream caller job
       # read a value the apply script printed (e.g. a benchmark marker).
@@ -111,7 +142,102 @@ jobs:
           VM_LIST=$(echo "$TARGETS_YAML" | yq '[.[].vm-name] | join(",")' -)
           echo "vm-list=${VM_LIST}" >>"$GITHUB_OUTPUT"
 
+      - name: Remote preflight
+        id: preflight
+        shell: bash
+        env:
+          PREFLIGHT_SCRIPT: ${{ inputs.preflight-script }}
+          TARGETS_YAML: ${{ inputs.targets }}
+          RG: ${{ inputs.resource-group }}
+        run: |
+          set -euo pipefail
+          echo "status=failed" >>"$GITHUB_OUTPUT"
+          echo "receipt-digest=" >>"$GITHUB_OUTPUT"
+          if [[ -z "$PREFLIGHT_SCRIPT" ]]; then
+            echo "status=skipped" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PREFLIGHT_ACC="$(mktemp)"
+          trap 'rm -f "$PREFLIGHT_ACC"' EXIT
+          COUNT=$(echo "$TARGETS_YAML" | yq 'length' -)
+          for i in $(seq 0 $((COUNT - 1))); do
+            VM=$(echo "$TARGETS_YAML" | yq ".[${i}].vm-name" -)
+            set +e
+            MSG=$(az vm run-command invoke \
+              --resource-group "$RG" \
+              --name "$VM" \
+              --command-id RunShellScript \
+              --scripts "set -e; export HOME=/root; ${PREFLIGHT_SCRIPT}" \
+              --query 'value[0].message' -o tsv 2>&1)
+            RC=$?
+            set -e
+            echo "----- BEGIN ${VM} preflight output -----"
+            echo "$MSG"
+            echo "----- END ${VM} preflight output -----"
+            printf '%s\n' "$MSG" >>"$PREFLIGHT_ACC"
+            mapfile -t RECEIPTS < <(
+              grep -oE 'PREFLIGHT_RECEIPT_DIGEST=sha256:[0-9a-f]{64}' "$PREFLIGHT_ACC" |
+                sed 's/^PREFLIGHT_RECEIPT_DIGEST=//'
+            )
+            if [[ "${#RECEIPTS[@]}" -eq 1 ]]; then
+              # Persist the evidence even when the remote script then exits
+              # nonzero. Callers can report the blocking receipt without
+              # treating the failed preflight as admitted.
+              echo "receipt-digest=${RECEIPTS[0]}" >>"$GITHUB_OUTPUT"
+            elif [[ "${#RECEIPTS[@]}" -gt 1 ]]; then
+              echo "::error::preflight produced multiple receipt digests"
+              exit 1
+            fi
+            if [[ "$RC" -ne 0 ]]; then
+              echo "::error::remote preflight failed on ${VM} (rc=${RC}); no snapshot or apply ran"
+              exit "$RC"
+            fi
+            MSG_FILE="$(mktemp)"
+            printf '%s\n' "$MSG" >"$MSG_FILE"
+            python3 - "$VM" "$MSG_FILE" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          vm = sys.argv[1]
+          message = Path(sys.argv[2]).read_text(encoding="utf-8")
+          patterns = (
+              re.compile(r"(^|\n)FAIL(?:\s|:)", re.IGNORECASE),
+              re.compile(r"(^|\n)ERROR:", re.IGNORECASE),
+              re.compile(r"\bPermission denied\b", re.IGNORECASE),
+              re.compile(r"(^|\n)fatal:\s+", re.IGNORECASE),
+              re.compile(r"Traceback \(most recent call last\):"),
+              re.compile(r"\bIllegal option -o pipefail\b"),
+          )
+          matches = [pattern.pattern for pattern in patterns if pattern.search(message)]
+          if matches:
+              print(f"::error::Preflight on {vm} reported fatal output markers:", file=sys.stderr)
+              for match in matches:
+                  print(f"  - {match}", file=sys.stderr)
+              raise SystemExit(1)
+          PY
+            rm -f "$MSG_FILE"
+          done
+
+          mapfile -t RECEIPTS < <(
+            grep -oE 'PREFLIGHT_RECEIPT_DIGEST=sha256:[0-9a-f]{64}' "$PREFLIGHT_ACC" |
+              sed 's/^PREFLIGHT_RECEIPT_DIGEST=//'
+          )
+          if [[ "${#RECEIPTS[@]}" -eq 0 ]]; then
+            echo "::error::preflight produced no valid receipt digest"
+            exit 1
+          fi
+          if [[ "${#RECEIPTS[@]}" -ne 1 ]]; then
+            echo "::error::preflight produced multiple receipt digests"
+            printf '  - %s\n' "${RECEIPTS[@]}"
+            exit 1
+          fi
+          echo "receipt-digest=${RECEIPTS[0]}" >>"$GITHUB_OUTPUT"
+          echo "status=passed" >>"$GITHUB_OUTPUT"
+
       - name: Snapshot all VMs
+        id: snapshot
         uses: three-cubes/tc-pipelines/.github/actions/snapshot-azure-vm-disk@v1
         with:
           resource-group: ${{ inputs.resource-group }}
@@ -259,3 +385,24 @@ jobs:
               echo "${DELIM}"
             } >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Failure cleanup
+        if: ${{ failure() && steps.preflight.outputs.status == 'passed' && inputs.failure-cleanup-script != '' }}
+        shell: bash
+        env:
+          CLEANUP_SCRIPT: ${{ inputs.failure-cleanup-script }}
+          TARGETS_YAML: ${{ inputs.targets }}
+          RG: ${{ inputs.resource-group }}
+        run: |
+          set -euo pipefail
+          COUNT=$(echo "$TARGETS_YAML" | yq 'length' -)
+          for i in $(seq 0 $((COUNT - 1))); do
+            VM=$(echo "$TARGETS_YAML" | yq ".[${i}].vm-name" -)
+            echo "=== Failure cleanup ${VM} ==="
+            az vm run-command invoke \
+              --resource-group "$RG" \
+              --name "$VM" \
+              --command-id RunShellScript \
+              --scripts "set -e; export HOME=/root; ${CLEANUP_SCRIPT}" \
+              --query 'value[0].message' -o tsv
+          done
