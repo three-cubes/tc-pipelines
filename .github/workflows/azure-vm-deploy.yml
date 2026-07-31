@@ -26,7 +26,8 @@ name: 'Reusable — Azure VM deploy (WIF → snapshot → apply → smoke)'
 #         contents: read
 #         id-token: write
 #         packages: write  # only required when passing ghcr-actions-token
-#       secrets: inherit  # so the caller's AZURE_* repo vars are visible
+#       secrets:
+#         ghcr-actions-token: ${{ github.token }}
 #
 # The `targets` input is a YAML string. Parsed at runtime by yq inside the
 # job. Each target gets snapshot → apply → smoke in sequence.
@@ -111,13 +112,6 @@ on:
       snapshot-resource-id:
         description: Newline-separated Azure resource IDs for created snapshots.
         value: ${{ jobs.deploy.outputs.snapshot-resource-id }}
-
-permissions:
-  contents: read
-  id-token: write
-  # Reusable workflows cannot elevate the caller's token. Callers remain
-  # authoritative and grant this only when passing ghcr-actions-token.
-  packages: write
 
 jobs:
   deploy:
@@ -315,9 +309,9 @@ jobs:
               --resource-group "$RG" \
               --vm-name "$vm" \
               --run-command-name "$command_name" \
-              --script "set -e; export HOME=/root; ${script}" \
+              --script "set -e; export HOME=/root; exec 9>/run/lock/tc-pipelines-azure-vm-deploy.lock; flock 9; ${script}" \
               --protected-parameters "@/dev/fd/${protected_fd}" \
-              --timeout-in-seconds 1800 \
+              --timeout-in-seconds 5400 \
               --query 'provisioningState' -o tsv || rc=$?
             exec {protected_fd}<&-
             return "$rc"
@@ -483,7 +477,7 @@ jobs:
                 --resource-group "$RG" \
                 --name "$VM" \
                 --command-id RunShellScript \
-                --scripts "set -e; export HOME=/root; ${SCRIPT}" \
+                --scripts "set -e; export HOME=/root; exec 9>/run/lock/tc-pipelines-azure-vm-deploy.lock; flock 9; ${SCRIPT}" \
                 --query 'value[0].message' -o tsv)
             else
               MSG=$(run_with_retry "managed apply on ${VM}" \

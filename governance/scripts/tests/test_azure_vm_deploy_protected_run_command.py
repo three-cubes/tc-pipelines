@@ -12,6 +12,8 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "azure-vm-deploy.yml"
+IMPLEMENTATION = REPO_ROOT / "docs" / "IMPLEMENTATION.md"
+MIGRATION = REPO_ROOT / "docs" / "MIGRATION.md"
 
 
 class GithubActionsLoader(yaml.SafeLoader):
@@ -60,17 +62,28 @@ def test_ghcr_token_is_a_closed_optional_job_scoped_secret() -> None:
     assert apply["env"]["GHCR_ACTIONS_TOKEN"] == "${{ secrets.ghcr-actions-token }}"
 
 
-def test_reusable_requests_package_write_without_owning_the_caller_token() -> None:
-    """The caller grants or downgrades package access; the reusable cannot elevate it."""
+def test_reusable_inherits_permissions_so_legacy_callers_need_no_package_write() -> None:
+    """The caller grants package access only when opting into token transport."""
 
     workflow = _workflow()
+    migration = MIGRATION.read_text(encoding="utf-8")
 
-    assert workflow["permissions"] == {
-        "contents": "read",
-        "id-token": "write",
-        "packages": "write",
-    }
+    assert "permissions" not in workflow
     assert "permissions" not in workflow["jobs"]["deploy"]
+    assert "contents: read" in migration
+    assert "id-token: write" in migration
+    assert "packages: write" not in migration
+
+
+def test_opt_in_examples_map_the_job_token_to_the_declared_secret() -> None:
+    """Documented callers must opt in with both permission and secret mapping."""
+
+    mapping = "secrets:\n      ghcr-actions-token: ${{ github.token }}"
+    workflow_example = WORKFLOW.read_text(encoding="utf-8")
+    implementation = IMPLEMENTATION.read_text(encoding="utf-8")
+
+    assert "#       secrets:\n#         ghcr-actions-token: ${{ github.token }}" in workflow_example
+    assert mapping in implementation
 
 
 def test_token_apply_uses_unique_managed_command_with_one_protected_parameter() -> None:
@@ -88,9 +101,26 @@ def test_token_apply_uses_unique_managed_command_with_one_protected_parameter() 
     assert "apply-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${INVOCATION_SUFFIX}-${i}" in apply
     assert "secrets.token_hex" in apply
     assert apply.count("--protected-parameters") == 1
-    assert "--timeout-in-seconds" in apply
+    assert "--timeout-in-seconds 5400" in apply
     assert "--instance-view" in apply
     assert "--expand instanceView" not in apply
+
+
+def test_both_apply_paths_share_a_vm_local_serialization_lock() -> None:
+    """Unique managed resources must not bypass per-VM deploy serialization."""
+
+    apply = _apply_step()["run"]
+    lock = "exec 9>/run/lock/tc-pipelines-azure-vm-deploy.lock; flock 9;"
+
+    assert apply.count(lock) == 2
+    managed = apply[
+        apply.index("az vm run-command create") : apply.index("--protected-parameters")
+    ]
+    legacy = apply[
+        apply.index("az vm run-command invoke") : apply.index("--query 'value[0].message'")
+    ]
+    assert lock in managed
+    assert lock in legacy
 
 
 def test_token_path_keeps_legacy_invoke_for_callers_without_a_token() -> None:
