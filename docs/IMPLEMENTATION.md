@@ -81,6 +81,7 @@ jobs:
     permissions:
       contents: read
       id-token: write     # required for WIF
+      packages: write     # required only when passing ghcr-actions-token
     with:
       resource-group: RG-AGENTS-CORE
       op-tag: deploy-on-merge
@@ -110,6 +111,20 @@ The contract:
 | `op-tag` | string | Snapshot name prefix. Use the deploy mode (`deploy-on-merge`, `manual-apply`). |
 | `skip-snapshot` | string | "true" or "false". Maps to the `SKIP_SNAPSHOT=true` env var the snapshot action honours. |
 | `azure-{client,tenant,subscription}-id` | string | Repo variables. WIF needs these to mint the OIDC token. |
+
+The reusable also accepts one optional `workflow_call` secret,
+`ghcr-actions-token`. When present, only the apply step receives it. The apply
+script runs through an Azure Managed Run Command whose unique resource name is
+derived from the workflow run, attempt, a runner-generated nonce, and target
+index; the token is passed from an anonymous FD as the single protected
+`HERMES_GHCR_ACTIONS_TOKEN` parameter. The command resource is deleted before
+smoke testing, by an exit trap, and by an independent `always()` step driven by
+a non-secret command manifest.
+The token is not added to target YAML, script text, ordinary parameters, files,
+logs, or workflow outputs. Callers that omit the secret retain the existing
+`az vm run-command invoke` apply path unchanged. An opted-in caller must grant
+`packages: write`; reusable workflows cannot elevate caller permissions, so a
+caller that omits or downgrades that permission remains authoritative.
 
 The reusable workflow does the rest:
 1. WIF login (composite action)

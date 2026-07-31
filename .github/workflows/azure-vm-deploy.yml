@@ -25,6 +25,7 @@ name: 'Reusable — Azure VM deploy (WIF → snapshot → apply → smoke)'
 #       permissions:
 #         contents: read
 #         id-token: write
+#         packages: write  # only required when passing ghcr-actions-token
 #       secrets: inherit  # so the caller's AZURE_* repo vars are visible
 #
 # The `targets` input is a YAML string. Parsed at runtime by yq inside the
@@ -32,6 +33,12 @@ name: 'Reusable — Azure VM deploy (WIF → snapshot → apply → smoke)'
 
 on:
   workflow_call:
+    secrets:
+      ghcr-actions-token:
+        description: |
+          Optional job-lifetime GitHub Actions token relayed to the remote
+          apply only as the protected HERMES_GHCR_ACTIONS_TOKEN parameter.
+        required: false
     inputs:
       resource-group:
         description: Azure resource group containing all target VMs.
@@ -108,6 +115,9 @@ on:
 permissions:
   contents: read
   id-token: write
+  # Reusable workflows cannot elevate the caller's token. Callers remain
+  # authoritative and grant this only when passing ghcr-actions-token.
+  packages: write
 
 jobs:
   deploy:
@@ -283,11 +293,80 @@ jobs:
         id: apply
         shell: bash
         env:
+          GHCR_ACTIONS_TOKEN: ${{ secrets.ghcr-actions-token }}
           TARGETS_YAML: ${{ inputs.targets }}
           RG: ${{ inputs.resource-group }}
           SURFACE_OUTPUT: ${{ inputs.surface-apply-output }}
         run: |
           set -euo pipefail
+          managed_apply_create() {
+            local vm="$1"
+            local command_name="$2"
+            local script="$3"
+            local protected_fd
+            local rc=0
+            # Azure CLI expands the protected key/value argument from an
+            # inherited FD. Build a fresh stream for every retry because az
+            # consumes it while parsing.
+            exec {protected_fd}< <(
+              printf 'HERMES_GHCR_ACTIONS_TOKEN=%s' "$GHCR_ACTIONS_TOKEN"
+            )
+            az vm run-command create \
+              --resource-group "$RG" \
+              --vm-name "$vm" \
+              --run-command-name "$command_name" \
+              --script "set -e; export HOME=/root; ${script}" \
+              --protected-parameters "@/dev/fd/${protected_fd}" \
+              --timeout-in-seconds 1800 \
+              --query 'provisioningState' -o tsv || rc=$?
+            exec {protected_fd}<&-
+            return "$rc"
+          }
+
+          # The protected parameter above is the sole token transport. Keep the
+          # Actions-provided secret as a non-exported shell value so unrelated
+          # child processes in this step do not inherit it.
+          PROTECTED_GHCR_ACTIONS_TOKEN="${GHCR_ACTIONS_TOKEN:-}"
+          unset GHCR_ACTIONS_TOKEN
+          declare GHCR_ACTIONS_TOKEN="$PROTECTED_GHCR_ACTIONS_TOKEN"
+          unset PROTECTED_GHCR_ACTIONS_TOKEN
+          readonly GHCR_ACTIONS_TOKEN
+
+          INVOCATION_SUFFIX=""
+          MANAGED_COMMAND_MANIFEST=""
+          if [[ -n "$GHCR_ACTIONS_TOKEN" ]]; then
+            INVOCATION_SUFFIX=$(python3 -c 'import secrets; print(secrets.token_hex(6))')
+            MANAGED_COMMAND_MANIFEST="${RUNNER_TEMP}/managed-apply-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${INVOCATION_SUFFIX}.jsonl"
+            : >"$MANAGED_COMMAND_MANIFEST"
+          fi
+          echo "managed-command-manifest=${MANAGED_COMMAND_MANIFEST}" >>"$GITHUB_OUTPUT"
+
+          PENDING_MANAGED_VM=""
+          PENDING_MANAGED_COMMAND=""
+          cleanup_managed_command() {
+            if [[ -z "$PENDING_MANAGED_VM" || -z "$PENDING_MANAGED_COMMAND" ]]; then
+              return 0
+            fi
+            local vm="$PENDING_MANAGED_VM"
+            local command_name="$PENDING_MANAGED_COMMAND"
+            local delete_output
+            if ! delete_output=$(run_with_retry "delete managed apply command on ${vm}" \
+              az vm run-command delete \
+              --resource-group "$RG" \
+              --vm-name "$vm" \
+              --run-command-name "$command_name" \
+              --yes); then
+              printf '%s\n' "$delete_output" >&2
+              echo "::error::failed to delete managed apply command ${command_name} on ${vm}"
+              return 1
+            fi
+            PENDING_MANAGED_VM=""
+            PENDING_MANAGED_COMMAND=""
+          }
+          trap cleanup_managed_command EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
           # Accumulate each target's apply output so it can optionally be
           # surfaced as the `apply-output` job output (see surface-apply-output).
           APPLY_ACC="$(mktemp)"
@@ -296,28 +375,62 @@ jobs:
           # still in flight (operator ad-hoc commands, prior deploy that
           # didn't finish cleaning up, etc.). Retry with backoff so the
           # workflow doesn't fail on transient collisions.
+          redact_stream() {
+            local line
+            while IFS= read -r line || [[ -n "$line" ]]; do
+              if [[ -n "$GHCR_ACTIONS_TOKEN" ]]; then
+                line="${line//"$GHCR_ACTIONS_TOKEN"/***}"
+              fi
+              printf '%s\n' "$line"
+            done
+          }
           run_with_retry() {
             local description="$1"; shift
             local attempt=1
             local max_attempts=5
             local wait_seconds=10
             while [[ $attempt -le $max_attempts ]]; do
-              if OUT=$("$@" 2>&1); then
-                echo "$OUT"
+              local attempt_dir stdout_pipe stderr_pipe stdout_file stderr_file stdout_pid stderr_pid rc
+              attempt_dir=$(mktemp -d)
+              stdout_pipe="${attempt_dir}/stdout.pipe"
+              stderr_pipe="${attempt_dir}/stderr.pipe"
+              stdout_file="${attempt_dir}/stdout"
+              stderr_file="${attempt_dir}/stderr"
+              mkfifo "$stdout_pipe" "$stderr_pipe"
+              redact_stream <"$stdout_pipe" >"$stdout_file" &
+              stdout_pid=$!
+              redact_stream <"$stderr_pipe" >"$stderr_file" &
+              stderr_pid=$!
+              set +e
+              "$@" >"$stdout_pipe" 2>"$stderr_pipe"
+              rc=$?
+              set -e
+              wait "$stdout_pid"
+              wait "$stderr_pid"
+              if [[ "$rc" -eq 0 ]]; then
+                if [[ -s "$stderr_file" ]]; then
+                  cat "$stderr_file" >&2
+                fi
+                cat "$stdout_file"
+                rm -rf "$attempt_dir"
                 return 0
               fi
-              if echo "$OUT" | grep -q "(Conflict)"; then
-                echo "::warning::${description}: attempt ${attempt}/${max_attempts} hit (Conflict); retrying in ${wait_seconds}s"
+              if grep -q "(Conflict)" "$stderr_file"; then
+                echo "::warning::${description}: attempt ${attempt}/${max_attempts} hit (Conflict); retrying in ${wait_seconds}s" >&2
+                cat "$stderr_file" >&2
+                rm -rf "$attempt_dir"
                 sleep "$wait_seconds"
                 wait_seconds=$((wait_seconds * 2))
                 attempt=$((attempt + 1))
                 continue
               fi
               # Non-Conflict error — surface immediately, don't retry blindly.
-              echo "$OUT"
+              cat "$stdout_file" >&2
+              cat "$stderr_file" >&2
+              rm -rf "$attempt_dir"
               return 1
             done
-            echo "::error::${description}: exhausted ${max_attempts} retries on (Conflict)"
+            echo "::error::${description}: exhausted ${max_attempts} retries on (Conflict)" >&2
             return 1
           }
           gate_run_command_output() {
@@ -357,12 +470,44 @@ jobs:
             SCRIPT=$(echo "$TARGETS_YAML" | yq ".[${i}].apply-script" -)
             UNITS=$(echo "$TARGETS_YAML" | yq ".[${i}].smoke-units" -)
             echo "=== Deploying ${VM} ==="
-            MSG=$(run_with_retry "apply on ${VM}" az vm run-command invoke \
-              --resource-group "$RG" \
-              --name "$VM" \
-              --command-id RunShellScript \
-              --scripts "set -e; export HOME=/root; ${SCRIPT}" \
-              --query 'value[0].message' -o tsv)
+            RUN_COMMAND_NAME="apply-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${INVOCATION_SUFFIX}-${i}"
+            MANAGED_FAILURE=""
+            if [[ -n "$GHCR_ACTIONS_TOKEN" ]]; then
+              jq -cn --arg vm "$VM" --arg command "$RUN_COMMAND_NAME" \
+                '{vm: $vm, command: $command}' >>"$MANAGED_COMMAND_MANIFEST"
+              PENDING_MANAGED_VM="$VM"
+              PENDING_MANAGED_COMMAND="$RUN_COMMAND_NAME"
+            fi
+            if [[ -z "$GHCR_ACTIONS_TOKEN" ]]; then
+              MSG=$(run_with_retry "apply on ${VM}" az vm run-command invoke \
+                --resource-group "$RG" \
+                --name "$VM" \
+                --command-id RunShellScript \
+                --scripts "set -e; export HOME=/root; ${SCRIPT}" \
+                --query 'value[0].message' -o tsv)
+            else
+              MSG=$(run_with_retry "managed apply on ${VM}" \
+                managed_apply_create "$VM" "$RUN_COMMAND_NAME" "$SCRIPT")
+              MANAGED_RESULT=$(run_with_retry "managed apply result on ${VM}" \
+                az vm run-command show \
+                --resource-group "$RG" \
+                --vm-name "$VM" \
+                --run-command-name "$RUN_COMMAND_NAME" \
+                --instance-view -o json)
+              MANAGED_STATE=$(jq -r '.instanceView.executionState // ""' <<<"$MANAGED_RESULT")
+              MANAGED_EXIT_CODE=$(jq -r '.instanceView.exitCode // ""' <<<"$MANAGED_RESULT")
+              MSG=$(jq -r '[.instanceView.output // "", .instanceView.error // ""] | map(select(length > 0)) | join("\n")' <<<"$MANAGED_RESULT")
+              MSG="${MSG//"$GHCR_ACTIONS_TOKEN"/***}"
+              if ! cleanup_managed_command; then
+                MANAGED_FAILURE="managed command cleanup failed on ${VM}"
+              fi
+              if [[ "$MANAGED_STATE" != "Succeeded" || "$MANAGED_EXIT_CODE" != "0" ]]; then
+                if [[ -n "$MANAGED_FAILURE" ]]; then
+                  MANAGED_FAILURE+="; "
+                fi
+                MANAGED_FAILURE+="managed apply failed on ${VM} (state=${MANAGED_STATE:-missing}, exit=${MANAGED_EXIT_CODE:-missing})"
+              fi
+            fi
             echo "----- BEGIN ${VM} apply output -----"
             echo "$MSG"
             echo "----- END ${VM} apply output -----"
@@ -374,6 +519,10 @@ jobs:
               exit 1
             fi
             rm -f "$MSG_FILE"
+            if [[ -n "$MANAGED_FAILURE" ]]; then
+              echo "::error::${MANAGED_FAILURE}"
+              exit 1
+            fi
             if [[ -n "${UNITS}" && "${UNITS}" != "null" ]]; then
               echo "=== Smoke ${VM} (${UNITS}) ==="
               SMOKE_MSG=$(run_with_retry "smoke on ${VM}" az vm run-command invoke \
@@ -419,6 +568,68 @@ jobs:
               echo "${DELIM}"
             } >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Ensure managed apply commands are deleted
+        if: ${{ always() && steps.apply.outputs.managed-command-manifest != '' }}
+        shell: bash
+        env:
+          MANAGED_COMMAND_MANIFEST: ${{ steps.apply.outputs.managed-command-manifest }}
+          RG: ${{ inputs.resource-group }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f "$MANAGED_COMMAND_MANIFEST" ]]; then
+            echo "::error::managed command manifest is missing"
+            exit 1
+          fi
+          run_with_retry() {
+            local description="$1"; shift
+            local attempt=1
+            local max_attempts=5
+            local wait_seconds=10
+            while [[ $attempt -le $max_attempts ]]; do
+              if OUT=$("$@" 2>&1); then
+                printf '%s\n' "$OUT"
+                return 0
+              fi
+              if grep -q "(Conflict)" <<<"$OUT"; then
+                if (( attempt >= max_attempts )); then
+                  break
+                fi
+                echo "::warning::${description}: attempt ${attempt}/${max_attempts} hit (Conflict); retrying in ${wait_seconds}s" >&2
+                sleep "$wait_seconds"
+                wait_seconds=$((wait_seconds * 2))
+                attempt=$((attempt + 1))
+                continue
+              fi
+              printf '%s\n' "$OUT"
+              return 1
+            done
+            echo "::error::${description}: exhausted ${max_attempts} retries on (Conflict)" >&2
+            return 1
+          }
+          CLEANUP_FAILED=0
+          while IFS= read -r entry; do
+            VM=$(jq -r '.vm' <<<"$entry")
+            COMMAND_NAME=$(jq -r '.command' <<<"$entry")
+            set +e
+            MSG=$(run_with_retry "delete managed apply command on ${VM}" \
+              az vm run-command delete \
+              --resource-group "$RG" \
+              --vm-name "$VM" \
+              --run-command-name "$COMMAND_NAME" \
+              --yes 2>&1)
+            RC=$?
+            set -e
+            if [[ "$RC" -ne 0 ]] && ! grep -qiE 'ResourceNotFound|NotFound|could not be found' <<<"$MSG"; then
+              printf '%s\n' "$MSG" >&2
+              echo "::error::failed to ensure managed command ${COMMAND_NAME} is deleted on ${VM}"
+              CLEANUP_FAILED=1
+            fi
+          done <"$MANAGED_COMMAND_MANIFEST"
+          if [[ "$CLEANUP_FAILED" -eq 0 ]]; then
+            rm -f "$MANAGED_COMMAND_MANIFEST"
+          fi
+          exit "$CLEANUP_FAILED"
 
       - name: Failure cleanup
         if: ${{ always() && (failure() || cancelled()) && steps.preflight.outputs.cleanup-required == 'true' && inputs.failure-cleanup-script != '' }}

@@ -10,6 +10,17 @@ for the consumer-facing `@vN` workflow/action references.
 
 ### Added
 
+- **Protected GHCR apply transport for `azure-vm-deploy.yml` (EXE-61).** An
+  optional, closed `ghcr-actions-token` reusable-workflow secret switches only
+  the apply leg to a uniquely named Azure Managed Run Command. The repository
+  token reaches the VM as one FD-backed protected parameter, is removed from
+  the step's exported environment, and the uniquely named command resource is
+  deleted before smoke and by a manifest-backed `always()` cleanup step. Managed
+  output retains the existing fatal-marker gate,
+  snapshot, retry, smoke, and opt-in output behavior. Callers that omit the
+  secret keep the existing `az vm run-command invoke` path. Opted-in callers
+  remain responsible for granting `packages: write`; the reusable workflow can
+  only maintain or downgrade the caller's token permission.
 - **Pre-snapshot remote admission for `azure-vm-deploy.yml` (EXE-61).** Consumers
   can opt into a `preflight-script` that runs on every target before the first
   snapshot or apply and must emit one content-addressed
