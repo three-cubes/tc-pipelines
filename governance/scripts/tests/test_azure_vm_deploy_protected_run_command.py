@@ -22,9 +22,7 @@ class GithubActionsLoader(yaml.SafeLoader):
 
 GithubActionsLoader.yaml_implicit_resolvers = {
     key: [
-        (tag, pattern)
-        for tag, pattern in resolvers
-        if tag != "tag:yaml.org,2002:bool"
+        (tag, pattern) for tag, pattern in resolvers if tag != "tag:yaml.org,2002:bool"
     ]
     for key, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
@@ -62,7 +60,9 @@ def test_ghcr_token_is_a_closed_optional_job_scoped_secret() -> None:
     assert apply["env"]["GHCR_ACTIONS_TOKEN"] == "${{ secrets.ghcr-actions-token }}"
 
 
-def test_reusable_inherits_permissions_so_legacy_callers_need_no_package_write() -> None:
+def test_reusable_inherits_permissions_so_legacy_callers_need_no_package_write() -> (
+    None
+):
     """The caller grants package access only when opting into token transport."""
 
     workflow = _workflow()
@@ -76,14 +76,34 @@ def test_reusable_inherits_permissions_so_legacy_callers_need_no_package_write()
 
 
 def test_opt_in_examples_map_the_job_token_to_the_declared_secret() -> None:
-    """Documented callers must opt in with both permission and secret mapping."""
+    """Documented callers must map the configuration-time job token."""
 
-    mapping = "secrets:\n      ghcr-actions-token: ${{ github.token }}"
+    mapping = "secrets:\n      ghcr-actions-token: ${{ secrets.GITHUB_TOKEN }}"
     workflow_example = WORKFLOW.read_text(encoding="utf-8")
     implementation = IMPLEMENTATION.read_text(encoding="utf-8")
 
-    assert "#       secrets:\n#         ghcr-actions-token: ${{ github.token }}" in workflow_example
+    assert (
+        "#       secrets:\n#         ghcr-actions-token: ${{ secrets.GITHUB_TOKEN }}"
+        in workflow_example
+    )
     assert mapping in implementation
+    assert "ghcr-actions-token: ${{ github.token }}" not in workflow_example
+    assert "ghcr-actions-token: ${{ github.token }}" not in implementation
+
+
+def test_apply_requires_a_unique_remote_exit_token() -> None:
+    """Invoke must fail closed when Azure hides the remote shell exit code."""
+
+    apply = _apply_step()["run"]
+
+    sentinel = "TC_APPLY_REMOTE_EXIT_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_${i}_"
+    assert sentinel in apply
+    assert "remote apply did not prove an exact exit status on" in apply
+    assert 'gate_run_command_output "$VM" "$REMOTE_EXIT_SENTINEL" "$MSG_FILE"' in apply
+    assert '--scripts "$REMOTE_SCRIPT"' in apply
+    assert 'managed_apply_create "$VM" "$RUN_COMMAND_NAME" "$REMOTE_SCRIPT"' in apply
+    assert "remote_rc=\\$?" in apply
+    assert any("exit" in line and "remote_rc" in line for line in apply.splitlines())
 
 
 def test_token_apply_uses_unique_managed_command_with_one_protected_parameter() -> None:
@@ -98,7 +118,10 @@ def test_token_apply_uses_unique_managed_command_with_one_protected_parameter() 
     assert 'HERMES_GHCR_ACTIONS_TOKEN="$GHCR_ACTIONS_TOKEN"' not in apply
     assert '--protected-parameters "@/dev/fd/${protected_fd}"' in apply
     assert "printf 'HERMES_GHCR_ACTIONS_TOKEN=%s'" in apply
-    assert "apply-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${INVOCATION_SUFFIX}-${i}" in apply
+    assert (
+        "apply-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${INVOCATION_SUFFIX}-${i}"
+        in apply
+    )
     assert "secrets.token_hex" in apply
     assert apply.count("--protected-parameters") == 1
     assert "--timeout-in-seconds 5400" in apply
@@ -110,17 +133,16 @@ def test_both_apply_paths_share_a_vm_local_serialization_lock() -> None:
     """Unique managed resources must not bypass per-VM deploy serialization."""
 
     apply = _apply_step()["run"]
-    lock = "exec 9>/run/lock/tc-pipelines-azure-vm-deploy.lock; flock 9;"
+    lock = "exec 9>/run/lock/tc-pipelines-azure-vm-deploy.lock"
 
-    assert apply.count(lock) == 2
-    managed = apply[
-        apply.index("az vm run-command create") : apply.index("--protected-parameters")
+    assert apply.count(lock) == 1
+    remote_start = apply.index("REMOTE_SCRIPT=$(")
+    remote_script = apply[
+        remote_start : apply.index('if [[ -n "$GHCR_ACTIONS_TOKEN" ]]', remote_start)
     ]
-    legacy = apply[
-        apply.index("az vm run-command invoke") : apply.index("--query 'value[0].message'")
-    ]
-    assert lock in managed
-    assert lock in legacy
+    assert lock in remote_script
+    assert '--scripts "$REMOTE_SCRIPT"' in apply
+    assert 'managed_apply_create "$VM" "$RUN_COMMAND_NAME" "$REMOTE_SCRIPT"' in apply
 
 
 def test_token_path_keeps_legacy_invoke_for_callers_without_a_token() -> None:
@@ -129,7 +151,7 @@ def test_token_path_keeps_legacy_invoke_for_callers_without_a_token() -> None:
     apply = _apply_step()["run"]
 
     assert 'if [[ -z "$GHCR_ACTIONS_TOKEN" ]]; then' in apply
-    assert 'az vm run-command invoke' in apply
+    assert "az vm run-command invoke" in apply
     assert 'else\n    MSG=$(run_with_retry "managed apply on ${VM}"' in apply
 
 
@@ -142,11 +164,15 @@ def test_token_is_not_written_to_targets_scripts_or_outputs() -> None:
     assert apply["env"]["TARGETS_YAML"] == "${{ inputs.targets }}"
     assert "GHCR_ACTIONS_TOKEN" not in apply["env"]["TARGETS_YAML"]
     create_argv = script[
-        script.index("az vm run-command create") : script.index("--query 'provisioningState'")
+        script.index("az vm run-command create") : script.index(
+            "--query 'provisioningState'"
+        )
     ]
     assert "--protected-parameters" in create_argv
     assert "$GHCR_ACTIONS_TOKEN" not in create_argv
-    output_block = script[script.index('if [[ "${SURFACE_OUTPUT:-false}" == "true" ]]; then') :]
+    output_block = script[
+        script.index('if [[ "${SURFACE_OUTPUT:-false}" == "true" ]]; then') :
+    ]
     assert "GHCR_ACTIONS_TOKEN" not in output_block
     assert "HERMES_GHCR_ACTIONS_TOKEN" not in output_block
 
@@ -156,11 +182,17 @@ def test_token_is_unexported_before_any_apply_child_process() -> None:
 
     script = _apply_step()["run"]
     unset = script.index("unset GHCR_ACTIONS_TOKEN")
-    redeclare = script.index('declare GHCR_ACTIONS_TOKEN="$PROTECTED_GHCR_ACTIONS_TOKEN"')
+    redeclare = script.index(
+        'declare GHCR_ACTIONS_TOKEN="$PROTECTED_GHCR_ACTIONS_TOKEN"'
+    )
     first_apply_child = script.index('APPLY_ACC="$(mktemp)"')
-    show_block = script[script.index("az vm run-command show") : script.index("MANAGED_STATE=")]
+    show_block = script[
+        script.index("az vm run-command show") : script.index("MANAGED_STATE=")
+    ]
     delete_block = script[
-        script.index("az vm run-command delete") : script.index("trap cleanup_managed_command")
+        script.index("az vm run-command delete") : script.index(
+            "trap cleanup_managed_command"
+        )
     ]
 
     assert unset < redeclare < first_apply_child
@@ -179,7 +211,9 @@ def test_managed_command_cleanup_covers_create_show_delete_and_signals() -> None
     clear_command = script.index('PENDING_MANAGED_COMMAND=""', delete)
     pending = script.index('PENDING_MANAGED_VM="$VM"')
     create = script.index('MSG=$(run_with_retry "managed apply on ${VM}"')
-    show = script.index('MANAGED_RESULT=$(run_with_retry "managed apply result on ${VM}"')
+    show = script.index(
+        'MANAGED_RESULT=$(run_with_retry "managed apply result on ${VM}"'
+    )
 
     assert "trap cleanup_managed_command EXIT" in script
     assert "trap 'exit 130' INT" in script
@@ -221,7 +255,12 @@ def test_retry_separates_and_redacts_diagnostics_from_structured_stdout() -> Non
     assert 'cat "$stderr_file" >&2' in script
     assert 'cat "$stdout_file"' in script
     assert 'hit (Conflict); retrying in ${wait_seconds}s" >&2' in script
-    assert "2>&1" not in script[script.index("run_with_retry()") : script.index("gate_run_command_output()")]
+    assert (
+        "2>&1"
+        not in script[
+            script.index("run_with_retry()") : script.index("gate_run_command_output()")
+        ]
+    )
 
 
 def test_managed_failure_preserves_apply_output_gate_and_legacy_output_order() -> None:
@@ -230,7 +269,10 @@ def test_managed_failure_preserves_apply_output_gate_and_legacy_output_order() -
     script = _apply_step()["run"]
     output = script.index('echo "----- BEGIN ${VM} apply output -----"')
     accumulate = script.index("printf '=== %s ===\\n%s\\n'", output)
-    gate = script.index('gate_run_command_output "$VM" "$MSG_FILE"', output)
+    gate = script.index(
+        'gate_run_command_output "$VM" "$REMOTE_EXIT_SENTINEL" "$MSG_FILE"',
+        output,
+    )
     managed_failure = script.index('if [[ -n "$MANAGED_FAILURE" ]]', output)
     smoke = script.index('echo "=== Smoke ${VM} (${UNITS}) ==="', output)
     cleanup = script.index("if ! cleanup_managed_command; then")
@@ -267,7 +309,7 @@ def fake_apply_tools(tmp_path: Path) -> tuple[Path, Path]:
 case "$1" in
   length) echo 1 ;;
   '.[0].vm-name') echo vm-test ;;
-  '.[0].apply-script') echo true ;;
+  '.[0].apply-script') printf '%s\n' "${FAKE_YQ_SCRIPT:-true}" ;;
   '.[0].smoke-units') echo '' ;;
   *) echo "unexpected yq expression: $1" >&2; exit 2 ;;
 esac
@@ -289,6 +331,8 @@ count=$((count + 1))
 printf '%s' "$count" >"$count_file"
 case "$op" in
   create)
+    marker=$(grep -oE 'TC_APPLY_REMOTE_EXIT_[A-Za-z0-9_]+' <<<"$*")
+    printf '%s' "$marker" >"$FAKE_AZ_STATE_DIR/remote-exit-marker"
     while [[ $# -gt 0 ]]; do
       if [[ "$1" == "--protected-parameters" ]]; then
         protected_path="${2#@}"
@@ -310,14 +354,28 @@ case "$op" in
       exit 1
     fi
     token=$(sed 's/^HERMES_GHCR_ACTIONS_TOKEN=//' "$FAKE_AZ_STATE_DIR/protected.txt")
+    marker=$(<"$FAKE_AZ_STATE_DIR/remote-exit-marker")
     echo 'benign show warning' >&2
-    jq -cn --arg token "$token" '{instanceView:{executionState:"Succeeded",exitCode:0,output:("result-" + $token),error:""}}'
+    jq -cn --arg token "$token" --arg marker "$marker" '{instanceView:{executionState:"Succeeded",exitCode:0,output:("result-" + $token + "\n" + $marker + "=0"),error:""}}'
     ;;
   delete)
     echo deleted
     ;;
   invoke)
     echo legacy-result
+    while [[ $# -gt 0 ]]; do
+      if [[ "$1" == "--scripts" ]]; then
+        printf '%s' "$2" >"$FAKE_AZ_STATE_DIR/remote-script"
+        break
+      fi
+      shift
+    done
+    marker=$(grep -oE 'TC_APPLY_REMOTE_EXIT_[A-Za-z0-9_]+' <<<"$*")
+    if [[ "${FAKE_AZ_LEGACY_EXIT:-0}" == "missing" ]]; then
+      echo 'remote shell exited before success marker' >&2
+    else
+      echo "${marker}=${FAKE_AZ_LEGACY_EXIT:-0}"
+    fi
     ;;
   *) echo "unexpected az operation: $op" >&2; exit 2 ;;
 esac
@@ -334,6 +392,8 @@ def _run_apply(
     fake_apply_tools: tuple[Path, Path],
     *,
     token: str,
+    apply_script: str = "true",
+    legacy_exit: str = "0",
 ) -> subprocess.CompletedProcess[str]:
     bin_dir, state_dir = fake_apply_tools
     script = tmp_path / "apply.sh"
@@ -342,7 +402,9 @@ def _run_apply(
     env.update(
         {
             "FAKE_AZ_STATE_DIR": str(state_dir),
+            "FAKE_AZ_LEGACY_EXIT": legacy_exit,
             "GHCR_ACTIONS_TOKEN": token,
+            "FAKE_YQ_SCRIPT": apply_script,
             "GITHUB_ENV": str(tmp_path / "github-env"),
             "GITHUB_OUTPUT": str(tmp_path / "github-output"),
             "GITHUB_RUN_ATTEMPT": "2",
@@ -399,6 +461,57 @@ def test_fake_azure_no_token_keeps_legacy_invoke_semantics(
     assert "vm run-command invoke" in argv_log
     assert "vm run-command create" not in argv_log
     assert "legacy-result" in result.stdout
+
+
+@pytest.mark.parametrize("remote_exit", ["missing", "23", "-1", "256", "invalid"])
+def test_fake_azure_no_token_fails_without_exact_zero_remote_exit(
+    tmp_path: Path,
+    fake_apply_tools: tuple[Path, Path],
+    remote_exit: str,
+) -> None:
+    """A zero Azure CLI status cannot hide a failed remote shell."""
+
+    result = _run_apply(
+        tmp_path,
+        fake_apply_tools,
+        token="",
+        legacy_exit=remote_exit,
+    )
+
+    assert result.returncode != 0
+    assert "remote apply did not prove an exact exit status on vm-test" in result.stderr
+
+
+def test_remote_wrapper_reports_exit_from_exec_based_caller(
+    tmp_path: Path, fake_apply_tools: tuple[Path, Path]
+) -> None:
+    """A caller exec cannot replace the parent that reports remote status."""
+
+    result = _run_apply(
+        tmp_path,
+        fake_apply_tools,
+        token="",
+        apply_script="exec bash -c 'exit 23'",
+    )
+    _, state_dir = fake_apply_tools
+    assert result.returncode == 0, result.stderr
+    remote_script = (state_dir / "remote-script").read_text(encoding="utf-8")
+    remote_script = remote_script.replace(
+        "exec 9>/run/lock/tc-pipelines-azure-vm-deploy.lock",
+        f"exec 9>{tmp_path / 'deploy.lock'}",
+    )
+    remote_script = remote_script.replace("  flock 9", "  true")
+
+    remote = subprocess.run(
+        ["bash", "-c", remote_script],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert remote.returncode == 23
+    assert "TC_APPLY_REMOTE_EXIT_123456_2_0_" in remote.stdout
+    assert remote.stdout.rstrip().endswith("=23")
 
 
 def test_fake_azure_always_cleanup_deletes_manifest_commands(
@@ -458,6 +571,10 @@ def test_two_reusable_invocations_in_one_run_use_different_command_names(
     ]
     assert len(manifests) == 2
     assert manifests[0] != manifests[1]
-    first_command = yaml.safe_load(Path(manifests[0]).read_text(encoding="utf-8"))["command"]
-    second_command = yaml.safe_load(Path(manifests[1]).read_text(encoding="utf-8"))["command"]
+    first_command = yaml.safe_load(Path(manifests[0]).read_text(encoding="utf-8"))[
+        "command"
+    ]
+    second_command = yaml.safe_load(Path(manifests[1]).read_text(encoding="utf-8"))[
+        "command"
+    ]
     assert first_command != second_command

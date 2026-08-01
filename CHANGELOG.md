@@ -33,6 +33,13 @@ for the consumer-facing `@vN` workflow/action references.
 
 ### Fixed
 
+- **Fail-closed Azure VM apply completion and usable GHCR token opt-in
+  (EXE-61).** Reusable callers now map the configuration-time
+  `secrets.GITHUB_TOKEN` into `ghcr-actions-token`; the previous documented
+  `${{ github.token }}` mapping evaluated empty outside an execution step.
+  Managed and legacy Run Command paths now share a parent-shell exit sentinel,
+  so an `exec`-based apply or an Azure extension false green cannot suppress a
+  non-zero remote exit and allow smoke or deployment success to continue.
 - **`auto-merge-on-green.yml` resolves the PR from `head-sha` itself.** A
   `workflow_run` caller has no `github.event.pull_request`, so it previously ran
   a local `resolve` job to map commit→PR via `commits/{sha}/pulls` — but that job
