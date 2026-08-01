@@ -83,7 +83,7 @@ jobs:
       id-token: write     # required for WIF
       packages: write     # required only when passing ghcr-actions-token
     secrets:
-      ghcr-actions-token: ${{ github.token }}
+      ghcr-actions-token: ${{ secrets.GITHUB_TOKEN }}
     with:
       resource-group: RG-AGENTS-CORE
       op-tag: deploy-on-merge
@@ -114,10 +114,12 @@ The contract:
 | `skip-snapshot` | string | "true" or "false". Maps to the `SKIP_SNAPSHOT=true` env var the snapshot action honours. |
 | `azure-{client,tenant,subscription}-id` | string | Repo variables. WIF needs these to mint the OIDC token. |
 
-The reusable also accepts one optional `workflow_call` secret,
+The reusable accepts one optional `workflow_call` secret,
 `ghcr-actions-token`. When present, only the apply step receives it. The caller
-must map `ghcr-actions-token: ${{ github.token }}` under the reusable
-job's `secrets` block; granting `packages: write` alone does not opt in. The
+must map `ghcr-actions-token: ${{ secrets.GITHUB_TOKEN }}` under the reusable
+job's `secrets` block; `${{ github.token }}` is populated only inside execution
+steps and evaluates empty in this job-level mapping. Granting `packages: write`
+alone does not opt in. The
 apply script runs through an Azure Managed Run Command whose unique resource name is
 derived from the workflow run, attempt, a runner-generated nonce, and target
 index; the token is passed from an anonymous FD as the single protected
@@ -129,7 +131,10 @@ though uniquely named Managed Run Command resources can run concurrently. The
 protected command retains the legacy 90-minute apply timeout.
 The token is not added to target YAML, script text, ordinary parameters, files,
 logs, or workflow outputs. Callers that omit the secret retain the existing
-`az vm run-command invoke` apply path unchanged. An opted-in caller must grant
+`az vm run-command invoke` apply path. Both apply paths require a unique,
+exact-zero remote exit marker emitted by a parent shell after the caller script,
+so Azure cannot report a false green when its extension hides the remote shell
+exit status or the caller uses `exec`. An opted-in caller must grant
 `packages: write`; reusable workflows cannot elevate caller permissions, so a
 caller that omits or downgrades that permission remains authoritative. The
 reusable workflow intentionally inherits its permissions from the calling job:

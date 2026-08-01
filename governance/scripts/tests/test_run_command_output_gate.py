@@ -70,7 +70,9 @@ def test_failure_markers_in_stdout_fail() -> None:
 def test_benign_azure_message_passes(stderr: str) -> None:
     module = _load_module()
 
-    result = module.classify_run_command_message(_message(stdout="apply completed", stderr=stderr))
+    result = module.classify_run_command_message(
+        _message(stdout="apply completed", stderr=stderr)
+    )
 
     assert result.failed is False
     assert result.matches == []
@@ -88,7 +90,9 @@ def test_reusable_workflow_gates_apply_message_before_smoke() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
 
     gate_definition = text.find("gate_run_command_output()")
-    gate_call = text.find('gate_run_command_output "$VM" "$MSG_FILE"')
+    gate_call = text.find(
+        'gate_run_command_output "$VM" "$REMOTE_EXIT_SENTINEL" "$MSG_FILE"'
+    )
     smoke = text.find("=== Smoke ${VM}")
 
     assert gate_definition != -1
