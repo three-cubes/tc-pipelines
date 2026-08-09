@@ -128,6 +128,11 @@ on:
       snapshot-resource-id:
         description: Newline-separated Azure resource IDs for created snapshots.
         value: ${{ jobs.deploy.outputs.snapshot-resource-id }}
+      apply-output:
+        description: |
+          Concatenated apply-script output when surface-apply-output is true;
+          empty otherwise. Apply scripts must not print secrets when enabled.
+        value: ${{ jobs.deploy.outputs.apply-output }}
 
 jobs:
   deploy:

@@ -88,6 +88,16 @@ def test_hermes_runtime_secret_is_caller_mapped_and_optional() -> None:
     assert apply["env"]["HERMES_RUNTIME_SECRETS_B64"] == expected_secret
 
 
+def test_opted_in_apply_output_crosses_the_reusable_workflow_boundary() -> None:
+    """Callers can consume the bounded result emitted by the deploy job."""
+
+    workflow = _workflow()
+    output = workflow["on"]["workflow_call"]["outputs"]["apply-output"]
+
+    assert output["value"] == "${{ jobs.deploy.outputs.apply-output }}"
+    assert "surface-apply-output" in output["description"]
+
+
 def test_protected_parameter_contract_is_fail_closed_and_bounded() -> None:
     """The fixed-name runtime bundle is optional but strictly bounded when set."""
 
