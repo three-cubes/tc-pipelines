@@ -135,7 +135,7 @@ jobs:
 
 ## Part 2 — Azure-VM deploy
 
-**The main consumer is [tc-agent-zone](https://github.com/three-cubes/tc-agent-zone)'s `deploy-on-merge` pipeline** — it calls [`azure-vm-deploy.yml@v1`](.github/workflows/azure-vm-deploy.yml) to snapshot → apply → smoke `vm-openclaw` (and `vm-hermes-poc`) on every merge to `main`. Other repos depend on this workflow's inputs, secrets, and permissions staying the same, so do not change them in place: if you need to change them, ship the change behind a major version bump (`@v2`) and leave `@v1` working.
+**The main consumer is [tc-agent-zone](https://github.com/three-cubes/tc-agent-zone)'s `deploy-on-merge` pipeline** — it calls [`azure-vm-deploy.yml@v1`](.github/workflows/azure-vm-deploy.yml) to establish a recovery point → apply → smoke on every merge to `main`. The default recovery point is a host snapshot. The governed container-only exception uses a protected path/configuration backup plus an immutable predecessor image and requires `snapshot-policy=forbidden`, `skip-snapshot=true`, and the verified `container-rollback-receipt-digest`; see [`snapshot-before-apply.md`](governance/standards/snapshot-before-apply.md). Other repos depend on this workflow's inputs, secrets, and permissions staying the same, so do not change them in place: if you need to change them, ship the change behind a major version bump (`@v2`) and leave `@v1` working.
 
 Every Three Cubes repo that deploys to Azure VMs does it the same way: composite actions for the small steps (snapshot, WIF login, apply via run-command, smoke check), one reusable workflow for the end-to-end flow, and a Bicep module for the Azure-side identity. Consumers call these instead of re-implementing them.
 
@@ -161,7 +161,7 @@ gh api -X PUT /repos/three-cubes/YOUR-REPO/environments/production --silent
 
 | Surface | Purpose |
 |---|---|
-| [`.github/workflows/azure-vm-deploy.yml`](.github/workflows/azure-vm-deploy.yml) | Reusable — WIF → snapshot → apply → smoke for one or many VMs. |
+| [`.github/workflows/azure-vm-deploy.yml`](.github/workflows/azure-vm-deploy.yml) | Reusable — WIF → governed recovery point → apply → smoke for one or many VMs. |
 | [`.github/actions/wif-azure-login`](.github/actions/wif-azure-login/action.yml) | Wraps `azure/login@v2` with the Three Cubes WIF convention. |
 | [`.github/actions/snapshot-azure-vm-disk`](.github/actions/snapshot-azure-vm-disk/action.yml) | OS-disk snapshot before destructive ops. |
 | [`.github/actions/apply-on-vm-via-runcommand`](.github/actions/apply-on-vm-via-runcommand/action.yml) | Runs a script on a VM via `az vm run-command`. |

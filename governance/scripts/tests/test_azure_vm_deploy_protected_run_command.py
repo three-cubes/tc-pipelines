@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 from pathlib import Path
 import stat
@@ -14,6 +15,11 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "azure-vm-deploy.yml"
 IMPLEMENTATION = REPO_ROOT / "docs" / "IMPLEMENTATION.md"
 MIGRATION = REPO_ROOT / "docs" / "MIGRATION.md"
+README = REPO_ROOT / "README.md"
+SNAPSHOT_STANDARD = REPO_ROOT / "governance" / "standards" / "snapshot-before-apply.md"
+DEVELOPMENT_WORKFLOW = (
+    REPO_ROOT / "governance" / "standards" / "development-workflow.md"
+)
 
 
 class GithubActionsLoader(yaml.SafeLoader):
@@ -40,6 +46,14 @@ def _apply_step() -> dict:
     )
 
 
+def _validation_step() -> dict:
+    return next(
+        step
+        for step in _workflow()["jobs"]["deploy"]["steps"]
+        if step.get("name") == "Validate deployment policy and protected input"
+    )
+
+
 def _managed_cleanup_step() -> dict:
     return next(
         step
@@ -58,6 +72,59 @@ def test_ghcr_token_is_a_closed_optional_job_scoped_secret() -> None:
     assert secret["required"] in {False, "false"}
     assert "GHCR_ACTIONS_TOKEN" not in workflow["jobs"]["deploy"].get("env", {})
     assert apply["env"]["GHCR_ACTIONS_TOKEN"] == "${{ secrets.ghcr-actions-token }}"
+
+
+def test_hermes_runtime_secret_is_caller_mapped_and_optional() -> None:
+    """The caller maps one repository secret without adding an Environment gate."""
+
+    workflow = _workflow()
+    secrets = workflow["on"]["workflow_call"]["secrets"]
+    deploy = workflow["jobs"]["deploy"]
+    validation = _validation_step()
+    apply = _apply_step()
+
+    assert secrets["hermes-runtime-secrets-b64"]["required"] in {False, "false"}
+    assert "environment" not in deploy
+    expected_secret = "${{ secrets.hermes-runtime-secrets-b64 }}"
+    assert validation["env"]["HERMES_RUNTIME_SECRETS_B64"] == expected_secret
+    assert apply["env"]["HERMES_RUNTIME_SECRETS_B64"] == expected_secret
+
+
+def test_opted_in_apply_output_crosses_the_reusable_workflow_boundary() -> None:
+    """Callers can consume the bounded result emitted by the deploy job."""
+
+    workflow = _workflow()
+    output = workflow["on"]["workflow_call"]["outputs"]["apply-output"]
+
+    assert output["value"] == "${{ jobs.deploy.outputs.apply-output }}"
+    assert "surface-apply-output" in output["description"]
+
+
+def test_protected_parameter_contract_is_fail_closed_and_bounded() -> None:
+    """The fixed-name runtime bundle is optional but strictly bounded when set."""
+
+    inputs = _workflow()["on"]["workflow_call"]["inputs"]
+    script = _validation_step()["run"]
+
+    assert inputs["snapshot-policy"]["default"] == "allowed"
+    assert inputs["container-rollback-receipt-digest"]["default"] == ""
+    assert "Hermes runtime secret must be canonical Base64" in script
+    assert "49152" in script
+    assert "36864" in script
+    assert "base64.b64decode" in script
+    assert "validate=True" in script
+    assert "SNAPSHOT_POLICY" in script
+    assert "snapshot-policy=forbidden requires skip-snapshot=true" in script
+    assert (
+        "snapshot-policy=forbidden requires a verified container rollback receipt"
+        in script
+    )
+    steps = _workflow()["jobs"]["deploy"]["steps"]
+    assert steps.index(_validation_step()) < next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("name") == "WIF Azure login"
+    )
 
 
 def test_reusable_inherits_permissions_so_legacy_callers_need_no_package_write() -> (
@@ -91,6 +158,15 @@ def test_opt_in_examples_map_the_job_token_to_the_declared_secret() -> None:
     assert "ghcr-actions-token: ${{ github.token }}" not in implementation
 
 
+def test_runtime_secret_example_maps_repository_secret_to_declared_secret() -> None:
+    workflow_example = WORKFLOW.read_text(encoding="utf-8")
+
+    assert (
+        "#         hermes-runtime-secrets-b64: "
+        "${{ secrets.HERMES_RUNTIME_SECRETS_B64 }}" in workflow_example
+    )
+
+
 def test_apply_requires_a_unique_remote_exit_token() -> None:
     """Invoke must fail closed when Azure hides the remote shell exit code."""
 
@@ -106,7 +182,9 @@ def test_apply_requires_a_unique_remote_exit_token() -> None:
     assert any("exit" in line and "remote_rc" in line for line in apply.splitlines())
 
 
-def test_token_apply_uses_unique_managed_command_with_one_protected_parameter() -> None:
+def test_token_apply_uses_unique_managed_command_with_separate_protected_parameters() -> (
+    None
+):
     """The protected token reaches the VM only through Azure's protected field."""
 
     apply = _apply_step()["run"]
@@ -116,8 +194,9 @@ def test_token_apply_uses_unique_managed_command_with_one_protected_parameter() 
     assert "az vm run-command delete" in apply
     assert "--protected-parameters" in apply
     assert 'HERMES_GHCR_ACTIONS_TOKEN="$GHCR_ACTIONS_TOKEN"' not in apply
-    assert '--protected-parameters "@/dev/fd/${protected_fd}"' in apply
+    assert '--protected-parameters "${protected_parameters[@]}"' in apply
     assert "printf 'HERMES_GHCR_ACTIONS_TOKEN=%s'" in apply
+    assert "printf 'HERMES_RUNTIME_SECRETS_B64=%s'" in apply
     assert (
         "apply-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${INVOCATION_SUFFIX}-${i}"
         in apply
@@ -129,6 +208,27 @@ def test_token_apply_uses_unique_managed_command_with_one_protected_parameter() 
     assert "--expand instanceView" not in apply
 
 
+def test_runtime_secret_uses_a_separate_fd_only_managed_transport() -> None:
+    """Each protected value is one Azure CLI item and never enters Azure argv."""
+
+    apply = _apply_step()
+    script = apply["run"]
+    create_argv = script[
+        script.index("az vm run-command create") : script.index(
+            "--query 'provisioningState'"
+        )
+    ]
+
+    assert "HERMES_RUNTIME_SECRETS_B64" in apply["env"]
+    assert "HERMES_RUNTIME_SECRETS_B64" not in create_argv
+    assert 'protected_parameters+=("@/dev/fd/${runtime_secret_fd}")' in script
+    assert 'protected_parameters+=("@/dev/fd/${ghcr_token_fd}")' in script
+    assert (
+        'if [[ -z "$GHCR_ACTIONS_TOKEN$HERMES_RUNTIME_SECRETS_B64" ]]; then' in script
+    )
+    assert 'line="${line//"$HERMES_RUNTIME_SECRETS_B64"/***}"' in script
+
+
 def test_both_apply_paths_share_a_vm_local_serialization_lock() -> None:
     """Unique managed resources must not bypass per-VM deploy serialization."""
 
@@ -138,7 +238,10 @@ def test_both_apply_paths_share_a_vm_local_serialization_lock() -> None:
     assert apply.count(lock) == 1
     remote_start = apply.index("REMOTE_SCRIPT=$(")
     remote_script = apply[
-        remote_start : apply.index('if [[ -n "$GHCR_ACTIONS_TOKEN" ]]', remote_start)
+        remote_start : apply.index(
+            'if [[ -n "$GHCR_ACTIONS_TOKEN$HERMES_RUNTIME_SECRETS_B64" ]]',
+            remote_start,
+        )
     ]
     assert lock in remote_script
     assert '--scripts "$REMOTE_SCRIPT"' in apply
@@ -146,11 +249,11 @@ def test_both_apply_paths_share_a_vm_local_serialization_lock() -> None:
 
 
 def test_token_path_keeps_legacy_invoke_for_callers_without_a_token() -> None:
-    """Existing consumers continue to invoke the target script directly."""
+    """Existing consumers with neither secret retain direct invoke semantics."""
 
     apply = _apply_step()["run"]
 
-    assert 'if [[ -z "$GHCR_ACTIONS_TOKEN" ]]; then' in apply
+    assert 'if [[ -z "$GHCR_ACTIONS_TOKEN$HERMES_RUNTIME_SECRETS_B64" ]]; then' in apply
     assert "az vm run-command invoke" in apply
     assert 'else\n    MSG=$(run_with_retry "managed apply on ${VM}"' in apply
 
@@ -283,15 +386,19 @@ def test_managed_failure_preserves_apply_output_gate_and_legacy_output_order() -
     assert 'MANAGED_FAILURE="managed command cleanup failed' in script[cleanup:output]
 
 
-def test_remote_output_cannot_surface_the_protected_token_value() -> None:
-    """A misbehaving apply script cannot echo the protected value into logs/outputs."""
+def test_managed_output_is_reduced_to_the_exit_proof_before_logs_or_outputs() -> None:
+    """Protected runs never surface arbitrary instanceView output."""
 
     script = _apply_step()["run"]
-    extract = script.index("MSG=$(jq -r")
-    redact = script.index('MSG="${MSG//"$GHCR_ACTIONS_TOKEN"/***}"')
+    extract = script.index("mapfile -t MANAGED_SENTINELS")
+    reduce = script.index('MSG="${REMOTE_EXIT_SENTINEL}=${MANAGED_EXIT_CODE}"')
     output = script.index('echo "----- BEGIN ${VM} apply output -----"')
 
-    assert extract < redact < output
+    assert extract < reduce < output
+    assert "instanceView.output" in script[extract:reduce]
+    assert "instanceView.error" in script[extract:reduce]
+    assert "REMOTE_GROUP_END=') >/dev/null 2>&1'" in script
+    assert "MSG=$(jq -r" not in script
 
 
 @pytest.fixture
@@ -329,20 +436,35 @@ count=0
 [[ -f "$count_file" ]] && count=$(<"$count_file")
 count=$((count + 1))
 printf '%s' "$count" >"$count_file"
+protected_values() {
+  local joined="" parameter value separator=""
+  while IFS= read -r parameter || [[ -n "$parameter" ]]; do
+    value="${parameter#*=}"
+    joined+="${separator}${value}"
+    separator="|"
+  done <"$FAKE_AZ_STATE_DIR/protected.txt"
+  printf '%s' "$joined"
+}
 case "$op" in
   create)
     marker=$(grep -oE 'TC_APPLY_REMOTE_EXIT_[A-Za-z0-9_]+' <<<"$*")
     printf '%s' "$marker" >"$FAKE_AZ_STATE_DIR/remote-exit-marker"
+    : >"$FAKE_AZ_STATE_DIR/protected.txt"
+    collecting=false
     while [[ $# -gt 0 ]]; do
       if [[ "$1" == "--protected-parameters" ]]; then
-        protected_path="${2#@}"
-        cat "$protected_path" >"$FAKE_AZ_STATE_DIR/protected.txt"
+        collecting=true
+      elif [[ "$collecting" == true && "$1" == --* ]]; then
         break
+      elif [[ "$collecting" == true ]]; then
+        protected_path="${1#@}"
+        cat "$protected_path" >>"$FAKE_AZ_STATE_DIR/protected.txt"
+        printf '\n' >>"$FAKE_AZ_STATE_DIR/protected.txt"
       fi
       shift
     done
     if [[ "$count" -eq 1 ]]; then
-      token=$(sed 's/^HERMES_GHCR_ACTIONS_TOKEN=//' "$FAKE_AZ_STATE_DIR/protected.txt")
+      token=$(protected_values)
       echo "(Conflict) synthetic $token" >&2
       exit 1
     fi
@@ -353,7 +475,7 @@ case "$op" in
       echo '(Conflict) synthetic show retry' >&2
       exit 1
     fi
-    token=$(sed 's/^HERMES_GHCR_ACTIONS_TOKEN=//' "$FAKE_AZ_STATE_DIR/protected.txt")
+    token=$(protected_values)
     marker=$(<"$FAKE_AZ_STATE_DIR/remote-exit-marker")
     echo 'benign show warning' >&2
     jq -cn --arg token "$token" --arg marker "$marker" '{instanceView:{executionState:"Succeeded",exitCode:0,output:("result-" + $token + "\n" + $marker + "=0"),error:""}}'
@@ -392,6 +514,7 @@ def _run_apply(
     fake_apply_tools: tuple[Path, Path],
     *,
     token: str,
+    runtime_secret: str = "",
     apply_script: str = "true",
     legacy_exit: str = "0",
 ) -> subprocess.CompletedProcess[str]:
@@ -404,6 +527,7 @@ def _run_apply(
             "FAKE_AZ_STATE_DIR": str(state_dir),
             "FAKE_AZ_LEGACY_EXIT": legacy_exit,
             "GHCR_ACTIONS_TOKEN": token,
+            "HERMES_RUNTIME_SECRETS_B64": runtime_secret,
             "FAKE_YQ_SCRIPT": apply_script,
             "GITHUB_ENV": str(tmp_path / "github-env"),
             "GITHUB_OUTPUT": str(tmp_path / "github-output"),
@@ -414,6 +538,35 @@ def _run_apply(
             "RUNNER_TEMP": str(tmp_path),
             "SURFACE_OUTPUT": "true",
             "TARGETS_YAML": "ignored-by-fake-yq",
+        }
+    )
+    return subprocess.run(
+        ["bash", str(script)],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _run_validation(
+    tmp_path: Path,
+    *,
+    runtime_secret: str = "",
+    skip_snapshot: str = "false",
+    snapshot_policy: str = "allowed",
+    rollback_receipt_digest: str = "",
+) -> subprocess.CompletedProcess[str]:
+    script = tmp_path / "validate.sh"
+    script.write_text(_validation_step()["run"], encoding="utf-8")
+    env = os.environ.copy()
+    env.update(
+        {
+            "HERMES_RUNTIME_SECRETS_B64": runtime_secret,
+            "SKIP_SNAPSHOT": skip_snapshot,
+            "SNAPSHOT_POLICY": snapshot_policy,
+            "CONTAINER_ROLLBACK_RECEIPT_DIGEST": rollback_receipt_digest,
         }
     )
     return subprocess.run(
@@ -442,7 +595,8 @@ def test_fake_azure_conflict_then_warning_keeps_json_and_token_private(
     assert token not in result.stdout
     assert token not in result.stderr
     assert token not in workflow_output
-    assert "result-***" in result.stdout
+    assert "result-" not in result.stdout
+    assert "TC_APPLY_REMOTE_EXIT_123456_2_0_" in result.stdout
     assert "synthetic show retry" in result.stderr
     assert "benign show warning" in result.stderr
     assert "JSON" not in result.stderr
@@ -461,6 +615,243 @@ def test_fake_azure_no_token_keeps_legacy_invoke_semantics(
     assert "vm run-command invoke" in argv_log
     assert "vm run-command create" not in argv_log
     assert "legacy-result" in result.stdout
+
+
+def test_fake_azure_runtime_secret_alone_uses_managed_transport_without_exposure(
+    tmp_path: Path, fake_apply_tools: tuple[Path, Path]
+) -> None:
+    """The runtime bundle opts in without requiring a GHCR token."""
+
+    secret = "dGVzdC1ydW50aW1lLXNlY3JldA=="
+    result = _run_apply(
+        tmp_path,
+        fake_apply_tools,
+        token="",
+        runtime_secret=secret,
+    )
+    _, state_dir = fake_apply_tools
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    argv_log = (state_dir / "argv.log").read_text(encoding="utf-8")
+    protected = (state_dir / "protected.txt").read_text(encoding="utf-8")
+    workflow_output = (tmp_path / "github-output").read_text(encoding="utf-8")
+
+    assert "vm run-command create" in argv_log
+    assert "vm run-command invoke" not in argv_log
+    assert protected.strip() == f"HERMES_RUNTIME_SECRETS_B64={secret}"
+    assert secret not in argv_log
+    assert secret not in result.stdout
+    assert secret not in result.stderr
+    assert secret not in workflow_output
+    assert "result-" not in result.stdout
+    assert "TC_APPLY_REMOTE_EXIT_123456_2_0_" in result.stdout
+
+
+def test_fake_azure_combines_both_protected_values_and_redacts_cleanup_output(
+    tmp_path: Path, fake_apply_tools: tuple[Path, Path]
+) -> None:
+    token = "test-ghcr-combined-token"
+    runtime_secret = "cnVudGltZS1jb21iaW5lZC1zZWNyZXQ="
+
+    result = _run_apply(
+        tmp_path,
+        fake_apply_tools,
+        token=token,
+        runtime_secret=runtime_secret,
+    )
+    _, state_dir = fake_apply_tools
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    protected = (state_dir / "protected.txt").read_text(encoding="utf-8")
+    argv_log = (state_dir / "argv.log").read_text(encoding="utf-8")
+    workflow_output = (tmp_path / "github-output").read_text(encoding="utf-8")
+
+    assert protected.splitlines() == [
+        f"HERMES_GHCR_ACTIONS_TOKEN={token}",
+        f"HERMES_RUNTIME_SECRETS_B64={runtime_secret}",
+    ]
+    for protected_value in (token, runtime_secret):
+        assert protected_value not in argv_log
+        assert protected_value not in result.stdout
+        assert protected_value not in result.stderr
+        assert protected_value not in workflow_output
+    assert "synthetic ***|***" in result.stderr
+    assert "result-" not in result.stdout
+    assert "TC_APPLY_REMOTE_EXIT_123456_2_0_" in result.stdout
+    assert "vm run-command delete" in argv_log
+    assert (state_dir / "delete.count").read_text(encoding="utf-8") == "1"
+
+
+def test_truncated_secret_fragments_never_reach_logs_or_apply_output(
+    tmp_path: Path, fake_apply_tools: tuple[Path, Path]
+) -> None:
+    """The last 4 KiB may start inside either secret, so managed output is suppressed."""
+
+    token = "token-prefix-unique-secret-suffix"
+    runtime_secret = "cnVudGltZS1wcmVmaXgtdW5pcXVlLXNlY3JldC1zdWZmaXg="
+    result = _run_apply(
+        tmp_path,
+        fake_apply_tools,
+        token=token,
+        runtime_secret=runtime_secret,
+    )
+    workflow_output = (tmp_path / "github-output").read_text(encoding="utf-8")
+
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    for fragment in (token[-13:], runtime_secret[-17:]):
+        assert fragment not in result.stdout
+        assert fragment not in result.stderr
+        assert fragment not in workflow_output
+    assert "result-" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "has space",
+        "line1\nline2",
+        "not-base64!",
+        "Zg=",
+        "Zg===",
+        "Zh==",
+        "YWJjZA",
+        "w6k=\N{SNOWMAN}",
+    ],
+)
+def test_validation_rejects_non_ascii_malformed_or_noncanonical_base64(
+    tmp_path: Path, value: str
+) -> None:
+    result = _run_validation(tmp_path, runtime_secret=value)
+
+    assert result.returncode != 0
+    assert value not in result.stdout
+    assert value not in result.stderr
+
+
+@pytest.mark.parametrize("decoded_size", [1, 2, 3, 36864])
+def test_validation_accepts_canonical_base64_through_decoded_size_boundary(
+    tmp_path: Path, decoded_size: int
+) -> None:
+    value = base64.b64encode(b"x" * decoded_size).decode("ascii")
+
+    result = _run_validation(tmp_path, runtime_secret=value)
+
+    assert result.returncode == 0, result.stderr
+    assert value not in result.stdout
+    assert value not in result.stderr
+
+
+def test_validation_rejects_payload_beyond_encoded_and_decoded_byte_boundary(
+    tmp_path: Path,
+) -> None:
+    value = base64.b64encode(b"x" * 36865).decode("ascii")
+    assert len(value.encode("ascii")) == 49156
+
+    result = _run_validation(tmp_path, runtime_secret=value)
+
+    assert result.returncode != 0
+    assert value not in result.stdout
+    assert value not in result.stderr
+
+
+def test_snapshot_policy_forbidden_requires_skip_snapshot(tmp_path: Path) -> None:
+    rejected = _run_validation(
+        tmp_path,
+        snapshot_policy="forbidden",
+        skip_snapshot="false",
+        rollback_receipt_digest=f"sha256:{'a' * 64}",
+    )
+    admitted = _run_validation(
+        tmp_path,
+        snapshot_policy="forbidden",
+        skip_snapshot="true",
+        rollback_receipt_digest=f"sha256:{'a' * 64}",
+    )
+
+    assert rejected.returncode != 0
+    assert "snapshot-policy=forbidden requires skip-snapshot=true" in rejected.stderr
+    assert admitted.returncode == 0, admitted.stderr
+
+
+def test_empty_skip_snapshot_is_normalized_to_false(tmp_path: Path) -> None:
+    result = _run_validation(tmp_path, skip_snapshot="")
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("digest", ["", "sha256:abc", f"sha256:{'A' * 64}"])
+def test_forbidden_policy_requires_exact_container_rollback_receipt(
+    tmp_path: Path, digest: str
+) -> None:
+    result = _run_validation(
+        tmp_path,
+        snapshot_policy="forbidden",
+        skip_snapshot="true",
+        rollback_receipt_digest=digest,
+    )
+
+    assert result.returncode != 0
+    assert (
+        "snapshot-policy=forbidden requires a verified container rollback receipt"
+        in result.stderr
+    )
+
+
+def test_forbidden_policy_accepts_content_addressed_container_rollback_receipt(
+    tmp_path: Path,
+) -> None:
+    digest = f"sha256:{'b' * 64}"
+    result = _run_validation(
+        tmp_path,
+        snapshot_policy="forbidden",
+        skip_snapshot="true",
+        rollback_receipt_digest=digest,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_forbidden_policy_skips_snapshot_action_and_runs_only_a_notice() -> None:
+    steps = _workflow()["jobs"]["deploy"]["steps"]
+    snapshot = next(step for step in steps if step.get("name") == "Snapshot all VMs")
+    notice = next(
+        step
+        for step in steps
+        if step.get("name") == "Verify host snapshots are forbidden"
+    )
+
+    assert snapshot["if"] == "${{ inputs.snapshot-policy != 'forbidden' }}"
+    assert notice["if"] == "${{ inputs.snapshot-policy == 'forbidden' }}"
+    assert "uses" not in notice
+    assert "az " not in notice["run"]
+    assert "snapshot" not in notice["run"].lower()
+
+
+def test_container_only_exception_is_tied_to_canonical_governance() -> None:
+    workflow = _workflow()
+    snapshot_input = workflow["on"]["workflow_call"]["inputs"]["snapshot-policy"]
+    standard = " ".join(SNAPSHOT_STANDARD.read_text(encoding="utf-8").split())
+    development = " ".join(DEVELOPMENT_WORKFLOW.read_text(encoding="utf-8").split())
+    readme = " ".join(README.read_text(encoding="utf-8").split())
+
+    assert (
+        "container-only deployment exception" in snapshot_input["description"].lower()
+    )
+    for required in (
+        "Container-only deployment exception",
+        "`snapshot-policy=forbidden`",
+        "protected path and configuration backup",
+        "immutable predecessor container image",
+        "`container-rollback-receipt-digest`",
+        "archive and manifest digests",
+        "no Azure storage command",
+        "Host disaster recovery remains a separate manual operation",
+        "`snapshot-policy=forbidden` without `skip-snapshot=true` fails admission",
+        "`snapshot-policy=allowed` with `skip-snapshot=true` remains",
+    ):
+        assert required in standard
+    assert "container-only exception" in development.lower()
+    assert "snapshot-before-apply.md" in development
+    assert "container-only exception" in readme.lower()
+    assert "snapshot-before-apply.md" in readme
 
 
 @pytest.mark.parametrize("remote_exit", ["missing", "23", "-1", "256", "invalid"])

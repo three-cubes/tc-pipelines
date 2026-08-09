@@ -112,6 +112,8 @@ The contract:
 | `targets` | YAML string | List of `{vm-name, apply-script, smoke-units}` maps. `smoke-units` can be empty. |
 | `op-tag` | string | Snapshot name prefix. Use the deploy mode (`deploy-on-merge`, `manual-apply`). |
 | `skip-snapshot` | string | "true" or "false". Maps to the `SKIP_SNAPSHOT=true` env var the snapshot action honours. |
+| `snapshot-policy` | string | `allowed` by default. `forbidden` selects the governed container-only exception and requires `skip-snapshot=true` plus `container-rollback-receipt-digest`. |
+| `container-rollback-receipt-digest` | string | Optional for normal callers; required as `sha256:<64 lowercase hex>` with `snapshot-policy=forbidden`. It identifies the verified pre-apply receipt binding protected backup paths, archive/manifest digests, and predecessor OCI image digest. |
 | `azure-{client,tenant,subscription}-id` | string | Repo variables. WIF needs these to mint the OIDC token. |
 
 The reusable accepts one optional `workflow_call` secret,
@@ -122,15 +124,18 @@ steps and evaluates empty in this job-level mapping. Granting `packages: write`
 alone does not opt in. The
 apply script runs through an Azure Managed Run Command whose unique resource name is
 derived from the workflow run, attempt, a runner-generated nonce, and target
-index; the token is passed from an anonymous FD as the single protected
-`HERMES_GHCR_ACTIONS_TOKEN` parameter. The command resource is deleted before
+index; each opted-in value is passed as its own Azure CLI protected-parameter
+item from a separate anonymous FD. The command resource is deleted before
 smoke testing, by an exit trap, and by an independent `always()` step driven by
 a non-secret command manifest. Both the legacy and protected apply paths acquire
 the same VM-local `flock`, preserving per-VM deployment serialization even
 though uniquely named Managed Run Command resources can run concurrently. The
 protected command retains the legacy 90-minute apply timeout.
-The token is not added to target YAML, script text, ordinary parameters, files,
-logs, or workflow outputs. Callers that omit the secret retain the existing
+Protected apply output is discarded on the VM because Azure retains only the
+last 4 KiB and a truncated secret cannot be redacted reliably. The managed
+result exposes only the workflow-generated exit proof; protected values are not
+added to target YAML, script text, ordinary parameters, logs, or workflow
+outputs. Callers that omit both secrets retain the existing
 `az vm run-command invoke` apply path. Both apply paths require a unique,
 exact-zero remote exit marker emitted by a parent shell after the caller script,
 so Azure cannot report a false green when its extension hides the remote shell
