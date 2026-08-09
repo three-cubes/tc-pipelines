@@ -68,12 +68,20 @@ Every condition below is mandatory:
   exposing secret values.
 - Record and retain an immutable predecessor container image that can be
   reactivated with the protected backup during automated rollback.
+- Produce and verify an immutable rollback receipt before apply. The receipt
+  must bind the exact protected paths, backup archive and manifest digests, and
+  predecessor OCI image digest. Pass its content address through the reusable
+  workflow's `container-rollback-receipt-digest` input as
+  `sha256:<64 lowercase hex>`; a missing or malformed digest blocks the
+  container-only exception before WIF or cloud operations.
 - Limit normal apply and rollback to the container workload and its governed
   configuration. The workflow must skip the snapshot action and execute no
   Azure storage command.
-- Set both `snapshot-policy=forbidden` and `skip-snapshot=true` on the reusable
-  workflow. `snapshot-policy=forbidden` without `skip-snapshot=true` fails admission
-  before WIF or cloud operations. `snapshot-policy=allowed` with
+- Set `snapshot-policy=forbidden`, `skip-snapshot=true`, and the verified
+  `container-rollback-receipt-digest` on the reusable workflow.
+  `snapshot-policy=forbidden` without `skip-snapshot=true` fails admission
+  before WIF or cloud operations. A missing or malformed receipt digest fails
+  at the same boundary. `snapshot-policy=allowed` with
   `skip-snapshot=true` remains the explicit legacy/development override and is
   not the governed container-only exception.
 - Treat host disaster recovery separately. Host disaster recovery remains a
@@ -112,8 +120,9 @@ Three paths can bypass the snapshot:
 - **`--no-snapshot`** flag on either apply script. Use during iterative dev when you know the VM is throwaway. The script logs `SKIP_SNAPSHOT=true` to make the override visible.
 - **Dry-run**. `--dry-run` skips the snapshot entirely since no state is mutated.
 - **Governed container-only deployment**. The reusable workflow admits this
-  only with `snapshot-policy=forbidden` plus `skip-snapshot=true` and only when
-  the container-only exception above is satisfied.
+  only with `snapshot-policy=forbidden`, `skip-snapshot=true`, and a verified
+  `container-rollback-receipt-digest`, and only when the container-only
+  exception above is satisfied.
 
 Production apply (operator OR CI-driven) MUST omit `--no-snapshot` unless the
 reusable workflow has admitted the governed container-only exception.
