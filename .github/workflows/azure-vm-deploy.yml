@@ -28,6 +28,7 @@ name: 'Reusable — Azure VM deploy (WIF → snapshot → apply → smoke)'
 #         packages: write  # only required when passing ghcr-actions-token
 #       secrets:
 #         ghcr-actions-token: ${{ secrets.GITHUB_TOKEN }}
+#         hermes-runtime-secrets-b64: ${{ secrets.HERMES_RUNTIME_SECRETS_B64 }}
 #
 # The `targets` input is a YAML string. Parsed at runtime by yq inside the
 # job. Each target gets snapshot → apply → smoke in sequence.
@@ -39,6 +40,13 @@ on:
         description: |
           Optional job-lifetime GitHub Actions token relayed to the remote
           apply only as the protected HERMES_GHCR_ACTIONS_TOKEN parameter.
+        required: false
+      hermes-runtime-secrets-b64:
+        description: |
+          Optional repository Actions secret relayed to the remote apply only
+          as the protected HERMES_RUNTIME_SECRETS_B64 parameter. When supplied,
+          it must be canonical Base64 of at most 49,152 encoded bytes and
+          36,864 decoded bytes.
         required: false
     inputs:
       resource-group:
@@ -61,6 +69,14 @@ on:
         required: false
         type: string
         default: 'false'
+      snapshot-policy:
+        description: |
+          Snapshot policy for this deployment. "allowed" preserves the
+          existing snapshot behavior. "forbidden" selects the governed
+          container-only deployment exception and requires skip-snapshot=true.
+        required: false
+        type: string
+        default: allowed
       azure-client-id:
         description: WIF identity client ID (typically vars.AZURE_CLIENT_ID).
         required: true
@@ -127,6 +143,68 @@ jobs:
       apply-output: ${{ steps.apply.outputs.apply-output }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Validate deployment policy and protected input
+        shell: bash
+        env:
+          HERMES_RUNTIME_SECRETS_B64: ${{ secrets.hermes-runtime-secrets-b64 }}
+          SKIP_SNAPSHOT: ${{ inputs.skip-snapshot }}
+          SNAPSHOT_POLICY: ${{ inputs.snapshot-policy }}
+        run: |
+          set -euo pipefail
+          case "$SNAPSHOT_POLICY" in
+            allowed|forbidden) ;;
+            *)
+              echo "::error::snapshot-policy must be allowed or forbidden" >&2
+              exit 1
+              ;;
+          esac
+          case "$SKIP_SNAPSHOT" in
+            true|false) ;;
+            *)
+              echo "::error::skip-snapshot must be true or false" >&2
+              exit 1
+              ;;
+          esac
+          if [[ "$SNAPSHOT_POLICY" == "forbidden" && "$SKIP_SNAPSHOT" != "true" ]]; then
+            echo "::error::snapshot-policy=forbidden requires skip-snapshot=true" >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import base64
+          import binascii
+          import os
+          import sys
+
+          value = os.environ.get("HERMES_RUNTIME_SECRETS_B64", "")
+          if not value:
+              raise SystemExit(0)
+
+          def reject() -> None:
+              print(
+                  "::error::Hermes runtime secret must be canonical Base64 of at "
+                  "most 49152 encoded bytes and 36864 decoded bytes",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+
+          try:
+              encoded = value.encode("ascii")
+          except UnicodeEncodeError:
+              reject()
+          if len(encoded) > 49152:
+              reject()
+          try:
+              decoded = base64.b64decode(encoded, validate=True)
+          except (binascii.Error, ValueError):
+              reject()
+          if (
+              not decoded
+              or len(decoded) > 36864
+              or base64.b64encode(decoded) != encoded
+          ):
+              reject()
+          PY
 
       - name: WIF Azure login
         uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@v1
@@ -276,6 +354,7 @@ jobs:
 
       - name: Snapshot all VMs
         id: snapshot
+        if: ${{ inputs.snapshot-policy != 'forbidden' }}
         uses: three-cubes/tc-pipelines/.github/actions/snapshot-azure-vm-disk@v1
         with:
           resource-group: ${{ inputs.resource-group }}
@@ -283,11 +362,17 @@ jobs:
           op-tag: ${{ inputs.op-tag }}
           skip: ${{ inputs.skip-snapshot }}
 
+      - name: Verify host snapshots are forbidden
+        if: ${{ inputs.snapshot-policy == 'forbidden' }}
+        shell: bash
+        run: echo "Host disk capture is forbidden by deployment policy."
+
       - name: Apply on each target + smoke
         id: apply
         shell: bash
         env:
           GHCR_ACTIONS_TOKEN: ${{ secrets.ghcr-actions-token }}
+          HERMES_RUNTIME_SECRETS_B64: ${{ secrets.hermes-runtime-secrets-b64 }}
           TARGETS_YAML: ${{ inputs.targets }}
           RG: ${{ inputs.resource-group }}
           SURFACE_OUTPUT: ${{ inputs.surface-apply-output }}
@@ -303,7 +388,15 @@ jobs:
             # inherited FD. Build a fresh stream for every retry because az
             # consumes it while parsing.
             exec {protected_fd}< <(
-              printf 'HERMES_GHCR_ACTIONS_TOKEN=%s' "$GHCR_ACTIONS_TOKEN"
+              separator=""
+              if [[ -n "$GHCR_ACTIONS_TOKEN" ]]; then
+                printf 'HERMES_GHCR_ACTIONS_TOKEN=%s' "$GHCR_ACTIONS_TOKEN"
+                separator=" "
+              fi
+              if [[ -n "$HERMES_RUNTIME_SECRETS_B64" ]]; then
+                printf '%sHERMES_RUNTIME_SECRETS_B64=%s' \
+                  "$separator" "$HERMES_RUNTIME_SECRETS_B64"
+              fi
             )
             az vm run-command create \
               --resource-group "$RG" \
@@ -325,10 +418,15 @@ jobs:
           declare GHCR_ACTIONS_TOKEN="$PROTECTED_GHCR_ACTIONS_TOKEN"
           unset PROTECTED_GHCR_ACTIONS_TOKEN
           readonly GHCR_ACTIONS_TOKEN
+          PROTECTED_HERMES_RUNTIME_SECRETS_B64="${HERMES_RUNTIME_SECRETS_B64:-}"
+          unset HERMES_RUNTIME_SECRETS_B64
+          declare HERMES_RUNTIME_SECRETS_B64="$PROTECTED_HERMES_RUNTIME_SECRETS_B64"
+          unset PROTECTED_HERMES_RUNTIME_SECRETS_B64
+          readonly HERMES_RUNTIME_SECRETS_B64
 
           INVOCATION_SUFFIX=""
           MANAGED_COMMAND_MANIFEST=""
-          if [[ -n "$GHCR_ACTIONS_TOKEN" ]]; then
+          if [[ -n "$GHCR_ACTIONS_TOKEN$HERMES_RUNTIME_SECRETS_B64" ]]; then
             INVOCATION_SUFFIX=$(python3 -c 'import secrets; print(secrets.token_hex(6))')
             MANAGED_COMMAND_MANIFEST="${RUNNER_TEMP}/managed-apply-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${INVOCATION_SUFFIX}.jsonl"
             : >"$MANAGED_COMMAND_MANIFEST"
@@ -374,6 +472,9 @@ jobs:
             while IFS= read -r line || [[ -n "$line" ]]; do
               if [[ -n "$GHCR_ACTIONS_TOKEN" ]]; then
                 line="${line//"$GHCR_ACTIONS_TOKEN"/***}"
+              fi
+              if [[ -n "$HERMES_RUNTIME_SECRETS_B64" ]]; then
+                line="${line//"$HERMES_RUNTIME_SECRETS_B64"/***}"
               fi
               printf '%s\n' "$line"
             done
@@ -506,13 +607,13 @@ jobs:
                 "printf '%s=%s\\n' '${REMOTE_EXIT_SENTINEL}' \"\$remote_rc\"" \
                 "exit \"\$remote_rc\""
             )
-            if [[ -n "$GHCR_ACTIONS_TOKEN" ]]; then
+            if [[ -n "$GHCR_ACTIONS_TOKEN$HERMES_RUNTIME_SECRETS_B64" ]]; then
               jq -cn --arg vm "$VM" --arg command "$RUN_COMMAND_NAME" \
                 '{vm: $vm, command: $command}' >>"$MANAGED_COMMAND_MANIFEST"
               PENDING_MANAGED_VM="$VM"
               PENDING_MANAGED_COMMAND="$RUN_COMMAND_NAME"
             fi
-            if [[ -z "$GHCR_ACTIONS_TOKEN" ]]; then
+            if [[ -z "$GHCR_ACTIONS_TOKEN$HERMES_RUNTIME_SECRETS_B64" ]]; then
               MSG=$(run_with_retry "apply on ${VM}" az vm run-command invoke \
                 --resource-group "$RG" \
                 --name "$VM" \
@@ -531,7 +632,12 @@ jobs:
               MANAGED_STATE=$(jq -r '.instanceView.executionState // ""' <<<"$MANAGED_RESULT")
               MANAGED_EXIT_CODE=$(jq -r '.instanceView.exitCode // ""' <<<"$MANAGED_RESULT")
               MSG=$(jq -r '[.instanceView.output // "", .instanceView.error // ""] | map(select(length > 0)) | join("\n")' <<<"$MANAGED_RESULT")
-              MSG="${MSG//"$GHCR_ACTIONS_TOKEN"/***}"
+              if [[ -n "$GHCR_ACTIONS_TOKEN" ]]; then
+                MSG="${MSG//"$GHCR_ACTIONS_TOKEN"/***}"
+              fi
+              if [[ -n "$HERMES_RUNTIME_SECRETS_B64" ]]; then
+                MSG="${MSG//"$HERMES_RUNTIME_SECRETS_B64"/***}"
+              fi
               if ! cleanup_managed_command; then
                 MANAGED_FAILURE="managed command cleanup failed on ${VM}"
               fi
