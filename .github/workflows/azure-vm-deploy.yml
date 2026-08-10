@@ -302,12 +302,21 @@ jobs:
           for i in $(seq 0 $((COUNT - 1))); do
             VM=$(echo "$TARGETS_YAML" | yq ".[${i}].vm-name" -)
             REMOTE_SUCCESS_TOKEN="TC_PREFLIGHT_REMOTE_SUCCESS_${GITHUB_RUN_ID}_${i}_${RANDOM}"
+            # Keep arbitrary caller text on its own line so a terminal newline
+            # or comment cannot invalidate or consume the success proof.
+            REMOTE_SCRIPT=$(
+              printf '%s\n' \
+                'set -e' \
+                'export HOME=/root' \
+                "$PREFLIGHT_SCRIPT" \
+                "printf '%s\n' '${REMOTE_SUCCESS_TOKEN}'"
+            )
             set +e
             MSG=$(run_with_retry "preflight on ${VM}" az vm run-command invoke \
               --resource-group "$RG" \
               --name "$VM" \
               --command-id RunShellScript \
-              --scripts "set -e; export HOME=/root; ${PREFLIGHT_SCRIPT}; printf '%s\n' '${REMOTE_SUCCESS_TOKEN}'" \
+              --scripts "$REMOTE_SCRIPT" \
               --query 'value[0].message' -o tsv 2>&1)
             RC=$?
             set -e
@@ -854,13 +863,22 @@ jobs:
           for i in $(seq 0 $((COUNT - 1))); do
             VM=$(echo "$TARGETS_YAML" | yq ".[${i}].vm-name" -)
             REMOTE_SUCCESS_TOKEN="TC_CLEANUP_REMOTE_SUCCESS_${GITHUB_RUN_ID}_${i}_${RANDOM}"
+            # Keep arbitrary caller text on its own line so a terminal newline
+            # or comment cannot invalidate or consume the success proof.
+            REMOTE_SCRIPT=$(
+              printf '%s\n' \
+                'set -e' \
+                'export HOME=/root' \
+                "$CLEANUP_SCRIPT" \
+                "printf '%s\n' '${REMOTE_SUCCESS_TOKEN}'"
+            )
             echo "=== Failure cleanup ${VM} ==="
             set +e
             MSG=$(run_with_retry "failure cleanup on ${VM}" az vm run-command invoke \
               --resource-group "$RG" \
               --name "$VM" \
               --command-id RunShellScript \
-              --scripts "set -e; export HOME=/root; ${CLEANUP_SCRIPT}; printf '%s\n' '${REMOTE_SUCCESS_TOKEN}'" \
+              --scripts "$REMOTE_SCRIPT" \
               --query 'value[0].message' -o tsv 2>&1)
             RC=$?
             set -e

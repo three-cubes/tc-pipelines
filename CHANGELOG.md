@@ -33,6 +33,11 @@ for the consumer-facing `@vN` workflow/action references.
 
 ### Fixed
 
+- **Newline-safe Azure preflight and failure-cleanup transport (EXE-63).**
+  `azure-vm-deploy.yml` now composes caller-supplied multiline scripts and the
+  remote success proof as separate newline-delimited fragments. A caller block
+  ending in a newline or shell comment can no longer create a leading `;`,
+  consume the proof command, or fail a successful preflight before apply.
 - **Fail-closed Azure VM apply completion and usable GHCR token opt-in
   (EXE-61).** Reusable callers now map the configuration-time
   `secrets.GITHUB_TOKEN` into `ghcr-actions-token`; the previous documented
