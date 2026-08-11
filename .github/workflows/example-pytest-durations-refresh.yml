@@ -1,0 +1,56 @@
+name: example — pytest-durations-refresh (reusable self-check)
+
+# Static call-graph self-check for the `pytest-durations-refresh.yml` reusable.
+# Each job `uses:` it via its LOCAL path with a real consumer's input shape, so
+# actionlint + GitHub's reusable-workflow resolver validate input names,
+# required-input presence, types, and secret shapes against the reusable's
+# `workflow_call:` contract at parse time — a mismatch fails HERE rather than in
+# a consumer's pipeline.
+#
+# NEVER runs the underlying work by default: `workflow_call` only, and every job
+# is gated on `run-for-real` (default false). A real refresh runs the whole suite
+# unsharded, which costs roughly the sum of the shards.
+
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: >-
+          Leave false (default) for the static call-graph self-check — every job
+          stays gated off and only the input/secret SHAPES are validated. The
+          dispatcher (example-callers.yml) passes this through.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # taz-shaped: locked workspace install with the Node half on, because its
+  # pytest suite shells out to node. This is the consumer that actually shards,
+  # so it is the one whose durations map has to come off a runner.
+  durations-taz:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/pytest-durations-refresh.yml
+    with:
+      python-version: "3.12"
+      uv-version: "0.11.16"
+      sync-args: --locked --all-packages
+      ci-requirements-path: .github/requirements-ci.txt
+      tc-fitness-args: --only platform-pytest
+      run-node: true
+      ts-coverage-command: "echo 'TS coverage runs in the consumer js-ts job.'"
+    secrets:
+      gh-token: dummy-token-shape-check-only
+
+  # Minimal shape: defaults for everything optional, exercising the contract for
+  # a consumer with no Node half and the default artifact/durations paths.
+  durations-minimal:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/pytest-durations-refresh.yml
+    with:
+      python-version: "3.12"
+      uv-version: "0.11.16"
+      sync-args: --all-extras --all-groups
+      ci-requirements-path: .github/requirements-ci.txt
+      tc-fitness-args: --only platform-pytest
