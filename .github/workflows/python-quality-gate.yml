@@ -165,6 +165,19 @@ on:
           in-gate concern-parallelism + `--tier` release).
         type: string
         default: ""
+      shard-tier:
+        description: >-
+          Tier the SHARD jobs select, when it differs from `tier`. Only steps
+          declaring `shard_args` actually split, so every non-sharded step —
+          typically the whole fitness catalogue — otherwise re-runs in full in every
+          shard: N times the compute, with its duration on each shard's critical
+          path instead of once.
+
+          Tag the sharded step (e.g. pytest) with its own tier and name it here; the
+          caller runs the remaining steps once in a separate job. Empty (the default)
+          keeps the previous behaviour exactly.
+        type: string
+        default: ""
       coverage-combine-post:
         description: >-
           Repo-owned bash command run in the `coverage-combine` job AFTER the shard
@@ -345,7 +358,7 @@ jobs:
           upload-coverage-artifact: ${{ inputs.upload-coverage-artifact }}
           coverage-xml-path: ${{ inputs.coverage-xml-path }}
           coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
-          tier: ${{ inputs.tier }}
+          tier: ${{ inputs.shard-tier != '' && inputs.shard-tier || inputs.tier }}
           shard-index: ${{ matrix.shard }}
           shard-total: ${{ inputs.pytest-shards }}
 
