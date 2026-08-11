@@ -8,6 +8,8 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.17.0] — 2026-08-11
+
 ### Added
 
 - **Protected GHCR apply transport for `azure-vm-deploy.yml` (EXE-61).** An
