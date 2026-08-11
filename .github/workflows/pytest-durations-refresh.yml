@@ -40,9 +40,12 @@ on:
         required: true
       tc-fitness-args:
         description: >-
-          Arguments for `tc-fitness run`, selecting the pytest step alone —
-          e.g. `--only platform-pytest`. Must NOT contain `--shard`: pytest-split
-          cannot store durations and split in the same run.
+          Arguments to the engine CLI, including the subcommand — e.g.
+          `run --only platform-pytest`. Matches `python-quality-gate.yml`, whose
+          default is `run`; the composite invokes `uv run tc-fitness <these args>`
+          verbatim, so omitting `run` fails before pytest starts. Select the
+          pytest step alone, and NOT with `--shard`: pytest-split cannot store
+          durations and split in the same run.
         type: string
         required: true
       durations-path:
@@ -92,6 +95,20 @@ on:
         type: string
         required: false
         default: ""
+      pre-steps:
+        description: >-
+          Shell run BEFORE the suite, matching what the consumer's gate call
+          passes. A consumer that generates fixtures or starts a local service in
+          `pre-steps` would otherwise time a differently prepared suite here, and
+          the map would describe a run its gate never performs.
+        type: string
+        required: false
+        default: ""
+      post-steps:
+        description: "Shell run after the suite, matching the consumer's gate call."
+        type: string
+        required: false
+        default: ""
     secrets:
       gh-token:
         description: "Token forwarded to the gate body."
@@ -119,7 +136,7 @@ jobs:
       - name: Reject a sharded selection
         if: ${{ contains(inputs.tc-fitness-args, '--shard') }}
         run: |
-          echo "::error::tc-fitness-args contains --shard, but pytest-split cannot store durations and split in one run — the map would describe a single shard's slice and rebalance the suite onto it. fix: pass the unsharded selection (e.g. '--only platform-pytest'). next: re-run."
+          echo "::error::tc-fitness-args contains --shard, but pytest-split cannot store durations and split in one run — the map would describe a single shard's slice and rebalance the suite onto it. fix: pass the unsharded selection (e.g. 'run --only platform-pytest'). next: re-run."
           exit 1
 
       - name: Run the suite and store durations
@@ -134,14 +151,27 @@ jobs:
           write-changed-files: false
           changed-files-path: ""
           run-no-attribution: false
-          pre-steps: ""
-          post-steps: ""
+          # The composite checks out before it runs pre-steps, so clearing the
+          # map has to happen HERE — a step ahead of the composite would be undone
+          # by that checkout. A consumer commits its map, so the file is on disk
+          # before the suite runs; left in place, a refresh that writes nothing
+          # (a selection naming a non-pytest step, a pytest command matching no
+          # tests) leaves the checked-in file to satisfy the assertion below and
+          # ship as a fresh map. The consumer's own pre-steps follow, so the
+          # suite is prepared exactly as its gate prepares it.
+          pre-steps: |
+            rm -f -- "${{ inputs.durations-path }}"
+            ${{ inputs.pre-steps }}
+          post-steps: ${{ inputs.post-steps }}
           run-node: ${{ inputs.run-node }}
           node-version-file: ${{ inputs.node-version-file }}
           pnpm-version: ${{ inputs.pnpm-version }}
           pnpm-install-args: ${{ inputs.pnpm-install-args }}
           ts-coverage-command: ${{ inputs.ts-coverage-command }}
-          gh-token: ${{ secrets.gh-token }}
+          # Matches python-quality-gate.yml: an omitted optional secret falls
+          # back to the workflow token, so a suite that shells out to gh/git or
+          # the API still authenticates instead of failing on an empty value.
+          gh-token: ${{ secrets.gh-token || github.token }}
           # Coverage is a gate concern, not a durations concern; the paths are
           # still required inputs, so they carry the composite's own defaults.
           coverage-xml-path: "coverage.xml"
@@ -179,5 +209,9 @@ jobs:
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ inputs.durations-path }}
+          # `.test_durations` is a dotfile and upload-artifact v4 excludes hidden
+          # files by default, so without this the upload finds nothing and the
+          # error below fires on a run that actually succeeded.
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

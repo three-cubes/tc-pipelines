@@ -22,11 +22,18 @@ for the consumer-facing `@vN` workflow/action references.
 
   The reusable runs the suite through the consumer's own gate step and injects
   `--store-durations` via `PYTEST_ADDOPTS`, so the command, markers and coverage
-  flags stay whatever `[tool.tc_fitness]` declares. It refuses a `--shard`
-  selection (pytest-split cannot store and split in one run — the map would
-  describe one shard's slice and rebalance the suite onto it), asserts the map is
-  a non-empty object with non-zero total, and publishes it as an artifact rather
-  than pushing, so a balance-critical input is never rewritten unreviewed.
+  flags stay whatever `[tool.tc_fitness]` declares. `pre-steps`/`post-steps` are
+  forwarded, so a consumer that generates fixtures or starts a service for its
+  gate times the same suite here rather than a differently prepared one.
+
+  It fails closed rather than shipping a map it did not produce: the checked-in
+  map is cleared before the suite runs (a consumer commits that file, so a
+  refresh writing nothing would otherwise re-upload the stale copy as fresh), a
+  `--shard` selection is refused (pytest-split cannot store and split in one run
+  — the map would describe one shard's slice and rebalance the suite onto it),
+  and the result must be a non-empty object with a non-zero total. Output is an
+  artifact, never a push, so a balance-critical input is never rewritten
+  unreviewed.
 
 ## [1.17.0] — 2026-08-11
 
