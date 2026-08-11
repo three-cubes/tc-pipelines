@@ -21,6 +21,13 @@ for the consumer-facing `@vN` workflow/action references.
   merge. `pytest` and `pyjwt` are declared in a `dev` dependency group — neither
   was installed by `uv sync`, so the suite only ever passed against a
   developer's ambient environment.
+- **`test_internal_call_contracts`** checks every internal `uses:` against the
+  contract of what it calls — required inputs present, no unknown ones — plus
+  per-lane parity of the consumer inputs `python-quality-gate.yml` forwards to
+  `python-gate-body`. Actions resolves these at run time and the two failure
+  modes are asymmetric: a reusable with a bad input shape fails as
+  `startup_failure` with no log, while a composite action missing a `required`
+  input only warns, substitutes an empty string, and reports success.
 - **`test_reusable_input_default_parity`** pins the shared optional inputs of
   `python-quality-gate.yml` and `pytest-durations-refresh.yml` to the same
   defaults. Both `pnpm-install-args` and `pnpm-version` drifted apart silently
@@ -30,6 +37,14 @@ for the consumer-facing `@vN` workflow/action references.
 
 ### Fixed
 
+- **`quality-non-shard` silently dropped four consumer inputs.** The lane
+  omitted `pre-steps`, `post-steps`, `coverage-xml-path` and
+  `coverage-artifact-name` while `quality` and `quality-shard` forwarded all of
+  them. A consumer that prepares fixtures or starts a service in `pre-steps`
+  therefore had its non-sharded checks run against an unprepared environment
+  while the sharded lanes ran against a prepared one — behind a single required
+  status context reporting on both. The lane now forwards them, and takes the
+  `secrets.gh-token || github.token` fallback its siblings already used.
 - **Three bootstrap tests asserted a ruleset path the script never writes.**
   They looked for `.github/rulesets/main.json` while
   `bootstrap-repo-governance.sh` emits `main-product.json`, so they had never

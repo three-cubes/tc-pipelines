@@ -544,12 +544,20 @@ jobs:
           write-changed-files: ${{ inputs.write-changed-files }}
           changed-files-path: ${{ inputs.changed-files-path }}
           run-no-attribution: false
+          # Forwarded like every other lane: a consumer that prepares fixtures or
+          # starts a service in pre-steps would otherwise have this lane run its
+          # checks against an unprepared environment, while the shard lanes ran
+          # against a prepared one.
+          pre-steps: ${{ inputs.pre-steps }}
+          post-steps: ${{ inputs.post-steps }}
           run-node: ${{ inputs.run-node }}
           node-version-file: ${{ inputs.node-version-file }}
           pnpm-version: ${{ inputs.pnpm-version }}
           pnpm-install-args: ${{ inputs.pnpm-install-args }}
           ts-coverage-command: ${{ inputs.ts-coverage-command }}
-          gh-token: ${{ secrets.gh-token }}
+          gh-token: ${{ secrets.gh-token || github.token }}
+          coverage-xml-path: ${{ inputs.coverage-xml-path }}
+          coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
           tier: ${{ inputs.non-shard-tier }}
           upload-coverage-artifact: false
 
