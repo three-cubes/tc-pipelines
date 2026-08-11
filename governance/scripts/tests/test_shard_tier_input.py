@@ -59,3 +59,52 @@ def test_the_unsharded_job_is_untouched() -> None:
     expr = str(_workflow()["jobs"]["quality"]["steps"][0]["with"]["tier"])
 
     assert expr.strip() == "${{ inputs.tier }}"
+
+
+def test_the_non_shard_lane_is_gated_by_the_fan_in() -> None:
+    """The complement must sit inside the required context, not beside it.
+
+    With `shard-tier` set the shard lanes cover only the sharded step. If the
+    remaining steps ran in a lane the fan-in ignores — or in a lane each consumer
+    had to build for itself — they would drop out of `Python quality gate result`
+    while it still reported green. That is a silently-skipped gate, which is the
+    failure this whole input exists to remove, not to introduce.
+    """
+    wf = _workflow()
+
+    assert "quality-non-shard" in wf["jobs"], "the workflow must own the complement lane"
+    assert "quality-non-shard" in wf["jobs"]["gate"]["needs"], "the fan-in must require it"
+
+    step = wf["jobs"]["gate"]["steps"][0]
+    assert "R_NONSHARD" in step["env"], "its result must be read"
+    assert "$R_NONSHARD" in step["run"], "its result must be checked, not merely read"
+
+
+def test_the_complement_lane_runs_only_when_sharding_with_a_shard_tier() -> None:
+    """It is inert for every consumer that has not opted in."""
+    cond = " ".join(str(_workflow()["jobs"]["quality-non-shard"]["if"]).split())
+
+    assert "inputs.pytest-shards > 1" in cond
+    assert "inputs.shard-tier != ''" in cond
+
+
+def test_a_shard_tier_without_its_complement_fails_fast() -> None:
+    """Half-configured is the dangerous state, so refuse it loudly.
+
+    Setting `shard-tier` and forgetting `non-shard-tier` would otherwise run the
+    shards alone and report a green gate over a fraction of the checks.
+    """
+    steps = _workflow()["jobs"]["quality-non-shard"]["steps"]
+    guard = steps[0]
+
+    assert "inputs.non-shard-tier == ''" in str(guard["if"])
+    assert "exit 1" in guard["run"]
+    assert "::error::" in guard["run"], "the failure must be actionable, not silent"
+
+
+def test_the_complement_lane_runs_the_non_shard_tier() -> None:
+    """It must select the complement, not repeat the shard tier or the whole gate."""
+    body = _workflow()["jobs"]["quality-non-shard"]["steps"][1]
+
+    assert str(body["with"]["tier"]).strip() == "${{ inputs.non-shard-tier }}"
+    assert "shard-index" not in body["with"], "the complement lane must not shard"

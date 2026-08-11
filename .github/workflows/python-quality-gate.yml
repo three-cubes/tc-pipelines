@@ -173,9 +173,19 @@ on:
           shard: N times the compute, with its duration on each shard's critical
           path instead of once.
 
-          Tag the sharded step (e.g. pytest) with its own tier and name it here; the
-          caller runs the remaining steps once in a separate job. Empty (the default)
-          keeps the previous behaviour exactly.
+          Tag the sharded step (e.g. pytest) with its own tier and name it here, and
+          name the complement in `non-shard-tier`. This workflow then runs that
+          complement ONCE in its own gated lane — it is not the caller's job to
+          remember, because a forgotten lane silently drops those checks from the
+          required context. Empty (the default) keeps the previous behaviour exactly.
+        type: string
+        default: ""
+      non-shard-tier:
+        description: >-
+          Tier holding every step the shards do NOT run. Required when `shard-tier`
+          is set: without it the shard lanes cover only the sharded step and the rest
+          of the gate would vanish from `Python quality gate result` while still
+          reporting green. The workflow fails fast rather than let that happen.
         type: string
         default: ""
       coverage-combine-post:
@@ -503,6 +513,46 @@ jobs:
           # the floor or there is no measurable new code.
           uv run python -m tc_fitness.core_checks.new_code_coverage
 
+  # ── the complement of the shard tier, run ONCE ──────────────────────────────
+  # With `shard-tier` set the shard lanes cover only the sharded step. This lane
+  # runs everything else exactly once and is wired into the fan-in below, so those
+  # checks stay inside the required context instead of depending on every consumer
+  # remembering to build and branch-protect a job of their own.
+  quality-non-shard:
+    needs: [detect-changes]
+    if: ${{ inputs.pytest-shards > 1 && inputs.shard-tier != '' && needs.detect-changes.outputs.code-changed == 'true' }}
+    name: Python quality gate (non-shard)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Reject a shard-tier with no complement
+        if: ${{ inputs.non-shard-tier == '' }}
+        run: |
+          echo "::error::shard-tier is set but non-shard-tier is empty — every step outside the shard tier would drop out of the gate while it still reported green. fix: set non-shard-tier to the tier holding those steps. next: re-run."
+          exit 1
+      - name: Run the gate (non-shard tier)
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@d0145c781a3f26a434fa46d4933d791d7acda078 # SHA pin (SGO-266)
+        with:
+          python-version: ${{ inputs.python-version }}
+          uv-version: ${{ inputs.uv-version }}
+          sync-args: ${{ inputs.sync-args }}
+          ci-requirements-path: ${{ inputs.ci-requirements-path }}
+          fetch-depth: ${{ inputs.fetch-depth }}
+          tc-fitness-args: ${{ inputs.tc-fitness-args }}
+          write-changed-files: ${{ inputs.write-changed-files }}
+          changed-files-path: ${{ inputs.changed-files-path }}
+          run-no-attribution: false
+          run-node: ${{ inputs.run-node }}
+          node-version-file: ${{ inputs.node-version-file }}
+          pnpm-version: ${{ inputs.pnpm-version }}
+          pnpm-install-args: ${{ inputs.pnpm-install-args }}
+          ts-coverage-command: ${{ inputs.ts-coverage-command }}
+          gh-token: ${{ secrets.gh-token }}
+          tier: ${{ inputs.non-shard-tier }}
+          upload-coverage-artifact: false
+
   # ── The single required-status context (shard-count-independent) ────────────
   # The `quality` job runs only unsharded and `quality-shard` only sharded, so
   # neither name is stable to pin in branch protection: pinning `quality` lets a
@@ -513,7 +563,7 @@ jobs:
   # pins regardless of pytest-shards. Its name never changes with the shard count.
   gate:
     name: Python quality gate result
-    needs: [quality, quality-shard, coverage-combine, new-code-coverage]
+    needs: [quality, quality-shard, quality-non-shard, coverage-combine, new-code-coverage]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -521,12 +571,13 @@ jobs:
         env:
           R_QUALITY: ${{ needs.quality.result }}
           R_SHARD: ${{ needs.quality-shard.result }}
+          R_NONSHARD: ${{ needs.quality-non-shard.result }}
           R_COMBINE: ${{ needs.coverage-combine.result }}
           R_NEWCOV: ${{ needs.new-code-coverage.result }}
         run: |
           set -euo pipefail
-          echo "quality=$R_QUALITY quality-shard=$R_SHARD coverage-combine=$R_COMBINE new-code-coverage=$R_NEWCOV"
-          for r in "$R_QUALITY" "$R_SHARD" "$R_COMBINE" "$R_NEWCOV"; do
+          echo "quality=$R_QUALITY quality-shard=$R_SHARD quality-non-shard=$R_NONSHARD coverage-combine=$R_COMBINE new-code-coverage=$R_NEWCOV"
+          for r in "$R_QUALITY" "$R_SHARD" "$R_NONSHARD" "$R_COMBINE" "$R_NEWCOV"; do
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
               echo "::error::Python quality gate FAILED — a quality lane did not pass ($r)."
               exit 1
