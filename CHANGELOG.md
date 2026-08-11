@@ -19,8 +19,12 @@ for the consumer-facing `@vN` workflow/action references.
   inputs are optional — therefore ran package lifecycle scripts during a refresh
   that its gate skips, building a different node tree and timing a suite the
   shards never execute. That is the divergence the durations map exists to
-  remove, so the mismatch defeated the workflow's own purpose. The defaults now
-  match.
+  remove, so the mismatch defeated the workflow's own purpose. `pnpm-version`
+  carried the same defect — the gate pins `10.27.0` while the refresh left it
+  empty, so `pnpm/action-setup` resolved from `packageManager`/`devEngines` or
+  failed outright. Both now match the gate, and the two defaults that stay
+  deliberately different (`fetch-depth`, `ts-coverage-command`) say why in their
+  own descriptions, so the next reader can tell drift from intent.
 
 ## [1.18.0] — 2026-08-12
 
