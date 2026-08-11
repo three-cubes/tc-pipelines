@@ -16,7 +16,7 @@
 # it installed emits.
 #
 # Precedence note: GitHub resolves variables/secrets repo-over-org. The
-# org-level AZURE_*/SONAR_TOKEN/CODECOV_TOKEN are the default; this script only
+# org-level AZURE_*/CODECOV_TOKEN are the default; this script only
 # sets a REPO-level override when it differs from the org value. For the common
 # case the org inheritance is enough and this script writes no repo variables.
 #
@@ -58,9 +58,7 @@ DRY_RUN=0
 # Quality-gate wiring knobs.
 FITNESS_TAG="v0.12.0"        # pinned tc-fitness engine (ships ci_consumes_shared_gate)
 PIPELINES_TAG="v1"           # pinned tc-pipelines reusables (floating major)
-DO_SONAR=1                   # emit the SonarCloud jobs + require the Sonar contexts
 DO_RELEASE=0                 # also render a release.yml caller
-SONAR_PROJECT_KEY=""         # default derived from --repo
 OUT_DIR=""                   # where wiring renders (default: a temp dir, reported)
 DO_VERIFY=0                  # run --verify after rendering
 VERIFY_ONLY=0                # verify an existing OUT_DIR, render nothing
@@ -78,7 +76,6 @@ STANDARD_VARS=(AZURE_CLIENT_ID AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID)
 
 # Canonical secrets wired from KV: secret-name -> kv-secret-name.
 declare -a SECRET_MAP=(
-  "SONAR_TOKEN:sonarcloud-ci-analysis-token"
   "CODECOV_TOKEN:codecov-upload-token"
 )
 
@@ -95,10 +92,7 @@ while [[ $# -gt 0 ]]; do
     --no-wiring) DO_WIRING=0; shift ;;
     --fitness-tag) FITNESS_TAG="$2"; shift 2 ;;
     --pipelines-tag) PIPELINES_TAG="$2"; shift 2 ;;
-    --sonar) DO_SONAR=1; shift ;;
-    --no-sonar) DO_SONAR=0; shift ;;
     --with-release) DO_RELEASE=1; shift ;;
-    --sonar-project-key) SONAR_PROJECT_KEY="$2"; shift 2 ;;
     --out-dir) OUT_DIR="$2"; shift 2 ;;
     --verify) DO_VERIFY=1; shift ;;
     --verify-only) VERIFY_ONLY=1; DO_VERIFY=1; shift ;;
@@ -121,7 +115,6 @@ fi
 
 # ── derived tokens ───────────────────────────────────────────────────────────
 REPO_SLUG="${REPO##*/}"                       # <name> from three-cubes/<name>
-: "${SONAR_PROJECT_KEY:=three-cubes_${REPO_SLUG}}"
 FITNESS_FLOOR="${FITNESS_TAG#v}"              # engine_version_floor value (no leading v)
 : "${OUT_DIR:=${TMPDIR:-/tmp}/tc-bootstrap-${REPO_SLUG}}"
 
@@ -153,8 +146,7 @@ subst_tokens() {
     -e "s|{{CANONICAL_HOMES}}|${CANONICAL_HOMES}|g" \
     -e "s|{{FITNESS_TAG}}|${FITNESS_TAG}|g" \
     -e "s|{{FITNESS_FLOOR}}|${FITNESS_FLOOR}|g" \
-    -e "s|{{PIPELINES_TAG}}|${PIPELINES_TAG}|g" \
-    -e "s|{{SONAR_PROJECT_KEY}}|${SONAR_PROJECT_KEY}|g"
+    -e "s|{{PIPELINES_TAG}}|${PIPELINES_TAG}|g"
 }
 
 # Render one skeleton to stdout: inline the banner INCLUDE, then resolve tokens.
@@ -173,29 +165,19 @@ render_skeleton() {
 }
 
 # Render one quality-gate wiring template (`<name>.tmpl`) to a target path.
-# ci.yml carries a SONAR-BLOCK the render KEEPS (--sonar) or STRIPS (--no-sonar),
-# so the emitted jobs match the required ruleset contexts for the chosen mode.
+# The skeleton emits exactly the jobs the applied ruleset requires.
 render_wiring() {
   local src="$1" dest="$2"
   mkdir -p "$(dirname "$dest")"
-  if [[ "$DO_SONAR" == "1" ]]; then
-    sed -e '/# SONAR-BLOCK-START/d' -e '/# SONAR-BLOCK-END/d' "${SKELETON_DIR}/${src}" | subst_tokens > "$dest"
-  else
-    sed '/# SONAR-BLOCK-START/,/# SONAR-BLOCK-END/d' "${SKELETON_DIR}/${src}" | subst_tokens > "$dest"
-  fi
+  subst_tokens < "${SKELETON_DIR}/${src}" > "$dest"
 }
 
-# Render the canonical main ruleset to $2, trimming the two SonarCloud required
-# contexts under --no-sonar so the required set matches what ci.yml emits.
+# Render the canonical main ruleset to $2. Its required contexts are exactly the
+# jobs the skeleton ci.yml emits.
 render_ruleset() {
   local src="$1" dest="$2"
   mkdir -p "$(dirname "$dest")"
-  if [[ "$DO_SONAR" == "1" ]]; then
-    cp "$src" "$dest"
-  else
-    jq '(.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks)
-        |= map(select(.context | test("SonarCloud") | not))' "$src" > "$dest"
-  fi
+  cp "$src" "$dest"
 }
 
 # ── verify ───────────────────────────────────────────────────────────────────
@@ -207,7 +189,7 @@ render_ruleset() {
 #   (b) .secrets.baseline exists (the pre-commit + gate secret-scan needs it);
 #   (c) the pyproject fragment carries the engine pin + the CORE bindings.
 # Externally-provided contexts (posted by an app, not a ci.yml job).
-VERIFY_EXTERNAL_CONTEXTS=("SonarCloud Code Analysis")
+VERIFY_EXTERNAL_CONTEXTS=()
 
 run_verify() {
   local ruleset="${OUT_DIR}/.github/rulesets/main-product.json"
@@ -361,11 +343,7 @@ if [[ "$DO_RULESET" == "1" ]]; then
       run gh api "repos/${REPO}/rulesets/${existing}" --method DELETE
     fi
     run gh api "repos/${REPO}/rulesets" --method POST --input "$applied_ruleset"
-    if [[ "$DO_SONAR" == "1" ]]; then
-      echo "ok: applied main ruleset (required: Quality gate + no-attribution)"
-    else
-      echo "ok: applied main ruleset, SonarCloud contexts trimmed (required: Quality gate + no-attribution)"
-    fi
+    echo "ok: applied main ruleset (required: Quality gate + no-attribution)"
     rm -f "$applied_ruleset"
     [[ -n "$cleanup_ruleset" ]] && rm -f "$cleanup_ruleset"
   fi
@@ -516,10 +494,6 @@ if [[ "$DO_WIRING" == "1" ]]; then
     done
     cp "${GOV_DIR}/pre-commit-config.yaml" "${OUT_DIR}/.pre-commit-config.yaml"
 
-    if [[ "$DO_SONAR" == "1" ]]; then
-      render_wiring "sonar-project.properties.tmpl" "${OUT_DIR}/sonar-project.properties"
-      echo "ok: rendered sonar-project.properties (projectKey ${SONAR_PROJECT_KEY})"
-    fi
 
     if [[ "$DO_RELEASE" == "1" ]]; then
       cat > "${OUT_DIR}/.github/workflows/release.yml" <<EOF
@@ -549,7 +523,7 @@ EOF
       render_skeleton "$s" > "${OUT_DIR}/${s}"
     done
 
-    echo "ok: wiring rendered to ${OUT_DIR} (fitness-tag=${FITNESS_TAG} pipelines-tag=${PIPELINES_TAG} sonar=${DO_SONAR})"
+    echo "ok: wiring rendered to ${OUT_DIR} (fitness-tag=${FITNESS_TAG} pipelines-tag=${PIPELINES_TAG})"
     cat <<EOF
   run (in a clone of ${REPO}, on a branch):
     # copy the rendered wiring in, MERGE the pyproject fragment into pyproject.toml,
@@ -557,7 +531,6 @@ EOF
     cp -r ${OUT_DIR}/.github ${OUT_DIR}/scripts ${OUT_DIR}/Makefile ${OUT_DIR}/.secrets.baseline \\
       ${OUT_DIR}/.pre-commit-config.yaml .
     cat ${OUT_DIR}/pyproject.tc_fitness.toml   # merge [dependency-groups] + [tool.tc_fitness] into pyproject.toml
-$( [[ "$DO_SONAR" == "1" ]] && echo "    cp ${OUT_DIR}/sonar-project.properties ." )
     uv lock && uv sync --all-extras --all-groups
     uv run pre-commit install --hook-type commit-msg --hook-type pre-push && uv run pre-commit install
     make check           # the exact gate CI runs — get it green before push
@@ -591,9 +564,6 @@ cat <<EOF
      and confirm .github/CODEOWNERS routes control-plane paths to @three-cubes/maintainers.
   3. GitHub App install (three-cubes-agent, so agents author PRs as the App):
        install/grant the App on ${REPO} (Settings → GitHub Apps) — a human act.
-  4. SonarCloud project (only under --sonar):
-       create project ${SONAR_PROJECT_KEY} in org three-cubes, enable the PR decoration,
-       and confirm the SONAR_TOKEN secret resolves (org-inherited or repo-set).
   Also: add your maintainer email to [tool.tc_fitness.core_checks.canonical_commit_identity]
   allowed_emails, and (for autonomous merge) flip the main ruleset review count to 0 only
   AFTER the gate is proven green + deterministic (governance/gate-hardening.md).

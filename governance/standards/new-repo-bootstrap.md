@@ -109,7 +109,6 @@ complete drop-in:
 - **`.pre-commit-config.yaml`** + **`scripts/git-hooks/{commit-msg,pre-push}`** —
   the local hook config and the repo-local hook scripts it points at.
 - **`sonar-project.properties`** — only under `--sonar`; policy per
-  [sonarqube-usage](sonarqube-usage.md).
 - **`.github/workflows/release.yml`** — only under `--with-release`.
 - The six affordance docs, so `--out-dir` is a self-contained drop-in.
 

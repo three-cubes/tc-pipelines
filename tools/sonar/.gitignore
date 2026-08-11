@@ -1,3 +1,0 @@
-# Python bytecode from running the CORE sonar drivers / their unit tests locally.
-__pycache__/
-*.py[cod]

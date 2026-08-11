@@ -16,7 +16,7 @@ name: python-quality-gate
 # one command: provisioning a pinned/cached uv venv, the optional Node/TS half
 # (a separate ecosystem the Python engine does not orchestrate), repo-specific
 # pre/post orchestration hooks, and the coverage-artifact handoff to
-# `sonar-scan.yml`. Repo-specific gate STEPS are config in the engine, never
+# the caller. Repo-specific gate STEPS are config in the engine, never
 # inputs here — that is the whole point of the convergence.
 #
 # ── Reusable-tag ↔ engine-tag compatibility ─────────────────────────────────
@@ -109,9 +109,9 @@ on:
           step itself was skipped). Empty string skips.
         type: string
         default: ""
-      # ── Coverage-artifact handoff to sonar-scan.yml ─────────────────────
+      # ── Coverage-artifact handoff ────────────────────────────────────────
       upload-coverage-artifact:
-        description: "Upload the engine-produced coverage XML as an artifact for the downstream Sonar scan."
+        description: "Upload the engine-produced coverage XML as an artifact for a downstream consumer job."
         type: boolean
         default: true
       coverage-xml-path:
@@ -121,7 +121,7 @@ on:
         type: string
         default: "coverage.xml"
       coverage-artifact-name:
-        description: "Artifact name the downstream sonar-scan job downloads."
+        description: "Artifact name the downstream consumer job downloads."
         type: string
         default: "coverage-data"
       # ── Node / TS half (opt-in — a separate ecosystem) ──────────────────

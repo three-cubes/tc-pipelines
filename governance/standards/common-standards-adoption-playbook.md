@@ -21,8 +21,6 @@ The convergence made **one shared quality engine** (`tc_fitness`) + **one shared
 - **Reusable workflows stay secret-free** (callers pass secrets); public artefacts don't name private sibling repos.
 - Reference model: kairix `CLAUDE.md`, `docs/architecture/ENGINEERING.md §3.7`, `docs/architecture/fitness-functions.md` (Limits section), and the two new runbooks `docs/operations/runbooks/how-to-consume-a-shared-reusable-workflow.md` + `runbook-ci-startup-failure.md`.
 
-**2. CI reusable-workflow adoption** — wire the repo's `ci.yml` / `sonar.yml` / `5-mutation-testing.yml` onto the shared tc-pipelines `@v1` reusables (`setup-uv-cached` composite, `python-quality-gate.yml`, `sonar-scan.yml` artifact-handoff, `mutation-gate.yml`, `docker-build-publish.yml`, `fresh-install-smoke.yml`).
-- **⚠️ Blocker first:** the `sonar-scan.yml@v1` caller broke kairix `ci.yml` at **`startup_failure`** (a `workflow_call` input/secret contract mismatch, undiagnosed — reverted in kairix). **Diagnose the contract and validate the caller on a python-touching PR before merging** (gotcha #1). The `setup-uv-cached` composite is the safe first adoption; `sonar-scan` artifact-handoff requires moving coverage production into an upstream job that uploads the coverage + test-results artifacts.
 - The repo's mutation gate needs its real runner landed before consuming `mutation-gate.yml`.
 
 **3. Test-cost / test-health audit** — run the same audit on the repo's suite that kairix just did (~459s→~250s on the per-commit path):

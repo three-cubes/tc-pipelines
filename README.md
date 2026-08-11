@@ -75,7 +75,6 @@ jobs:
 |---|---|
 | [`python-quality-gate.yml`](.github/workflows/python-quality-gate.yml) | The shared Python check → `uv run tc-fitness run`. Sets up a pinned, cached uv venv, then runs the tool against the repo's `[tool.tc_fitness]` config. |
 | [`meta-quality-gate.yml`](.github/workflows/meta-quality-gate.yml) | Self-CI for **non-Python** repos (this repo, docs/action collections). Repo-agnostic hygiene checks — actionlint, yamllint, license-present, branch-naming — each one you can turn on or off; all caller inputs are bound to env vars before any shell runs (injection-safe). |
-| [`sonar-scan.yml`](.github/workflows/sonar-scan.yml) | SonarCloud scan that **reuses the test results** (it does not re-run tests) — it imports the coverage XML and JUnit results that `python-quality-gate` produced. `sonar.qualitygate.wait=true`. **Secret:** `SONAR_TOKEN`. |
 | [`release.yml`](.github/workflows/release.yml) | Thin shared release flow (needs a human): validate CalVer tag, extract CHANGELOG section, create + push tag, `gh release create`. Repo-specific checks stay in the caller. **Secret:** `gh-token`. |
 | [`mutation-gate.yml`](.github/workflows/mutation-gate.yml) | Mutation/parity check scoped to the diff; keeps a survivors baseline that can only improve, never get worse. |
 | [`docker-build-publish.yml`](.github/workflows/docker-build-publish.yml) | Build and optionally push a container image. |
@@ -97,7 +96,7 @@ Each workflow's inputs, secrets, and defaults are documented in the header of th
 | `write-changed-files` | `false` | write a newline-delimited PR/push diff file before the gate |
 | `changed-files-path` | `".tc-fitness-changed-files"` | path written when `write-changed-files` is true |
 | `pre-steps` / `post-steps` | `""` | bash run before / after the check |
-| `upload-coverage-artifact` | `true` | upload coverage XML for `sonar-scan.yml` |
+| `upload-coverage-artifact` | `true` | upload coverage XML for a downstream consumer job |
 | `run-node` | `false` | run the pnpm/TS half (separate ecosystem) |
 
 Diff-scoped PR smoke example:

@@ -20,7 +20,7 @@ The pin bump touches the gate's own definition, so it is a control-plane change:
 
 ## Improve the pipeline (tc-pipelines)
 
-1. **Change the reusable in place** — the workflow (`python-quality-gate.yml`, `sonar-scan.yml`, `azure-vm-deploy.yml`, …) or a composite action under `.github/actions/`.
+1. **Change the reusable in place** — the workflow (`python-quality-gate.yml`, `azure-vm-deploy.yml`, …) or a composite action under `.github/actions/`.
 2. **SHA-pin every third-party `uses:`** to a full commit SHA (Sonar `S7637`); the org self-pins its own composites to `@v1`.
 3. **Tag the change** and roll it out through the major pin. A breaking input/output change cuts a new major (`@v2`) and leaves `@v1` working; consumers move to the new tag on their own schedule (`VERS-D1`).
 

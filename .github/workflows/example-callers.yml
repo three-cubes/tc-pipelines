@@ -45,13 +45,12 @@ name: example-callers (reusable self-check dispatcher)
 #   release              → example-release.yml                (HITL — gated off)
 #   require-work-item    → example-require-work-item.yml
 #   security-scan        → example-security-scan.yml
-#   sonar-scan           → example-sonar-scan.yml
 #   verify-and-close     → example-verify-and-close.yml
 #
 # NEVER runs the underlying work by default: `workflow_dispatch` only (never on
 # push/PR) and every per-reusable job is gated on `run-for-real`, whose default
 # is false. The call graph is validated statically regardless of the gate; the
-# bodies (real Dockerfiles, kairix/taz scripts, a SonarCloud token, the release
+# bodies (real Dockerfiles, kairix/taz scripts, the release
 # path) never execute under the default dispatch. The release/docker/publish-pypi
 # jobs MUST stay gated: they touch the HITL release path (feedback_release_hitl /
 # G4) and would only ever run with explicit per-action authorization + real
@@ -127,11 +126,6 @@ jobs:
 
   security-scan:
     uses: ./.github/workflows/example-security-scan.yml
-    with:
-      run-for-real: ${{ inputs.run-for-real }}
-
-  sonar-scan:
-    uses: ./.github/workflows/example-sonar-scan.yml
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
