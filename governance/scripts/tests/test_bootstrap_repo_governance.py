@@ -108,7 +108,7 @@ def test_unknown_flag_is_rejected() -> None:
 
 
 def test_dry_run_covers_the_affordance_payload() -> None:
-    # The extended payload (SGO-164): rendered skeletons + sonar-sqaa hook +
+    # The extended payload (SGO-164): rendered skeletons +
     # idempotent settings.json jq-merge + safe-commit/preflight — all named in
     # the --dry-run output. Live sections are toggled off so this stays hermetic.
     result = _run(
@@ -126,7 +126,6 @@ def test_dry_run_covers_the_affordance_payload() -> None:
         assert skel in out, f"affordance payload omits {skel}"
 
     # The hook + the idempotent settings.json merge.
-    assert "sonar-sqaa" in out
     assert "PostToolUse" in out
     assert "unique" in out, "settings.json merge must be idempotent (jq unique), not an append"
 
@@ -172,8 +171,6 @@ def test_help_lists_the_quality_gate_wiring_flags() -> None:
     for flag in (
         "--fitness-tag",
         "--pipelines-tag",
-        "--sonar",
-        "--no-sonar",
         "--with-release",
         "--out-dir",
         "--verify",
@@ -196,7 +193,6 @@ def test_wiring_render_resolves_every_token(tmp_path: Path) -> None:
         "scripts/checks/_core_catalogue.py",
         ".github/workflows/ci.yml",
         ".github/workflows/auto-merge.yml",
-        "sonar-project.properties",
     ):
         text = (out_dir / rel).read_text(encoding="utf-8")
         leftovers = TEMPLATE_TOKEN_RE.findall(text)
@@ -277,16 +273,20 @@ def test_verify_catches_a_context_mismatch(tmp_path: Path) -> None:
     assert "FAIL" in result.stderr
 
 
-def test_no_sonar_trims_the_sonar_contexts_and_jobs(tmp_path: Path) -> None:
+def test_the_bootstrap_emits_no_sonar_surface(tmp_path: Path) -> None:
+    """Sonar is decommissioned — a bootstrapped repo must not be wired to it.
+
+    A ruleset requiring a context nothing emits blocks every PR in the new repo,
+    which is the failure this render/verify pair exists to prevent.
+    """
     out_dir = tmp_path / "wire"
-    assert _render(out_dir, "--no-sonar", "--verify").returncode == 0
+    assert _render(out_dir, "--verify").returncode == 0
 
     contexts = _required_contexts(out_dir / ".github/rulesets/main.json")
-    assert not any("SonarCloud" in c for c in contexts), "SonarCloud contexts must be trimmed"
     assert set(contexts) == {"Quality gate", "no-attribution"}
 
     names = _ci_job_names(out_dir / ".github/workflows/ci.yml")
-    assert "SonarCloud scan" not in names, "ci.yml must not emit a Sonar job under --no-sonar"
+    assert not any("Sonar" in n for n in names), "ci.yml must emit no Sonar job"
     assert not (out_dir / "sonar-project.properties").exists()
 
 

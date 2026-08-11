@@ -32,7 +32,7 @@ The org's paved-road decisions were made real in code and prose before they were
 numbered ADRs. Roughly twenty org-wide, cross-cutting decisions are **embedded** across
 `governance/STANDARDS.md`, `governance/gate-hardening.md`, `governance/AUTONOMOUS-DELIVERY-STANDARD.md`,
 the `governance/` templates (rulesets, CODEOWNERS, dependabot, renovate), and `docs/IMPLEMENTATION.md`
-/ `docs/COST-OPTIMIZATION.md` / `docs/SONAR-MAINTENANCE.md`. They already carry short, stable,
+/ `docs/COST-OPTIMIZATION.md`. They already carry short, stable,
 **prefixed handles** in that prose — `STD-MERGE`, `STD-IDENTITY`, `RULESET-D1`, `CODEOWNERS-D1`,
 `GATE-HARDEN`, `DEP-D1`, `QG-CONVERGE`, `SONAR-HANDOFF`, `MUT-RATCHET`, `REPO-MERGE`, `WIF-D1..D5`,
 `VERS-D1`, `COST-D1/2` — not `ADR-###` numbers.
@@ -105,7 +105,6 @@ authoritative text — read the source.
 | `CODEOWNERS-D1` | Two-tier review routing: only the control plane (the gate's own definition) is owned — **no `* @OWNER`** — so work merges autonomously while gate-defining changes need a human. | `governance/CODEOWNERS`; `governance/README.md` |
 | `GATE-HARDEN` | Before a repo flips to 0-review its gate must clear the Gate-Hardening bar — a hard bar on new/changed code + monotonic ratchet on legacy debt, determinism non-negotiable. **Harden then flip, never flip first.** | `governance/gate-hardening.md` |
 | `QG-CONVERGE` | The reusable Python gate shrinks to `checkout → setup-uv-cached → uv run tc-fitness run`; every step lives in each repo's `[tool.tc_fitness]`, so `make check == CI` by construction. | `.github/workflows/python-quality-gate.yml`; `STANDARDS.md` §2–3; `CHANGELOG.md` |
-| `SONAR-HANDOFF` | Sonar runs as an artifact-handoff reusable (`sonar-scan.yml`, `qualitygate.wait=true`) with CORE-owned new-code-reset + weekly hotspot-triage drivers; project key + hotspot rationales stay per-repo and triage fails closed. | `docs/SONAR-MAINTENANCE.md`; `.github/workflows/sonar-scan.yml` / `sonar-triage.yml` / `sonar-new-code-reset.yml` |
 | `MUT-RATCHET` | Mutation is diff-scoped and ratcheted: an escaped mutant on a changed line fails; the survivors baseline only ratchets down; Mutation is **not currently a required status check** (deferred until the workflow is wired). | `governance/gate-hardening.md`; `.github/workflows/mutation-gate.yml` |
 | `DEP-D1` | Dependency policy: 3-day-cooldown, grouped dependabot (pip + npm + github-actions, security-toggle-off) + a Renovate customManager pinning the tc-fitness engine version (no silent drift). | `governance/dependabot.yml`; `governance/renovate.json` |
 | `REPO-MERGE` | Two CORE paved-road repos — tc-pipelines (reusable CI + governance templates) and tc-fitness (the gate engine); consumers pin `@v1` / engine `@vX` + lockfile SHA; **promote prior work up into CORE, never fork-and-inline.** | `AUTONOMOUS-DELIVERY-STANDARD.md` (paved road); `STANDARDS.md` §3 |

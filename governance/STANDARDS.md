@@ -114,7 +114,6 @@ level — see §3–§4 — and are not duplicated below.)
 | Quality & fitness | [`quality-ratchet.md`](standards/quality-ratchet.md) | Touched-file coverage ratchet — lift without papering. |
 | Quality & fitness | [`mutation-testing-survival-ratchet.md`](standards/mutation-testing-survival-ratchet.md) | Diff-scoped mutation + survivors ratchet. |
 | Quality & fitness | [`agent-actionable-feedback.md`](standards/agent-actionable-feedback.md) | Every error carries `fix:`/`next:`/`run:`. |
-| Quality & fitness | [`sonarqube-usage.md`](standards/sonarqube-usage.md) | New-code gate conditions, Security-Rating≥A, don't-ignore policy, FP mechanics. |
 | Quality & fitness | [`improving-fitness-gates.md`](standards/improving-fitness-gates.md) | Add/improve a CORE check or a reusable and ship it: converge-up, tag-release, consumer-repin. |
 | Architecture & decisions | [`architecture-decision-method.md`](standards/architecture-decision-method.md) | How a decision is researched + justified (method, not ADR mechanics). |
 | Architecture & decisions | [`engineering-nfr-standard.md`](standards/engineering-nfr-standard.md) | The six-dimension NFR checklist every design must clear. |

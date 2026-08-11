@@ -104,7 +104,7 @@ on:
         description: >-
           Extra arguments appended to `semgrep ci` (e.g. --exclude, --metrics
           off, --max-target-bytes). Caller-controlled, never event-derived —
-          mirrors sonar-scan.yml's `args` passthrough.
+          mirrors the scanner `args` passthrough convention.
         type: string
         default: ""
       # ── CodeQL surface ──────────────────────────────────────────────────

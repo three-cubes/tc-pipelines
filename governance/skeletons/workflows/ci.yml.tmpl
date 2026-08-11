@@ -134,38 +134,3 @@ jobs:
             echo "::error::no-attribution: remove the AI/LLM self-attribution flagged above. Install the local commit-msg strip hook to catch it before push." >&2
           fi
           exit "$rc"
-# SONAR-BLOCK-START
-  # SonarCloud scan (scan-only) — consumes the coverage artifact the gate produced
-  # instead of re-running the suite. `sonar.qualitygate.wait=true` in
-  # sonar-project.properties makes this job's conclusion the Sonar verdict.
-  sonar-scan:
-    name: Sonar scan (reusable)
-    needs: [gate]
-    if: always() && needs.gate.result == 'success'
-    uses: three-cubes/tc-pipelines/.github/workflows/sonar-scan.yml@{{PIPELINES_TAG}}
-    secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-  # SonarCloud scan aggregator — the required branch-protection context (bare name,
-  # not the nested reusable check). `SonarCloud Code Analysis` is posted separately
-  # by the SonarCloud GitHub App when the scan submits its analysis.
-  sonar:
-    name: SonarCloud scan
-    needs: [sonar-scan]
-    if: always()
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Gate on the Sonar scan result
-        env:
-          R_SONAR: ${{ needs.sonar-scan.result }}
-        run: |
-          set -euo pipefail
-          echo "sonar-scan=$R_SONAR"
-          if [[ "$R_SONAR" != "success" ]]; then
-            echo "::error::SonarCloud scan failed or did not run ($R_SONAR)."
-            exit 1
-          fi
-          echo "SonarCloud scan: PASS."
-# SONAR-BLOCK-END
