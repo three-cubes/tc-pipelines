@@ -9,8 +9,27 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[dependency-groups]
+# The repo's tests are contract tests over its workflows/actions. `uv sync`
+# installs default groups, so the CI lane gets these without extra flags.
+dev = [
+    "pytest>=8.0",
+    # tools/ is a separate package with its own pyproject; its tests import
+    # tc_agent_tools.agent_token, which signs RS256 App JWTs.
+    "pyjwt[crypto]>=2,<3",
+]
+
 [tool.uv]
 # Deps-only harness: uv installs the dependencies into the venv but does NOT
 # build this root as a package (there is nothing to build — the repo's product
 # is its workflows + composite actions).
 package = false
+
+[tool.pytest.ini_options]
+# `tools/` is its own package with its own pyproject, so its tests cannot import
+# `tc_agent_tools` from the repo root without this.
+pythonpath = ["tools"]
+testpaths = ["governance", "tools/tests"]
+markers = [
+    "contract: pins a workflow/action input contract consumers depend on",
+]

@@ -10,7 +10,30 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [1.18.1] — 2026-08-12
 
+### Added
+
+- **The repo's own contract tests now run in CI.** `tc-pipelines` had 393 tests
+  over its workflows, actions and governance scripts, and nothing executed them:
+  CI ran only `meta-quality-gate` (actionlint, yamllint, license, branch
+  naming), which judges each file in isolation. Three tests had been failing on
+  `main` since the commit that added them, undetected. A `tests` job now runs
+  `pytest` and the `Quality gate` fan-in requires it, so a red test blocks a
+  merge. `pytest` and `pyjwt` are declared in a `dev` dependency group — neither
+  was installed by `uv sync`, so the suite only ever passed against a
+  developer's ambient environment.
+- **`test_reusable_input_default_parity`** pins the shared optional inputs of
+  `python-quality-gate.yml` and `pytest-durations-refresh.yml` to the same
+  defaults. Both `pnpm-install-args` and `pnpm-version` drifted apart silently
+  while each file stayed individually valid, so no linter could see it.
+  Differences that are intended are declared with their reason, keeping intent
+  distinguishable from drift.
+
 ### Fixed
+
+- **Three bootstrap tests asserted a ruleset path the script never writes.**
+  They looked for `.github/rulesets/main.json` while
+  `bootstrap-repo-governance.sh` emits `main-product.json`, so they had never
+  passed since being introduced alongside the SonarCloud removal.
 
 - **`pytest-durations-refresh.yml` builds the same node tree as the gate.** Its
   `pnpm-install-args` defaulted to `--frozen-lockfile` while

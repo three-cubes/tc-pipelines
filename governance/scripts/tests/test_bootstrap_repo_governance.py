@@ -240,7 +240,7 @@ def test_wiring_ci_emits_every_required_ruleset_context(tmp_path: Path) -> None:
     assert _render(out_dir, "--verify").returncode == 0
 
     names = set(_ci_job_names(out_dir / ".github/workflows/ci.yml"))
-    contexts = _required_contexts(out_dir / ".github/rulesets/main.json")
+    contexts = _required_contexts(out_dir / ".github/rulesets/main-product.json")
     assert "Quality gate" in contexts and "no-attribution" in contexts
     for ctx in contexts:
         assert ctx in names or ctx in EXTERNAL_CONTEXTS, (
@@ -260,7 +260,7 @@ def test_verify_catches_a_context_mismatch(tmp_path: Path) -> None:
     out_dir = tmp_path / "wire"
     assert _render(out_dir).returncode == 0
 
-    ruleset = out_dir / ".github/rulesets/main.json"
+    ruleset = out_dir / ".github/rulesets/main-product.json"
     data = json.loads(ruleset.read_text(encoding="utf-8"))
     for rule in data["rules"]:
         if rule.get("type") == "required_status_checks":
@@ -282,7 +282,7 @@ def test_the_bootstrap_emits_no_sonar_surface(tmp_path: Path) -> None:
     out_dir = tmp_path / "wire"
     assert _render(out_dir, "--verify").returncode == 0
 
-    contexts = _required_contexts(out_dir / ".github/rulesets/main.json")
+    contexts = _required_contexts(out_dir / ".github/rulesets/main-product.json")
     assert set(contexts) == {"Quality gate", "no-attribution"}
 
     names = _ci_job_names(out_dir / ".github/workflows/ci.yml")
