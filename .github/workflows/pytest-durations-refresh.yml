@@ -86,10 +86,15 @@ on:
         required: false
         default: ""
       pnpm-install-args:
-        description: "Arguments for `pnpm install` when `run-node` is set."
+        description: >-
+          Arguments for `pnpm install` when `run-node` is set. Matches
+          `python-quality-gate.yml`'s default so a consumer that states the value
+          in neither place still builds the same node tree in both. A refresh
+          that ran lifecycle scripts the gate skips would time a suite the shards
+          never execute, which is the divergence this map exists to remove.
         type: string
         required: false
-        default: "--frozen-lockfile"
+        default: "--frozen-lockfile --ignore-scripts"
       ts-coverage-command:
         description: "TS coverage command; a no-op echo when TS coverage lives elsewhere."
         type: string

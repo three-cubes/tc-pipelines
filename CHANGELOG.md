@@ -8,6 +8,20 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.18.1] — 2026-08-12
+
+### Fixed
+
+- **`pytest-durations-refresh.yml` builds the same node tree as the gate.** Its
+  `pnpm-install-args` defaulted to `--frozen-lockfile` while
+  `python-quality-gate.yml` defaults to `--frozen-lockfile --ignore-scripts`. A
+  consumer that states the value in neither call — the common case, since both
+  inputs are optional — therefore ran package lifecycle scripts during a refresh
+  that its gate skips, building a different node tree and timing a suite the
+  shards never execute. That is the divergence the durations map exists to
+  remove, so the mismatch defeated the workflow's own purpose. The defaults now
+  match.
+
 ## [1.18.0] — 2026-08-12
 
 ### Added
