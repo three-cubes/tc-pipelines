@@ -1,0 +1,183 @@
+name: pytest-durations-refresh
+
+# Regenerates the `.test_durations` map that `pytest-shards > 1` splits on, by
+# running the suite on a CI runner and storing what each test actually cost there.
+#
+# The map must be produced on the same class of machine that runs the shards.
+# Durations captured on a developer workstation do not scale uniformly to a
+# runner: compute-bound tests stay proportional while subprocess-heavy ones
+# (git, docker, node shell-outs) cost far more, so a locally-captured map
+# under-weights exactly the tests that come to dominate a shard. The split then
+# balances against fiction and one shard sets the critical path for the rest.
+#
+# `--store-durations` is injected through PYTEST_ADDOPTS so the suite still runs
+# through the repo's own gate step — the command, markers and coverage flags stay
+# whatever `[tool.tc_fitness]` declares, and this workflow does not restate them.
+# `--store-durations` and `--splits/--group` are mutually exclusive in
+# pytest-split, so `tc-fitness-args` must select the step WITHOUT `--shard`.
+#
+# Output is an artifact, never a push: the caller decides whether to open a PR,
+# so a refresh can never rewrite a balance-critical input unreviewed.
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: "Python version for the run."
+        type: string
+        required: true
+      uv-version:
+        description: "uv version, pinned to match the consumer's gate."
+        type: string
+        required: true
+      sync-args:
+        description: "Arguments for `uv sync` (e.g. `--locked --all-packages`)."
+        type: string
+        required: true
+      ci-requirements-path:
+        description: "Path to the CI requirements file."
+        type: string
+        required: true
+      tc-fitness-args:
+        description: >-
+          Arguments for `tc-fitness run`, selecting the pytest step alone —
+          e.g. `--only platform-pytest`. Must NOT contain `--shard`: pytest-split
+          cannot store durations and split in the same run.
+        type: string
+        required: true
+      durations-path:
+        description: "Path the map is written to, matching the repo's `shard_args`."
+        type: string
+        required: false
+        default: ".test_durations"
+      artifact-name:
+        description: "Name of the uploaded artifact carrying the refreshed map."
+        type: string
+        required: false
+        default: "test-durations"
+      timeout-minutes:
+        description: >-
+          Job timeout. A durations run is unsharded, so it takes roughly the sum
+          of what the shards take in parallel — set this well above gate timeouts.
+        type: number
+        required: false
+        default: 180
+      fetch-depth:
+        description: "Checkout depth."
+        type: number
+        required: false
+        default: 0
+      run-node:
+        description: "Provision node/pnpm when tests shell out to them."
+        type: boolean
+        required: false
+        default: false
+      node-version-file:
+        description: "Node version file when `run-node` is set."
+        type: string
+        required: false
+        default: ".nvmrc"
+      pnpm-version:
+        description: "pnpm version when `run-node` is set."
+        type: string
+        required: false
+        default: ""
+      pnpm-install-args:
+        description: "Arguments for `pnpm install` when `run-node` is set."
+        type: string
+        required: false
+        default: "--frozen-lockfile"
+      ts-coverage-command:
+        description: "TS coverage command; a no-op echo when TS coverage lives elsewhere."
+        type: string
+        required: false
+        default: ""
+    secrets:
+      gh-token:
+        description: "Token forwarded to the gate body."
+        required: false
+    outputs:
+      artifact-name:
+        description: "Artifact holding the refreshed durations map."
+        value: ${{ inputs.artifact-name }}
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: Refresh pytest durations
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    env:
+      # Prepended to pytest's arguments, so it adds the storage flags without
+      # displacing anything the gate step already passes.
+      PYTEST_ADDOPTS: "--store-durations --durations-path ${{ inputs.durations-path }}"
+    steps:
+      - name: Reject a sharded selection
+        if: ${{ contains(inputs.tc-fitness-args, '--shard') }}
+        run: |
+          echo "::error::tc-fitness-args contains --shard, but pytest-split cannot store durations and split in one run — the map would describe a single shard's slice and rebalance the suite onto it. fix: pass the unsharded selection (e.g. '--only platform-pytest'). next: re-run."
+          exit 1
+
+      - name: Run the suite and store durations
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@d0145c781a3f26a434fa46d4933d791d7acda078 # SHA pin (SGO-266)
+        with:
+          python-version: ${{ inputs.python-version }}
+          uv-version: ${{ inputs.uv-version }}
+          sync-args: ${{ inputs.sync-args }}
+          ci-requirements-path: ${{ inputs.ci-requirements-path }}
+          fetch-depth: ${{ inputs.fetch-depth }}
+          tc-fitness-args: ${{ inputs.tc-fitness-args }}
+          write-changed-files: false
+          changed-files-path: ""
+          run-no-attribution: false
+          pre-steps: ""
+          post-steps: ""
+          run-node: ${{ inputs.run-node }}
+          node-version-file: ${{ inputs.node-version-file }}
+          pnpm-version: ${{ inputs.pnpm-version }}
+          pnpm-install-args: ${{ inputs.pnpm-install-args }}
+          ts-coverage-command: ${{ inputs.ts-coverage-command }}
+          gh-token: ${{ secrets.gh-token }}
+          # Coverage is a gate concern, not a durations concern; the paths are
+          # still required inputs, so they carry the composite's own defaults.
+          coverage-xml-path: "coverage.xml"
+          coverage-artifact-name: "coverage-data"
+          upload-coverage-artifact: false
+
+      - name: Assert the map was written and is usable
+        env:
+          DURATIONS_PATH: ${{ inputs.durations-path }}
+        run: |
+          set -euo pipefail
+          path="$DURATIONS_PATH"
+          if [[ ! -s "$path" ]]; then
+            echo "::error::$path is missing or empty after the run — PYTEST_ADDOPTS did not reach pytest, or the selected step ran no tests. fix: confirm tc-fitness-args selects the pytest step. next: re-run and check the step log for '--store-durations'."
+            exit 1
+          fi
+          python3 - "$path" <<'PY'
+          import json, sys
+          path = sys.argv[1]
+          with open(path) as handle:
+              durations = json.load(handle)
+          if not isinstance(durations, dict) or not durations:
+              raise SystemExit(f"::error::{path} is not a non-empty object — pytest-split cannot split on it.")
+          total = sum(durations.values())
+          print(f"entries={len(durations)} total={total:.0f}s")
+          # A map recording near-zero time carries no ordering for the splitter to
+          # use, which is the silent form of this failure: the split proceeds and
+          # balances arbitrarily.
+          if total <= 0:
+              raise SystemExit(f"::error::{path} totals {total}s — the split would be arbitrary.")
+          PY
+
+      - name: Upload the refreshed map
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.durations-path }}
+          if-no-files-found: error
+          retention-days: 7

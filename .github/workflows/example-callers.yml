@@ -114,6 +114,11 @@ jobs:
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
+  pytest-durations-refresh:
+    uses: ./.github/workflows/example-pytest-durations-refresh.yml
+    with:
+      run-for-real: ${{ inputs.run-for-real }}
+
   release:
     uses: ./.github/workflows/example-release.yml
     with:

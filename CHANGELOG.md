@@ -8,6 +8,26 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+### Added
+
+- **`pytest-durations-refresh.yml` — regenerate a shard-balance map on a runner.**
+  `pytest-shards > 1` splits on `.test_durations`, and nothing produced that file:
+  consumers hand-maintained it, in practice from a workstation. Those timings do
+  not scale uniformly to a runner — compute-bound tests stay proportional while
+  subprocess-heavy ones (git, docker, node shell-outs) cost far more — so the map
+  under-weights exactly the tests that come to dominate a shard, and the split
+  balances against fiction. Measured on a consumer at 8 shards: a map claiming
+  977s against 2346s of real work, splitting 1.61x off ideal, so the slowest shard
+  set the critical path while the fastest idled.
+
+  The reusable runs the suite through the consumer's own gate step and injects
+  `--store-durations` via `PYTEST_ADDOPTS`, so the command, markers and coverage
+  flags stay whatever `[tool.tc_fitness]` declares. It refuses a `--shard`
+  selection (pytest-split cannot store and split in one run — the map would
+  describe one shard's slice and rebalance the suite onto it), asserts the map is
+  a non-empty object with non-zero total, and publishes it as an artifact rather
+  than pushing, so a balance-critical input is never rewritten unreviewed.
+
 ## [1.17.0] — 2026-08-11
 
 ### Added
