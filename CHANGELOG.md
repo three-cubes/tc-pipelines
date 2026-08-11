@@ -8,6 +8,8 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.18.0] — 2026-08-12
+
 ### Added
 
 - **`pytest-durations-refresh.yml` — regenerate a shard-balance map on a runner.**
