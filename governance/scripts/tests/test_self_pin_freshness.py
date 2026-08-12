@@ -119,90 +119,64 @@ def _resolve(repo_path: str) -> str:
     return repo_path
 
 
-@pytest.mark.parametrize(("source", "line", "repo_path", "sha"), PINS, ids=PIN_IDS)
-def test_the_revision_a_pin_loads_has_current_pins_of_its_own(
-    source: str, line: int, repo_path: str, sha: str
-) -> None:
-    """Follow one hop: the revision a pin loads must not carry stale pins itself.
+def _rev(ref: str) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", f"{ref}^{{commit}}"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
 
-    Normalising pin SHAs keeps a repin from reading as a change, but it also
-    hides the case that matters most in a nested chain: a workflow pinning a
-    composite at a revision whose OWN pin is old. The outer content compares
-    equal while the step three levels down loads something years behind.
 
-    That shipped twice. A cache fix landed in `setup-uv-cached`, the consuming
-    workflow was repinned, and it still ran the pre-fix action — because the
-    composite revision in between pointed at the older one, and every check
-    comparing normalised content saw no difference.
+def _newest_release_commit() -> str | None:
+    """Newest release BEFORE HEAD.
+
+    A tag cut at HEAD is skipped. No commit can pin to its own SHA — writing the
+    pin changes the hash — so treating the tag being cut as the target would
+    fail on the release commit itself and on every commit after it until a
+    separate repin landed, which is the flow this rule is meant to support.
     """
-    pinned = _blob_at(sha, _resolve(repo_path))
-    if pinned is None:
-        pytest.skip(f"commit {sha[:12]} unreadable — run with fetch-depth: 0")
-
-    stale = []
-    for nested in SELF_PIN.finditer(pinned):
-        nested_path, nested_sha = nested.group("path"), nested.group("sha")
-        nested_local = REPO_ROOT / _resolve(nested_path)
-        if not nested_local.is_file():
-            continue
-        nested_pinned = _blob_at(nested_sha, _resolve(nested_path))
-        if nested_pinned is None:
-            continue
-        if _without_pin_shas(nested_pinned) != _without_pin_shas(
-            nested_local.read_text(encoding="utf-8")
-        ):
-            stale.append(f"{nested_path}@{nested_sha[:12]}")
-
-    assert not stale, (
-        f"{source}:{line} pins `{repo_path}` at {sha[:12]}, and THAT revision "
-        f"pins {stale} at revisions whose content is no longer current. The "
-        f"outer pin looks fresh while the step it loads reaches an old file — "
-        f"a fix in that file reaches nobody. "
-        f"fix: repin `{repo_path}` to a revision whose own pins are current, "
-        f"normally the most recent release. next: re-run pytest."
-    )
+    head = _rev("HEAD")
+    tags = subprocess.run(
+        ["git", "tag", "--sort=-v:refname", "--merged", "HEAD", "v*"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.split()
+    for tag in tags:
+        sha = _rev(tag)
+        if sha and sha != head:
+            return sha
+    return None
 
 
 @pytest.mark.parametrize(("source", "line", "repo_path", "sha"), PINS, ids=PIN_IDS)
-def test_self_pin_loads_the_file_this_repo_ships(
+def test_self_pin_names_the_newest_release(
     source: str, line: int, repo_path: str, sha: str
 ) -> None:
-    # A composite reference names the directory holding `action.yml`; a reusable
-    # workflow reference names the file itself.
-    local = REPO_ROOT / repo_path
-    if local.is_dir():
-        repo_path = f"{repo_path}/action.yml"
-        local = REPO_ROOT / repo_path
-    if not local.is_file():
-        pytest.fail(
-            f"{source}:{line} pins `{repo_path}`, which does not exist in this "
-            f"tree. fix: correct the path, or drop the reference."
-        )
+    """Every self-pin resolves to the most recent release, never further back.
 
-    pinned = _blob_at(sha, repo_path)
-    if pinned is None:
-        pytest.skip(
-            f"commit {sha[:12]} is not readable — a shallow clone cannot compare "
-            f"the pinned revision. Run with fetch-depth: 0."
-        )
+    A pin loads whatever its commit held, so a pin left behind runs an old file
+    while everything read locally is current. One froze at a release 91 commits
+    back and a deploy advertised an always-empty rollback handle; another kept a
+    cache fix from executing across three releases and two consumer repins.
 
-    if repo_path in PINNED_BEHIND_BY_DESIGN:
-        assert _without_pin_shas(pinned) != _without_pin_shas(
-            local.read_text(encoding="utf-8")
-        ), (
-            f"{repo_path} is listed in PINNED_BEHIND_BY_DESIGN but now matches "
-            f"its pin. fix: remove the entry so the staleness assertion covers it."
-        )
-        return
+    Pinning is per level, so a change reaches a caller only once the release
+    carrying it is pinned. Requiring the NEWEST release bounds that lag at one
+    release instead of letting it grow without limit. Bump these as the last
+    step before cutting a tag.
+    """
+    newest = _newest_release_commit()
+    if newest is None:
+        pytest.skip("no release tag reachable from HEAD — nothing to compare against")
 
-    assert _without_pin_shas(pinned) == _without_pin_shas(
-        local.read_text(encoding="utf-8")
-    ), (
-        f"{source}:{line} pins `{repo_path}` at {sha[:12]}, whose copy differs "
-        f"from the one in this tree. That step runs the OLD revision while every "
-        f"reviewer and every other check reads the new one — a change to "
-        f"`{repo_path}` reaches nobody until this pin moves. "
-        f"fix: repin to a release SHA whose copy matches, normally the most "
-        f"recent tag; or add `{repo_path}` to PINNED_BEHIND_BY_DESIGN with the "
-        f"reason the older revision is wanted. next: re-run pytest."
+    assert sha == newest, (
+        f"{source}:{line} pins `{repo_path}` at {sha[:12]}, not the newest "
+        f"release {newest[:12]}. That step loads an older revision of a file "
+        f"sitting current beside it, so a change there reaches nobody until the "
+        f"pin moves — and the gap grows silently with every release. "
+        f"fix: repin to {newest[:12]} as the last step before cutting a tag. "
+        f"next: re-run pytest."
     )

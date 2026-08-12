@@ -84,6 +84,19 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       with:
         fetch-depth: ${{ inputs.fetch-depth }}
 
+      # ── Locked-uv install ───────────────────────────────────────────────
+      # BEFORE the node half. setup-uv hashes files to key its cache, and the
+      # walk it performs is proportional to what is on disk — once `pnpm
+      # install` has run that includes every `node_modules` tree. Measured on
+      # a consumer: 79s here, against 1.1s in a job that installs uv first.
+    - name: Locked uv install
+      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@1b744fa918eb2597380118c0738832ba78cdc9cd # v1.18.3
+      with:
+        uv-version: ${{ inputs.uv-version }}
+        python-version: ${{ inputs.python-version }}
+        sync-args: ${{ inputs.sync-args }}
+        ci-requirements: ${{ inputs.ci-requirements-path }}
+
     # ── Node / pnpm half (opt-in) ───────────────────────────────────────
     - name: Set up pnpm
       if: inputs.run-node == 'true'
@@ -100,15 +113,6 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       if: inputs.run-node == 'true'
       shell: bash
       run: pnpm install ${{ inputs.pnpm-install-args }}
-
-    # ── Locked-uv install (org composite, self-pinned to v1) ────────────
-    - name: Locked uv install
-      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@1b744fa918eb2597380118c0738832ba78cdc9cd # v1.18.3
-      with:
-        uv-version: ${{ inputs.uv-version }}
-        python-version: ${{ inputs.python-version }}
-        sync-args: ${{ inputs.sync-args }}
-        ci-requirements: ${{ inputs.ci-requirements-path }}
 
     # ── Diff-scoped smoke support (opt-in) ─────────────────────────────
     - name: Write changed-file list

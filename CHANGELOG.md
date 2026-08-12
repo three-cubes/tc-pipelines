@@ -8,6 +8,25 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`setup-uv` runs before the node half.** It hashes files to key its cache,
+  and the walk is proportional to what is on disk — after `pnpm install` that
+  includes every `node_modules` tree. Measured on a consumer: 79s mean here
+  against 1.1s in jobs that install uv first, on 9 of 26 job instances. Ordering
+  removes the cost regardless of whether the glob setting reaches the runner,
+  which through a nested pin chain it had not for three releases.
+
+### Changed
+
+- **`test_self_pin_freshness` bounds pin lag instead of forbidding it.** The
+  content comparison it used could not be satisfied: changing a self-referenced
+  file makes its own pin stale by definition, so every such change failed. It
+  now requires each self-pin to name the newest release reachable from HEAD,
+  which bounds the lag at one release rather than letting it grow unbounded —
+  one pin had frozen 91 commits back. Bump the pins as the last step before
+  cutting a tag.
+
 ## [1.18.4] — 2026-08-12
 
 ### Fixed
