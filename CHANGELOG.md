@@ -8,6 +8,19 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`setup-uv-cached` no longer walks `node_modules` to key its cache.**
+  `enable-cache` was set with no `cache-dependency-glob`, so the action fell
+  back to its default whole-workspace glob. In a repo that also carries a pnpm
+  workspace that means descending every `node_modules` tree: measured at 86.3s
+  to locate 40 files, against a 2.0s cache restore, on every lane of every run —
+  19% of a 446s gate lane spent in a filesystem walk. The glob is now the two
+  root-anchored files that key the cache, with no `**`: @actions/glob decides
+  whether to descend a directory by partial-matching the POSITIVE patterns, so
+  a negated `!**/node_modules/**` would still traverse the tree and only
+  discard matches afterwards.
+
 ## [1.18.1] — 2026-08-12
 
 ### Added
