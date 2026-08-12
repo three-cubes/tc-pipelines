@@ -119,7 +119,25 @@ def _resolve(repo_path: str) -> str:
     return repo_path
 
 
+def _rev(ref: str) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", f"{ref}^{{commit}}"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+
+
 def _newest_release_commit() -> str | None:
+    """Newest release BEFORE HEAD.
+
+    A tag cut at HEAD is skipped. No commit can pin to its own SHA — writing the
+    pin changes the hash — so treating the tag being cut as the target would
+    fail on the release commit itself and on every commit after it until a
+    separate repin landed, which is the flow this rule is meant to support.
+    """
+    head = _rev("HEAD")
     tags = subprocess.run(
         ["git", "tag", "--sort=-v:refname", "--merged", "HEAD", "v*"],
         cwd=REPO_ROOT,
@@ -128,14 +146,8 @@ def _newest_release_commit() -> str | None:
         check=False,
     ).stdout.split()
     for tag in tags:
-        sha = subprocess.run(
-            ["git", "rev-parse", f"{tag}^{{commit}}"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout.strip()
-        if sha:
+        sha = _rev(tag)
+        if sha and sha != head:
             return sha
     return None
 
