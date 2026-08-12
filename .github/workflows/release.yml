@@ -142,7 +142,10 @@ jobs:
           # multi-token command (python … / awk …); the command source is a
           # workflow input controlled by the caller, not untrusted run data.
           eval "$EXTRACT_COMMAND" > /tmp/release-notes.md
-          if [ ! -s /tmp/release-notes.md ]; then
+          # Non-whitespace, not size: a heading with no body under it extracts
+          # to a single newline, which `[ -s ]` counts as content. The Release
+          # then publishes blank while this job reports success.
+          if ! grep -q '[^[:space:]]' /tmp/release-notes.md; then
             echo "::error::no release notes extracted for [$CHANGELOG_LABEL]"
             echo "fix: add a '## [$CHANGELOG_LABEL]' section to CHANGELOG.md, or pass the right changelog-label."
             exit 1

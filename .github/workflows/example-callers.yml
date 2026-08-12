@@ -138,3 +138,28 @@ jobs:
     uses: ./.github/workflows/example-verify-and-close.yml
     with:
       run-for-real: ${{ inputs.run-for-real }}
+
+  azure-vm-deploy:
+    uses: ./.github/workflows/example-azure-vm-deploy.yml
+    with:
+      run-for-real: ${{ inputs.run-for-real }}
+
+  capability-health-probe:
+    uses: ./.github/workflows/example-capability-health-probe.yml
+    with:
+      run-for-real: ${{ inputs.run-for-real }}
+
+  dependabot-automerge:
+    uses: ./.github/workflows/example-dependabot-automerge.yml
+    with:
+      run-for-real: ${{ inputs.run-for-real }}
+
+  independent-verifier:
+    uses: ./.github/workflows/example-independent-verifier.yml
+    with:
+      run-for-real: ${{ inputs.run-for-real }}
+
+  loop-implement:
+    uses: ./.github/workflows/example-loop-implement.yml
+    with:
+      run-for-real: ${{ inputs.run-for-real }}

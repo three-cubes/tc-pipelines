@@ -283,7 +283,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run the gate (unsharded)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@d0145c781a3f26a434fa46d4933d791d7acda078 # SHA pin (SGO-266)
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@c37eef32beb0ef7cb4172c678723088fb1972552 # v1.18.0
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -345,7 +345,7 @@ jobs:
         shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Run the gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@d0145c781a3f26a434fa46d4933d791d7acda078 # SHA pin (SGO-266)
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@c37eef32beb0ef7cb4172c678723088fb1972552 # v1.18.0
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -385,7 +385,7 @@ jobs:
         with:
           fetch-depth: 1
       - name: Locked uv install
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@v1
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@c37eef32beb0ef7cb4172c678723088fb1972552 # v1.18.0
         with:
           uv-version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}
@@ -487,7 +487,7 @@ jobs:
           git fetch --no-tags origin "+refs/heads/${base}:refs/remotes/origin/${base}" || \
             echo "::warning::could not fetch ${BASE_REF}; the new-code floor may soft-pass."
       - name: Locked uv install
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@v1
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@c37eef32beb0ef7cb4172c678723088fb1972552 # v1.18.0
         with:
           uv-version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}
@@ -533,7 +533,7 @@ jobs:
           echo "::error::shard-tier is set but non-shard-tier is empty — every step outside the shard tier would drop out of the gate while it still reported green. fix: set non-shard-tier to the tier holding those steps. next: re-run."
           exit 1
       - name: Run the gate (non-shard tier)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@d0145c781a3f26a434fa46d4933d791d7acda078 # SHA pin (SGO-266)
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@c37eef32beb0ef7cb4172c678723088fb1972552 # v1.18.0
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -556,6 +556,7 @@ jobs:
           pnpm-install-args: ${{ inputs.pnpm-install-args }}
           ts-coverage-command: ${{ inputs.ts-coverage-command }}
           gh-token: ${{ secrets.gh-token || github.token }}
+          private-infra-patterns: ${{ secrets.private-infra-patterns }}
           coverage-xml-path: ${{ inputs.coverage-xml-path }}
           coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
           tier: ${{ inputs.non-shard-tier }}

@@ -12,6 +12,43 @@ for the consumer-facing `@vN` workflow/action references.
 
 ### Added
 
+- **Nine guards over pipeline wiring, each proven by reintroducing its defect.**
+  The suite covered shell lifted out of workflows and static file shape; nothing
+  covered the relationships between files, which is what a pipeline is. Added:
+  `uses:` ref pinning; the contract a pinned ref actually loads; secret
+  forwarding parity across lanes; example-caller coverage; release-notes
+  extraction; ternary true-branch emptiness; required-context coherence; job
+  skip semantics; composite-action internal consistency. Every one was checked
+  by mutating the repo to reintroduce the defect and confirming it fails — the
+  ref-pinning guard passed that check only after correction, because as written
+  it classified a floating self-reference as acceptable.
+- **Example callers for `azure-vm-deploy`, `capability-health-probe`,
+  `dependabot-automerge`, `independent-verifier` and `loop-implement`**, wired
+  into the dispatcher. That static caller is what makes GitHub's resolver
+  validate a reusable's input and secret contract at parse time, so these five
+  had their contracts unvalidated anywhere.
+
+### Fixed
+
+- **`azure-vm-deploy` published an empty snapshot handle on every run.** The
+  snapshot step resolved through `@v1`, a tag frozen 91 commits back whose
+  revision of `snapshot-azure-vm-disk` declares only `snapshot-names`. The
+  workflow reads `snapshot-resource-ids`, so the job output advertised to
+  consumers — the rollback-evidence handle for a destructive VM deploy — was the
+  empty string while the job reported success. Both existing tests passed
+  because they assert against the local action file rather than the ref that
+  executes. Every self-reference is now SHA-pinned to a released tag.
+- **`private-infra-patterns` never reached the gate.** `python-quality-gate.yml`
+  passed it to `python-gate-body` pinned at a commit that does not declare it; a
+  composite logs `Unexpected input(s)`, drops the value, and reports success, so
+  a consumer's private-infra secret-scan detector was silently inactive. The
+  composite is repinned and the input is now forwarded in the non-shard lane too.
+- **`release.yml` accepted a whitespace-only extraction.** The gate used
+  `[ -s ]`, which counts the single newline an empty CHANGELOG section extracts
+  to as content, so a Release published blank while the job reported success. It
+  now requires non-whitespace.
+
+
 - **The repo's own contract tests now run in CI.** `tc-pipelines` had 393 tests
   over its workflows, actions and governance scripts, and nothing executed them:
   CI ran only `meta-quality-gate` (actionlint, yamllint, license, branch
