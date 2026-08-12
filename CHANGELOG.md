@@ -8,6 +8,25 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.18.3] — 2026-08-12
+
+### Fixed
+
+- **Internal self-pins loaded revisions older than the tree that ships them.**
+  Every internal `uses:` is SHA-pinned, so a step runs whatever that commit
+  held. `python-gate-body` pinned `setup-uv-cached` at v1.18.0, so the v1.18.2
+  cache-glob fix reached no consumer: tc-agent-zone repinned, took the new
+  workflow, and got the old action — the 86s glob search was still in its logs.
+  The same shape had already shipped an always-empty snapshot handle. All
+  self-pins now resolve to the current release.
+
+### Added
+
+- **`test_self_pin_freshness`** asserts the file a self-pin loads is identical
+  to the local copy, comparing with pin SHAs normalised so a repin alone is
+  inert while a real change is not. Verified by reintroducing the stale
+  `setup-uv-cached` pin: 1 failed.
+
 ## [1.18.2] — 2026-08-12
 
 ### Fixed
