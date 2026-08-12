@@ -408,7 +408,7 @@ jobs:
         # KV-fetch path. Federates to Azure via OIDC (no stored credential) so the
         # Linear step can read the key from Key Vault at run time.
         if: steps.context.outputs.bypass == 'none' && steps.context.outputs.resolved == 'true' && inputs.linear-key-vault != ''
-        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@c37eef32beb0ef7cb4172c678723088fb1972552 # v1.18.0
+        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@7396e4056154412d8c3faf43929f8f85416c0d28 # v1.18.2
         with:
           client-id: ${{ inputs.azure-client-id }}
           tenant-id: ${{ inputs.azure-tenant-id }}
