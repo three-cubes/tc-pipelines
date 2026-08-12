@@ -76,7 +76,7 @@ jobs:
     steps:
       - name: Mint three-cubes-agent App token (WIF, secret-free)
         id: app
-        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@7396e4056154412d8c3faf43929f8f85416c0d28 # v1.18.2
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@1b744fa918eb2597380118c0738832ba78cdc9cd # v1.18.3
         with:
           client-id: ${{ inputs.azure-client-id }}
           tenant-id: ${{ inputs.azure-tenant-id }}

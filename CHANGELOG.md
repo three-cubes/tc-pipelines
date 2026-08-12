@@ -8,6 +8,22 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.18.4] — 2026-08-12
+
+### Fixed
+
+- **A nested pin kept the cache fix from reaching anyone, twice.** v1.18.3
+  refreshed each file's own pins, but `python-quality-gate.yml` still loaded the
+  v1.18.2 revision of `python-gate-body`, which loaded the v1.18.0
+  `setup-uv-cached` — so the 86s glob search survived two releases and two
+  consumer repins. Every self-pin now resolves to one release whose own pins are
+  current, making the chain correct at every level rather than one level per
+  release.
+- **`test_self_pin_freshness` follows one hop.** Its content comparison
+  normalises pin SHAs so a repin reads as inert — which also hid exactly this:
+  the outer file compared equal while the revision it loaded carried a stale
+  pin. It now asserts the loaded revision's own pins are current.
+
 ## [1.18.3] — 2026-08-12
 
 ### Fixed

@@ -112,6 +112,57 @@ def test_the_scan_found_self_pins() -> None:
     )
 
 
+def _resolve(repo_path: str) -> str:
+    """A composite reference names its directory; a workflow names the file."""
+    if (REPO_ROOT / repo_path).is_dir():
+        return f"{repo_path}/action.yml"
+    return repo_path
+
+
+@pytest.mark.parametrize(("source", "line", "repo_path", "sha"), PINS, ids=PIN_IDS)
+def test_the_revision_a_pin_loads_has_current_pins_of_its_own(
+    source: str, line: int, repo_path: str, sha: str
+) -> None:
+    """Follow one hop: the revision a pin loads must not carry stale pins itself.
+
+    Normalising pin SHAs keeps a repin from reading as a change, but it also
+    hides the case that matters most in a nested chain: a workflow pinning a
+    composite at a revision whose OWN pin is old. The outer content compares
+    equal while the step three levels down loads something years behind.
+
+    That shipped twice. A cache fix landed in `setup-uv-cached`, the consuming
+    workflow was repinned, and it still ran the pre-fix action — because the
+    composite revision in between pointed at the older one, and every check
+    comparing normalised content saw no difference.
+    """
+    pinned = _blob_at(sha, _resolve(repo_path))
+    if pinned is None:
+        pytest.skip(f"commit {sha[:12]} unreadable — run with fetch-depth: 0")
+
+    stale = []
+    for nested in SELF_PIN.finditer(pinned):
+        nested_path, nested_sha = nested.group("path"), nested.group("sha")
+        nested_local = REPO_ROOT / _resolve(nested_path)
+        if not nested_local.is_file():
+            continue
+        nested_pinned = _blob_at(nested_sha, _resolve(nested_path))
+        if nested_pinned is None:
+            continue
+        if _without_pin_shas(nested_pinned) != _without_pin_shas(
+            nested_local.read_text(encoding="utf-8")
+        ):
+            stale.append(f"{nested_path}@{nested_sha[:12]}")
+
+    assert not stale, (
+        f"{source}:{line} pins `{repo_path}` at {sha[:12]}, and THAT revision "
+        f"pins {stale} at revisions whose content is no longer current. The "
+        f"outer pin looks fresh while the step it loads reaches an old file — "
+        f"a fix in that file reaches nobody. "
+        f"fix: repin `{repo_path}` to a revision whose own pins are current, "
+        f"normally the most recent release. next: re-run pytest."
+    )
+
+
 @pytest.mark.parametrize(("source", "line", "repo_path", "sha"), PINS, ids=PIN_IDS)
 def test_self_pin_loads_the_file_this_repo_ships(
     source: str, line: int, repo_path: str, sha: str
