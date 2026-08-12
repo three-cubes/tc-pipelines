@@ -24,17 +24,49 @@ jobs:
       # here so the scan runs once.
       run-no-attribution: false
 
-  # Fan-in aggregator: a single check-run that is green iff the whole `meta`
-  # self-check passed. auto-merge.yml arms `--auto` off THIS check-run name, so
-  # it is the one stable gate a ruleset or consumer points at.
+  # The repo's product is workflows and composite actions, so its tests are
+  # contract tests over those files and the scripts they call. actionlint and
+  # yamllint judge each file alone and cannot see a broken relationship between
+  # two of them — a lane dropping a required input, two reusables' defaults
+  # drifting apart, a step pinned to a ref whose action no longer emits the
+  # output the workflow reads.
+  tests:
+    name: Contract tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The pinned-ref guards read each `uses:` SHA out of history to compare
+          # the contract that ref actually loads against the local file. A shallow
+          # clone has none of those objects, so they would skip rather than check.
+          fetch-depth: 0
+      - name: Set up uv + Python
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@6cf913aa78b327a3798745adf7677ce282925ef1 # v1.10.0
+        with:
+          python-version: "3.12"
+      - name: Install the harness dependencies
+        run: uv sync --locked
+      - name: Run the contract tests
+        run: uv run --no-sync pytest -q
+
+  # Fan-in aggregator: a single check-run that is green iff both the `meta`
+  # self-check and the contract tests passed. auto-merge.yml arms `--auto` off
+  # THIS check-run name, so it is the one stable gate a ruleset or consumer
+  # points at.
   quality-gate:
     name: Quality gate
-    needs: meta
+    needs: [meta, tests]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - name: Assert the meta self-check succeeded
         run: test "${{ needs.meta.result }}" = "success"
+      - name: Assert the contract tests succeeded
+        run: test "${{ needs.tests.result }}" = "success"
 
   # no-attribution — the BARE required status context org-main-core gates on.
   # Runs the shared tc-fitness detector over the PR commit range + title/body
@@ -47,7 +79,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
       - name: Install uv

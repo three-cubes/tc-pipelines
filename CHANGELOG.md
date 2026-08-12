@@ -8,6 +8,99 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.18.1] — 2026-08-12
+
+### Added
+
+- **Nine guards over pipeline wiring, each proven by reintroducing its defect.**
+  The suite covered shell lifted out of workflows and static file shape; nothing
+  covered the relationships between files, which is what a pipeline is. Added:
+  `uses:` ref pinning; the contract a pinned ref actually loads; secret
+  forwarding parity across lanes; example-caller coverage; release-notes
+  extraction; ternary true-branch emptiness; required-context coherence; job
+  skip semantics; composite-action internal consistency. Every one was checked
+  by mutating the repo to reintroduce the defect and confirming it fails — the
+  ref-pinning guard passed that check only after correction, because as written
+  it classified a floating self-reference as acceptable.
+- **Example callers for `azure-vm-deploy`, `capability-health-probe`,
+  `dependabot-automerge`, `independent-verifier` and `loop-implement`**, wired
+  into the dispatcher. That static caller is what makes GitHub's resolver
+  validate a reusable's input and secret contract at parse time, so these five
+  had their contracts unvalidated anywhere.
+
+### Fixed
+
+- **`azure-vm-deploy` published an empty snapshot handle on every run.** The
+  snapshot step resolved through `@v1`, a tag frozen 91 commits back whose
+  revision of `snapshot-azure-vm-disk` declares only `snapshot-names`. The
+  workflow reads `snapshot-resource-ids`, so the job output advertised to
+  consumers — the rollback-evidence handle for a destructive VM deploy — was the
+  empty string while the job reported success. Both existing tests passed
+  because they assert against the local action file rather than the ref that
+  executes. Every self-reference is now SHA-pinned to a released tag.
+- **`private-infra-patterns` never reached the gate.** `python-quality-gate.yml`
+  passed it to `python-gate-body` pinned at a commit that does not declare it; a
+  composite logs `Unexpected input(s)`, drops the value, and reports success, so
+  a consumer's private-infra secret-scan detector was silently inactive. The
+  composite is repinned and the input is now forwarded in the non-shard lane too.
+- **`release.yml` accepted a whitespace-only extraction.** The gate used
+  `[ -s ]`, which counts the single newline an empty CHANGELOG section extracts
+  to as content, so a Release published blank while the job reported success. It
+  now requires non-whitespace.
+
+
+- **The repo's own contract tests now run in CI.** `tc-pipelines` had 393 tests
+  over its workflows, actions and governance scripts, and nothing executed them:
+  CI ran only `meta-quality-gate` (actionlint, yamllint, license, branch
+  naming), which judges each file in isolation. Three tests had been failing on
+  `main` since the commit that added them, undetected. A `tests` job now runs
+  `pytest` and the `Quality gate` fan-in requires it, so a red test blocks a
+  merge. `pytest` and `pyjwt` are declared in a `dev` dependency group — neither
+  was installed by `uv sync`, so the suite only ever passed against a
+  developer's ambient environment.
+- **`test_internal_call_contracts`** checks every internal `uses:` against the
+  contract of what it calls — required inputs present, no unknown ones — plus
+  per-lane parity of the consumer inputs `python-quality-gate.yml` forwards to
+  `python-gate-body`. Actions resolves these at run time and the two failure
+  modes are asymmetric: a reusable with a bad input shape fails as
+  `startup_failure` with no log, while a composite action missing a `required`
+  input only warns, substitutes an empty string, and reports success.
+- **`test_reusable_input_default_parity`** pins the shared optional inputs of
+  `python-quality-gate.yml` and `pytest-durations-refresh.yml` to the same
+  defaults. Both `pnpm-install-args` and `pnpm-version` drifted apart silently
+  while each file stayed individually valid, so no linter could see it.
+  Differences that are intended are declared with their reason, keeping intent
+  distinguishable from drift.
+
+### Fixed
+
+- **`quality-non-shard` silently dropped four consumer inputs.** The lane
+  omitted `pre-steps`, `post-steps`, `coverage-xml-path` and
+  `coverage-artifact-name` while `quality` and `quality-shard` forwarded all of
+  them. A consumer that prepares fixtures or starts a service in `pre-steps`
+  therefore had its non-sharded checks run against an unprepared environment
+  while the sharded lanes ran against a prepared one — behind a single required
+  status context reporting on both. The lane now forwards them, and takes the
+  `secrets.gh-token || github.token` fallback its siblings already used.
+- **Three bootstrap tests asserted a ruleset path the script never writes.**
+  They looked for `.github/rulesets/main.json` while
+  `bootstrap-repo-governance.sh` emits `main-product.json`, so they had never
+  passed since being introduced alongside the SonarCloud removal.
+
+- **`pytest-durations-refresh.yml` builds the same node tree as the gate.** Its
+  `pnpm-install-args` defaulted to `--frozen-lockfile` while
+  `python-quality-gate.yml` defaults to `--frozen-lockfile --ignore-scripts`. A
+  consumer that states the value in neither call — the common case, since both
+  inputs are optional — therefore ran package lifecycle scripts during a refresh
+  that its gate skips, building a different node tree and timing a suite the
+  shards never execute. That is the divergence the durations map exists to
+  remove, so the mismatch defeated the workflow's own purpose. `pnpm-version`
+  carried the same defect — the gate pins `10.27.0` while the refresh left it
+  empty, so `pnpm/action-setup` resolved from `packageManager`/`devEngines` or
+  failed outright. Both now match the gate, and the two defaults that stay
+  deliberately different (`fetch-depth`, `ts-coverage-command`) say why in their
+  own descriptions, so the next reader can tell drift from intent.
+
 ## [1.18.0] — 2026-08-12
 
 ### Added

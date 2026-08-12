@@ -1,0 +1,41 @@
+name: example — capability-health-probe (reusable self-check)
+
+# Static call-graph self-check for the `capability-health-probe.yml` reusable. The job `uses:` it
+# via its LOCAL path with a real consumer's input shape, so actionlint and
+# GitHub's reusable-workflow resolver validate input names, required-input
+# presence, types and secret shapes against the reusable's `workflow_call:`
+# contract at parse time — a mismatch fails HERE rather than in a consumer's
+# pipeline.
+#
+# NEVER runs the underlying work by default: `workflow_call` only, and the job is
+# gated on `run-for-real`, whose default is false. Flipping it true would run a probe command against a live VM.
+
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: >-
+          Leave false (default) for the static call-graph self-check — the job
+          stays gated off and only the input/secret SHAPES are validated. The
+          dispatcher (example-callers.yml) passes this through.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # A probe-shaped call: the WIF identity triple, one target VM, and the
+  # command whose exit status becomes the probe verdict.
+  probe-shape:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/capability-health-probe.yml
+    with:
+      resource-group: "RG-EXAMPLE"
+      vm-name: "vm-example"
+      probe-command: "systemctl is-active example.service"
+      azure-client-id: "00000000-0000-0000-0000-000000000000"
+      azure-tenant-id: "00000000-0000-0000-0000-000000000000"
+      azure-subscription-id: "00000000-0000-0000-0000-000000000000"
+    secrets:
+      ALERT_WEBHOOK: dummy-webhook-shape-check-only

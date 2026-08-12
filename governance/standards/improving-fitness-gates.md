@@ -21,7 +21,7 @@ The pin bump touches the gate's own definition, so it is a control-plane change:
 ## Improve the pipeline (tc-pipelines)
 
 1. **Change the reusable in place** — the workflow (`python-quality-gate.yml`, `azure-vm-deploy.yml`, …) or a composite action under `.github/actions/`.
-2. **SHA-pin every third-party `uses:`** to a full commit SHA (Sonar `S7637`); the org self-pins its own composites to `@v1`.
+2. **SHA-pin every `uses:`** to a full commit SHA (Sonar `S7637`), including a reference to this repo's own composites. A floating major such as `@v1` only stays correct while something advances that tag on every release; nothing does, so it froze and a step loaded a revision of a composite that no longer emitted the output its workflow read — silently, because the workflow and the composite sit side by side and every local check compares against the local file. Pinned by `governance/scripts/tests/test_uses_ref_pinning.py`.
 3. **Tag the change** and roll it out through the major pin. A breaking input/output change cuts a new major (`@v2`) and leaves `@v1` working; consumers move to the new tag on their own schedule (`VERS-D1`).
 
 Exercise the caller before merge: a change-detection filter can gate a `uses:` job off on the very PR that changes it, so a broken `workflow_call` contract can reach `main` and fail at workflow startup. Force a triggering change in the same PR.
