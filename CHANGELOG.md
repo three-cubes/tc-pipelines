@@ -8,6 +8,8 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.18.2] — 2026-08-12
+
 ### Fixed
 
 - **`setup-uv-cached` no longer walks `node_modules` to key its cache.**
