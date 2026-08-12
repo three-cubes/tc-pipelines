@@ -26,15 +26,22 @@ runs:
         version: ${{ inputs.uv-version }}
         python-version: ${{ inputs.python-version }}
         enable-cache: true
-        # Bounded to the files that actually key the cache. The action's default
-        # glob walks the whole workspace, so in a repo that also carries a pnpm
-        # workspace it descends every `node_modules` tree — measured at 86.3s to
-        # locate 40 files, against a 2.0s restore, on every lane of every run.
+        # Root-anchored, with no `**`. The action's default glob walks the
+        # whole workspace, so in a repo that also carries a pnpm workspace it
+        # descends every `node_modules` tree — measured at 86.3s to locate 40
+        # files, against a 2.0s restore, on every lane of every run.
+        #
+        # A negated `!**/node_modules/**` does not fix that: @actions/glob
+        # decides whether to descend a directory by partial-matching the
+        # POSITIVE patterns, so any `**` pattern still traverses the tree and
+        # the negation only discards matches afterwards. Naming the two files
+        # outright removes the traversal rather than filtering its results.
+        # `uv.lock` is the authoritative key — it pins the fully resolved set
+        # including every workspace member — and the root `pyproject.toml`
+        # carries the config that produces it.
         cache-dependency-glob: |
           uv.lock
           pyproject.toml
-          **/pyproject.toml
-          !**/node_modules/**
     - name: uv sync
       shell: bash
       run: uv sync ${{ inputs.sync-args }}

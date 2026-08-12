@@ -15,8 +15,11 @@ for the consumer-facing `@vN` workflow/action references.
   back to its default whole-workspace glob. In a repo that also carries a pnpm
   workspace that means descending every `node_modules` tree: measured at 86.3s
   to locate 40 files, against a 2.0s cache restore, on every lane of every run —
-  19% of a 446s gate lane spent in a filesystem walk. The glob is now bounded to
-  the lockfile and project files that actually key the cache.
+  19% of a 446s gate lane spent in a filesystem walk. The glob is now the two
+  root-anchored files that key the cache, with no `**`: @actions/glob decides
+  whether to descend a directory by partial-matching the POSITIVE patterns, so
+  a negated `!**/node_modules/**` would still traverse the tree and only
+  discard matches afterwards.
 
 ## [1.18.1] — 2026-08-12
 
