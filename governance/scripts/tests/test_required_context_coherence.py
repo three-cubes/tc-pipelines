@@ -64,17 +64,12 @@ SKIP_IS_LEGITIMATE: dict[str, str] = {
         "both-quality-lanes-skipped assertion."
     ),
     "coverage-combine": (
-        "It merges the shard .coverage.* files and skips exactly when there are "
-        "none to merge: pytest-shards <= 1, coverage upload off, or no code "
-        "changed."
-    ),
-    "new-code-coverage": (
-        "Its condition also requires a quality lane to have SUCCEEDED, so a "
-        "failed lane skips it and the fan-in fails on that lane's own result. "
-        "It otherwise skips only when the floor was not requested. The "
-        "remaining combination — enforce-new-code-coverage true with "
-        "upload-coverage-artifact false — is incoherent on the caller's input "
-        "surface, not in this wiring, and the input declares the coupling."
+        "It merges the shard .coverage.* files and enforces the new-code floor "
+        "against the result, and skips exactly when it has neither to do: no "
+        "code changed, coverage upload off, or unsharded with the floor not "
+        "requested. The one combination that would skip it with work "
+        "outstanding — enforce-new-code-coverage true, upload-coverage-artifact "
+        "false — is rejected in detect-changes before the matrix runs."
     ),
 }
 

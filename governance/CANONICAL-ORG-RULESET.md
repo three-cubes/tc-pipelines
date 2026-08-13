@@ -55,7 +55,7 @@ the gate that gates it.
 | Work-item traceability — the branch embeds the Linear id (operational/bot prefixes exempt) | GitHub | native `branch_name_pattern` in `org-branch-naming` (the runtime `require-work-item.yml` callers were retired) |
 | No AI/LLM self-attribution | tc-fitness / tc-pipelines | `core:no_llm_attribution` → `no-attribution` leg |
 | Canonical bot/human commit author | tc-fitness | `core:canonical_commit_identity` |
-| 80% coverage floor on changed lines | tc-fitness | `core:new_code_coverage`, run as the `new-code-coverage` job inside `Quality gate` |
+| 80% coverage floor on changed lines | tc-fitness | `core:new_code_coverage`, run in the `coverage-combine` lane inside `Quality gate` |
 | One runnable gate, local == CI | tc-pipelines | `python-quality-gate.yml` (the shared reusable) |
 | Shard-count-independent required context | tc-pipelines | the reusable fan-in check-run, required **by name** |
 | Consumer can't drift off the paved path | tc-fitness | `core:engine_version_floor`, `core:ci_consumes_shared_gate`, fan-in-name parity |
