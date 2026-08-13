@@ -22,7 +22,7 @@ description: |
     permissions: { id-token: write, contents: read }
     steps:
       - id: app
-        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@7caaf68e1976813bd2f1bdf9f33afb5d5e8e1cb5 # v1.19.0
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@0541f75d6a3491ff83e643bc752d9722f17d865e # v1.19.1
         with:
           client-id:       {{ vars.AZURE_CLIENT_ID }}
           tenant-id:       {{ vars.AZURE_TENANT_ID }}
@@ -86,7 +86,7 @@ runs:
   using: composite
   steps:
     - name: Azure login (WIF)
-      uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@7caaf68e1976813bd2f1bdf9f33afb5d5e8e1cb5 # v1.19.0
+      uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@0541f75d6a3491ff83e643bc752d9722f17d865e # v1.19.1
       with:
         client-id: ${{ inputs.client-id }}
         tenant-id: ${{ inputs.tenant-id }}
