@@ -8,6 +8,8 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.19.0] — 2026-08-13
+
 ### Changed
 
 - **The new-code coverage floor runs in the `coverage-combine` lane.** It had a
@@ -26,6 +28,13 @@ for the consumer-facing `@vN` workflow/action references.
   skipped: no lane, no failure, and a green gate that enforced nothing. The
   combination is rejected in `detect-changes`, before the shard matrix spends
   anything on it.
+- **`test_self_pin_freshness` bounds pin lag instead of forbidding it.** The
+  content comparison it used could not be satisfied: changing a self-referenced
+  file makes its own pin stale by definition, so every such change failed. It
+  now requires each self-pin to name the newest release reachable from HEAD,
+  which bounds the lag at one release rather than letting it grow unbounded —
+  one pin had frozen 91 commits back. Bump the pins as the last step before
+  cutting a tag.
 
 ### Fixed
 
@@ -36,15 +45,9 @@ for the consumer-facing `@vN` workflow/action references.
   removes the cost regardless of whether the glob setting reaches the runner,
   which through a nested pin chain it had not for three releases.
 
-### Changed
-
-- **`test_self_pin_freshness` bounds pin lag instead of forbidding it.** The
-  content comparison it used could not be satisfied: changing a self-referenced
-  file makes its own pin stale by definition, so every such change failed. It
-  now requires each self-pin to name the newest release reachable from HEAD,
-  which bounds the lag at one release rather than letting it grow unbounded —
-  one pin had frozen 91 commits back. Bump the pins as the last step before
-  cutting a tag.
+  The ordering fix is in `actions/python-gate-body`, which
+  `python-quality-gate.yml` self-pins one release back — so it reaches a consumer
+  only once that pin names this release. Bump the pins and cut again.
 
 ## [1.18.4] — 2026-08-12
 
