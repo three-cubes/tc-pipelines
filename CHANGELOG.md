@@ -8,19 +8,35 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.19.1] — 2026-08-13
+
 ### Fixed
 
 - **The `setup-uv` ordering fix now reaches consumers.** It landed in
   `actions/python-gate-body` for v1.19.0, but every self-pin still named v1.18.3,
   so the gate loaded the pre-fix revision and the 79s cache-key walk survived the
-  release. All 19 self-pins now name v1.19.0. A consumer takes the fix at the
+  release. All 25 self-pins now name v1.19.0. A consumer takes the fix at the
   tag cut from this commit, not at v1.19.0.
 - **The pin rule was one commit from failing every PR.** `main` was left standing
   exactly on the v1.19.0 tag, and `test_self_pin_freshness` skips a tag at HEAD —
   so the pins still naming v1.18.3 read as current. The next commit to land would
-  have made v1.19.0 the newest release before HEAD and turned all 19 assertions
+  have made v1.19.0 the newest release before HEAD and turned all 25 assertions
   red, on whoever's PR happened to be next. Bumping the pins in the same window
   closes that.
+- **`test_self_pin_freshness`'s docstring described a rule it no longer
+  implements.** It still claimed the byte-identical comparison replaced in
+  v1.18.4 by "names the newest release before HEAD". It now matches the code and
+  carries the release-order trap.
+
+### Added
+
+- **`governance/standards/supply-chain-pinning.md`** states the pinning
+  architecture the tests were enforcing and nothing explained: why a `uses:` SHA
+  cannot be factored into a variable (the keyword accepts no context, so a ref is
+  a literal or it is nothing), why the checker rather than a variable is what
+  holds the set consistent, why cutting a release takes two tags, and what a
+  consumer repin touches — including which repeated values are deliberate trust
+  roots and must not be deduplicated.
 
 ## [1.19.0] — 2026-08-13
 
