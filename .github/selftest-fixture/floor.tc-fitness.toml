@@ -1,0 +1,17 @@
+# New-code-floor self-test fixture for python-quality-gate.yml's
+# enforce-new-code-coverage path. The floor lane scores a coverage report it
+# downloads from the quality lane, so the gate has to leave one behind: the probe
+# writes coverage data only when the engine sets COVERAGE_FILE, which unsharded it
+# does not. Drive coverage explicitly instead. Exercised by the `floor` job in
+# test-shard-routing.yml.
+name = "new-code floor self-test fixture"
+
+[[steps]]
+id = "probe-under-coverage"
+summary = "run the shard probe under coverage"
+run = ["python3", "-m", "coverage", "run", "shard_probe.py"]
+
+[[steps]]
+id = "coverage-xml"
+summary = "write the Cobertura report the new-code floor reads"
+run = ["python3", "-m", "coverage", "xml", "-o", "coverage.xml"]

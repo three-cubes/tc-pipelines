@@ -455,6 +455,11 @@ jobs:
       # succeeded, and the floor below reports the skip instead.
       - name: Download the coverage XML (unsharded lane)
         if: ${{ inputs.pytest-shards <= 1 && needs.quality.result == 'success' }}
+        # A lane that produced no XML uploads no artifact (if-no-files-found:
+        # ignore), and a download by name errors on that with nothing said about
+        # coverage. Let the floor step below report it instead — it names the
+        # inputs to look at.
+        continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: ${{ inputs.coverage-artifact-name }}
@@ -540,10 +545,15 @@ jobs:
             echo "::error::new-code coverage floor cannot run — no coverage XML ($COVERAGE_XML) was produced/uploaded; check upload-coverage-artifact + the gate's pytest --cov config."
             exit 1
           fi
-          # Reads [tool.tc_fitness.core_checks.new_code_coverage] from the repo:
-          # floor_pct / roots / base_ref / coverage_report. Exit 1 on a below-floor
-          # changed file (hard, non-grandfatherable), 0 when the changed lines clear
-          # the floor or there is no measurable new code.
+          # The module entrypoint takes the check's OWN defaults — an 80% floor
+          # over every .py in the tree, `coverage.xml`, `origin/main`. The repo's
+          # [tool.tc_fitness.core_checks.new_code_coverage] block binds the
+          # in-catalogue run, not this one, so a repo that narrows `roots` there is
+          # scored more widely here, and one that moves `base_ref` off origin/main
+          # is scored against a ref this never diffs. Keep new-code-base-ref
+          # pointing at the trunk the check defaults to.
+          # Exit 1 on a below-floor changed file (hard, non-grandfatherable), 0 when
+          # the changed lines clear the floor or there is no measurable new code.
           uv run python -m tc_fitness.core_checks.new_code_coverage
 
   # ── the complement of the shard tier, run ONCE ──────────────────────────────
