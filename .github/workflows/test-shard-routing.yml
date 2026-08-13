@@ -72,6 +72,11 @@ jobs:
       sync-args: "--locked"
       upload-coverage-artifact: true
       enforce-new-code-coverage: true
+      # Distinct from the `sharded` caller's default. Artifact names are scoped to
+      # the RUN, not the caller, and these callers share one: a second upload of a
+      # taken name is a non-retryable 409, and a download by that name can resolve
+      # to the other caller's report.
+      coverage-artifact-name: floor-coverage
       pre-steps: |
         set -euo pipefail
         cp .github/selftest-fixture/floor.tc-fitness.toml .tc-fitness.toml

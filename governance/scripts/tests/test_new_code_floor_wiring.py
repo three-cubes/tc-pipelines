@@ -34,7 +34,8 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-GATE = REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml"
+WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+GATE = WORKFLOW_DIR / "python-quality-gate.yml"
 
 #: The module invocation that IS the floor. Finding it locates the lane. The
 #: `-m` is load-bearing: the same dotted path appears in that step's own comment
@@ -163,6 +164,35 @@ def test_the_floor_runs_after_the_report_it_scores() -> None:
         f"score at all. "
         f"fix: order every report-producing step before the floor step."
     )
+
+
+def test_concurrent_gate_callers_do_not_share_a_coverage_artifact_name() -> None:
+    """The floor fetches its report BY NAME, and names are scoped to the run.
+
+    Two callers of the gate in one workflow both uploading coverage take the same
+    name. The second upload is a non-retryable 409, and — worse, because it is
+    quiet — a download by that name can resolve to the other caller's report, so
+    the floor scores a change set that is not the one it is gating.
+
+    Only callers that actually upload can collide, so the scan is over those.
+    """
+    for path in sorted(WORKFLOW_DIR.glob("*.yml")):
+        jobs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {}
+        uploaders: dict[str, list[str]] = {}
+        for job_id, job in jobs.items():
+            if not isinstance(job, dict) or "python-quality-gate.yml" not in str(job.get("uses", "")):
+                continue
+            params = job.get("with") or {}
+            if params.get("upload-coverage-artifact") is not True:
+                continue
+            uploaders.setdefault(str(params.get("coverage-artifact-name", "coverage-data")), []).append(job_id)
+        shared = {name: ids for name, ids in uploaders.items() if len(ids) > 1}
+        assert not shared, (
+            f"{path.name}: callers {shared} run in one workflow and upload coverage "
+            f"under the same artifact name. The second upload 409s, and a download "
+            f"by that name can return the other caller's report. "
+            f"fix: give each uploading caller its own `coverage-artifact-name`."
+        )
 
 
 def _git(repo: Path, *args: str) -> None:
