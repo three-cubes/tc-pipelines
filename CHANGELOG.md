@@ -8,6 +8,25 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+### Changed
+
+- **The new-code coverage floor runs in the `coverage-combine` lane.** It had a
+  job of its own, which meant a second runner, checkout and uv install whose
+  only purpose was to move one XML file out of the artifact store and read it —
+  and it sat after `coverage-combine` on the critical path of the required
+  context, so its whole duration was serial. Measured on a consumer: 21s of job
+  plus a 2s queue gap. The lane that assembles the report now scores it. The
+  floor's own preconditions travel with it: the checkout is full-history and the
+  trunk ref is fetched, because an unresolvable merge-base is the one failure the
+  check reports as PASS. `test_new_code_floor_wiring` pins both, and demonstrates
+  the soft-pass against the real engine so the pinning is not taken on trust.
+- **Asking for the floor without the coverage artifact now fails fast.** The lane
+  carrying the floor exists only to hold a coverage report, so
+  `enforce-new-code-coverage: true` with `upload-coverage-artifact: false` left it
+  skipped: no lane, no failure, and a green gate that enforced nothing. The
+  combination is rejected in `detect-changes`, before the shard matrix spends
+  anything on it.
+
 ### Fixed
 
 - **`setup-uv` runs before the node half.** It hashes files to key its cache,
