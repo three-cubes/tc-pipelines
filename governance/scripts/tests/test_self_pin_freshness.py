@@ -1,4 +1,4 @@
-"""A self-pinned `uses:` must load the same file this repo currently ships.
+"""Every self-pinned `uses:` must name this repo's newest release.
 
 Every internal reference is pinned to a commit SHA, so a step runs whatever that
 commit held — not what sits beside it in the tree. When the two diverge, the
@@ -12,9 +12,22 @@ run. Then a cache fix landed in `setup-uv-cached` and did nothing, because
 `python-gate-body` still pinned the pre-fix revision two levels down — the
 consumer repinned, took the new workflow, and got the old action.
 
-The rule: the file a self-pin loads must be byte-identical to the local copy.
-A pin one release behind is fine while nothing has changed in it; the moment
-something does, this fails and names the file.
+The rule: every self-pin names the newest release reachable from HEAD. A commit
+cannot pin itself — writing the pin changes the hash — so a tag AT HEAD is
+skipped and the target is the newest release BEFORE it. That bounds the lag at
+one release rather than letting it grow: a change to a composite reaches a
+consumer at the release AFTER the one carrying it, and never later.
+
+So bump the pins immediately after cutting a tag. While `main` stands on that tag
+the stale pins still read as current, because the tag at HEAD is skipped and
+nothing is wrong yet. The next commit to land makes it the target and turns every
+assertion here red — on an author who changed none of them.
+
+There is no way to name the SHA once and reuse it: `uses:` accepts no context of
+any kind, in a reusable call or an action step. So this test, rather than a
+variable, is what holds the set consistent, and the repetition it polices is the
+platform's floor rather than a design choice. The architecture, and what a
+consumer repin touches, are in `governance/standards/supply-chain-pinning.md`.
 
 `git` must be able to read the pinned object, so the checkout needs full
 history. A shallow clone makes this SKIP rather than silently pass.

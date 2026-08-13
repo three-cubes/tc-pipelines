@@ -8,6 +8,20 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `setup-uv` ordering fix now reaches consumers.** It landed in
+  `actions/python-gate-body` for v1.19.0, but every self-pin still named v1.18.3,
+  so the gate loaded the pre-fix revision and the 79s cache-key walk survived the
+  release. All 19 self-pins now name v1.19.0. A consumer takes the fix at the
+  tag cut from this commit, not at v1.19.0.
+- **The pin rule was one commit from failing every PR.** `main` was left standing
+  exactly on the v1.19.0 tag, and `test_self_pin_freshness` skips a tag at HEAD —
+  so the pins still naming v1.18.3 read as current. The next commit to land would
+  have made v1.19.0 the newest release before HEAD and turned all 19 assertions
+  red, on whoever's PR happened to be next. Bumping the pins in the same window
+  closes that.
+
 ## [1.19.0] — 2026-08-13
 
 ### Changed

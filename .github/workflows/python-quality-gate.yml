@@ -30,6 +30,15 @@ name: python-quality-gate
 #   enforce-new-code-coverage  →  engine >= v0.8.0  (new_code_coverage core check)
 # The default (no shards, no tier) works on any engine >= v0.8.x.
 #
+# ── Self-pins ───────────────────────────────────────────────────────────────
+# Each `uses:` below names a full commit SHA of THIS repo, so a step runs that
+# revision rather than the file beside it. The SHA cannot be factored into a
+# variable — `uses:` accepts no context — so `test_self_pin_freshness` is what
+# keeps the set consistent, and every pin moves together to the newest release.
+# A pin here lags the tree by one release by construction, so a change to a
+# composite ships at the release AFTER the one carrying it:
+# governance/standards/supply-chain-pinning.md.
+#
 # Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
 
 on:
@@ -281,7 +290,7 @@ jobs:
         # Immutable SHA pin (SGO-280 shipped the action to main; its bootstrap
         # branch ref was left dangling after the branch was deleted, breaking the
         # self-test — SGO-303 repins it as the release step intended).
-        uses: three-cubes/tc-pipelines/actions/detect-code-changes@1b744fa918eb2597380118c0738832ba78cdc9cd # v1.18.3
+        uses: three-cubes/tc-pipelines/actions/detect-code-changes@7caaf68e1976813bd2f1bdf9f33afb5d5e8e1cb5 # v1.19.0
         with:
           code-change-filter: ${{ inputs.code-change-filter }}
           fetch-depth: ${{ inputs.fetch-depth }}
@@ -298,7 +307,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run the gate (unsharded)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@1b744fa918eb2597380118c0738832ba78cdc9cd # v1.18.3
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@7caaf68e1976813bd2f1bdf9f33afb5d5e8e1cb5 # v1.19.0
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -360,7 +369,7 @@ jobs:
         shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Run the gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@1b744fa918eb2597380118c0738832ba78cdc9cd # v1.18.3
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@7caaf68e1976813bd2f1bdf9f33afb5d5e8e1cb5 # v1.19.0
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -436,7 +445,7 @@ jobs:
           git fetch --no-tags origin "+refs/heads/${base}:refs/remotes/origin/${base}" || \
             echo "::warning::could not fetch ${BASE_REF}; the new-code floor may soft-pass."
       - name: Locked uv install
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@1b744fa918eb2597380118c0738832ba78cdc9cd # v1.18.3
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@7caaf68e1976813bd2f1bdf9f33afb5d5e8e1cb5 # v1.19.0
         with:
           uv-version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}
@@ -576,7 +585,7 @@ jobs:
           echo "::error::shard-tier is set but non-shard-tier is empty — every step outside the shard tier would drop out of the gate while it still reported green. fix: set non-shard-tier to the tier holding those steps. next: re-run."
           exit 1
       - name: Run the gate (non-shard tier)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@1b744fa918eb2597380118c0738832ba78cdc9cd # v1.18.3
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@7caaf68e1976813bd2f1bdf9f33afb5d5e8e1cb5 # v1.19.0
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
