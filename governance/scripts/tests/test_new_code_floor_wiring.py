@@ -43,6 +43,10 @@ GATE = WORKFLOW_DIR / "python-quality-gate.yml"
 #: after the line that runs the check was deleted.
 FLOOR_INVOCATION = "-m tc_fitness.core_checks.new_code_coverage"
 
+#: The reusable's `coverage-artifact-name` default — what every caller that names
+#: none silently takes.
+DEFAULT_COVERAGE_ARTIFACT = "coverage-data"
+
 #: Cobertura with no <sources> root, so a class filename reads as a repo-relative
 #: path — the shape the changed-line paths are matched against.
 COVERAGE_XML_TEMPLATE = """<?xml version="1.0" ?>
@@ -166,6 +170,61 @@ def test_the_floor_runs_after_the_report_it_scores() -> None:
     )
 
 
+def _uploading_gate_callers(path: Path) -> list[tuple[str, dict, str]]:
+    """(job id, job, artifact name) for each gate caller in `path` that uploads.
+
+    Both defaults are load-bearing and both point the same way — toward a caller
+    that says nothing still uploading, under the one name every other silent
+    caller also takes. Reading an omitted input as "off" would make this scan
+    skip exactly the callers most likely to collide.
+    """
+    jobs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {}
+    found = []
+    for job_id, job in jobs.items():
+        if not isinstance(job, dict) or "python-quality-gate.yml" not in str(job.get("uses", "")):
+            continue
+        params = job.get("with") or {}
+        # `upload-coverage-artifact` defaults to true, so only an explicit false
+        # opts out. Compared as text because YAML yields a bool and a caller may
+        # quote it.
+        if str(params.get("upload-coverage-artifact", True)).strip().lower() == "false":
+            continue
+        found.append(
+            (job_id, job, str(params.get("coverage-artifact-name", DEFAULT_COVERAGE_ARTIFACT)))
+        )
+    return found
+
+
+def test_the_assumed_input_defaults_match_the_reusable() -> None:
+    """The scan above reads an omitted input as the reusable's default.
+
+    Both defaults live in another file. Flip `upload-coverage-artifact` to false
+    there and every silent caller stops being scanned; change the artifact name
+    and colliding callers start reading as distinct. Either way the guard goes
+    quiet rather than wrong, which is the failure it cannot report on itself.
+    """
+    document = yaml.safe_load(GATE.read_text(encoding="utf-8")) or {}
+    # `on:` is YAML 1.1 truthy, so safe_load keys it as the boolean True.
+    triggers = document.get("on", document.get(True)) or {}
+    inputs = (triggers.get("workflow_call") or {}).get("inputs") or {}
+    assert inputs.get("upload-coverage-artifact", {}).get("default") is True, (
+        f"{GATE.name}: `upload-coverage-artifact` no longer defaults to true, so "
+        f"a caller that omits it no longer uploads — and the collision scan, "
+        f"which treats omission as uploading, now flags callers that cannot "
+        f"collide. fix: reconcile _uploading_gate_callers with the new default."
+    )
+    assert (
+        inputs.get("coverage-artifact-name", {}).get("default") == DEFAULT_COVERAGE_ARTIFACT
+    ), (
+        f"{GATE.name}: `coverage-artifact-name` defaults to "
+        f"{inputs.get('coverage-artifact-name', {}).get('default')!r}, not "
+        f"{DEFAULT_COVERAGE_ARTIFACT!r}. Callers that name none take the real "
+        f"default, so the scan would compare them under a name nothing uses and "
+        f"read a live collision as two distinct names. "
+        f"fix: update DEFAULT_COVERAGE_ARTIFACT."
+    )
+
+
 def test_concurrent_gate_callers_do_not_share_a_coverage_artifact_name() -> None:
     """The floor fetches its report BY NAME, and names are scoped to the run.
 
@@ -173,25 +232,40 @@ def test_concurrent_gate_callers_do_not_share_a_coverage_artifact_name() -> None
     name. The second upload is a non-retryable 409, and — worse, because it is
     quiet — a download by that name can resolve to the other caller's report, so
     the floor scores a change set that is not the one it is gating.
-
-    Only callers that actually upload can collide, so the scan is over those.
     """
     for path in sorted(WORKFLOW_DIR.glob("*.yml")):
-        jobs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {}
         uploaders: dict[str, list[str]] = {}
-        for job_id, job in jobs.items():
-            if not isinstance(job, dict) or "python-quality-gate.yml" not in str(job.get("uses", "")):
-                continue
-            params = job.get("with") or {}
-            if params.get("upload-coverage-artifact") is not True:
-                continue
-            uploaders.setdefault(str(params.get("coverage-artifact-name", "coverage-data")), []).append(job_id)
+        for job_id, _job, name in _uploading_gate_callers(path):
+            uploaders.setdefault(name, []).append(job_id)
         shared = {name: ids for name, ids in uploaders.items() if len(ids) > 1}
         assert not shared, (
             f"{path.name}: callers {shared} run in one workflow and upload coverage "
             f"under the same artifact name. The second upload 409s, and a download "
             f"by that name can return the other caller's report. "
             f"fix: give each uploading caller its own `coverage-artifact-name`."
+        )
+
+
+def test_a_matrix_gate_caller_varies_its_coverage_artifact_name() -> None:
+    """One matrix caller is many jobs in one run, all uploading the same name.
+
+    A `strategy.matrix` on a `uses:` job fans it into a cell per combination, and
+    every cell runs in the SAME workflow — so a fixed artifact name collides with
+    itself. Counting job ids cannot see it: the caller is declared once, so the
+    scan above reads one uploader and passes while the run 409s.
+    """
+    for path in sorted(WORKFLOW_DIR.glob("*.yml")):
+        fixed = [
+            job_id
+            for job_id, job, name in _uploading_gate_callers(path)
+            if (job.get("strategy") or {}).get("matrix") and "matrix." not in name
+        ]
+        assert not fixed, (
+            f"{path.name}: matrix caller(s) {fixed} upload coverage under a name "
+            f"that does not vary per cell, so every cell of one run takes the same "
+            f"artifact name and all but the first 409. "
+            f"fix: interpolate a matrix value into `coverage-artifact-name`, or "
+            f"drop the matrix from the uploading caller."
         )
 
 
