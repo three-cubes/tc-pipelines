@@ -115,6 +115,7 @@ level — see §3–§4 — and are not duplicated below.)
 | Quality & fitness | [`mutation-testing-survival-ratchet.md`](standards/mutation-testing-survival-ratchet.md) | Diff-scoped mutation + survivors ratchet. |
 | Quality & fitness | [`agent-actionable-feedback.md`](standards/agent-actionable-feedback.md) | Every error carries `fix:`/`next:`/`run:`. |
 | Quality & fitness | [`improving-fitness-gates.md`](standards/improving-fitness-gates.md) | Add/improve a CORE check or a reusable and ship it: converge-up, tag-release, consumer-repin. |
+| Quality & fitness | [`supply-chain-pinning.md`](standards/supply-chain-pinning.md) | Why every `uses:` is a literal SHA and repeated, the two-tag self-pin release order, and what a consumer repin actually touches. |
 | Architecture & decisions | [`architecture-decision-method.md`](standards/architecture-decision-method.md) | How a decision is researched + justified (method, not ADR mechanics). |
 | Architecture & decisions | [`engineering-nfr-standard.md`](standards/engineering-nfr-standard.md) | The six-dimension NFR checklist every design must clear. |
 | Language & deps | [`python-dependency-locking.md`](standards/python-dependency-locking.md) | uv workspace + frozen `uv.lock`. |
