@@ -45,7 +45,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: three-cubes/tc-pipelines/.github/workflows/azure-vm-deploy.yml@v1
+    uses: three-cubes/tc-pipelines/.github/workflows/azure-vm-deploy.yml@<sha> # vX.Y.Z
     with:
       resource-group: RG-AGENTS-CORE
       op-tag: deploy-on-merge
@@ -163,8 +163,8 @@ If the migration introduces a bug:
 
 ```bash
 # Revert the workflow file in the consumer repo. The shared workflow is
-# pinned to @v1 — even if the tc-pipelines repo has a regression,
-# pinning to a previous SHA gets you out:
+# pinned to a release SHA, so repinning to the previous one gets you out
+# and nothing moves under you in the meantime:
 uses: three-cubes/tc-pipelines/.github/workflows/azure-vm-deploy.yml@<known-good-sha>
 ```
 

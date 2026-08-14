@@ -51,7 +51,7 @@ from the canonical shared tool (needs an `az login` with reader access to the ag
 [tc-pipelines `tools/`](https://github.com/three-cubes/tc-pipelines/tree/main/tools)):
 
 ```bash
-export GH_TOKEN="$(uvx --from 'git+https://github.com/three-cubes/tc-pipelines@v1#subdirectory=tools' agent-token)"
+export GH_TOKEN="$(uvx --from 'git+https://github.com/three-cubes/tc-pipelines@v1.19.1#subdirectory=tools' agent-token)"
 git config user.name 'three-cubes-agent[bot]'
 git config user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com'
 git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/{{REPO}}.git"  # reset to tokenless after pushing
