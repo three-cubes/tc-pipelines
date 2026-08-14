@@ -2,11 +2,15 @@ name: 'Reusable — Azure VM deploy (WIF → snapshot → apply → smoke)'
 
 # Three Cubes shared deploy workflow.
 #
+# Pin the ref to a release commit SHA with the tag in a trailing comment. A
+# floating `@v1` only stays correct while something advances that tag on every
+# release, and nothing does. See
+# governance/standards/supply-chain-pinning.md.
 # Consumers call this from their own workflow with:
 #
 #   jobs:
 #     deploy:
-#       uses: three-cubes/tc-pipelines/.github/workflows/azure-vm-deploy.yml@v1
+#       uses: three-cubes/tc-pipelines/.github/workflows/azure-vm-deploy.yml@<sha> # vX.Y.Z
 #       with:
 #         resource-group: RG-AGENTS-CORE
 #         targets: |

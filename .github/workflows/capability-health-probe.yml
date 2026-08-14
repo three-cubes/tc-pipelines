@@ -28,11 +28,15 @@ name: 'Reusable — Capability health probe (post-deploy live-connector runtime 
 # CORE lifts only the WORKFLOW CONTRACT: WIF login -> run the probe on the VM ->
 # parse the verdict -> publish the measurement artifact -> alert / gate on breach.
 #
+# Pin the ref to a release commit SHA with the tag in a trailing comment. A
+# floating `@v1` only stays correct while something advances that tag on every
+# release, and nothing does. See
+# governance/standards/supply-chain-pinning.md.
 # Consumers call this from their own nightly + post-deploy workflow with:
 #
 #   jobs:
 #     capability-health:
-#       uses: three-cubes/tc-pipelines/.github/workflows/capability-health-probe.yml@v1
+#       uses: three-cubes/tc-pipelines/.github/workflows/capability-health-probe.yml@<sha> # vX.Y.Z
 #       with:
 #         resource-group: RG-AGENTS-CORE
 #         vm-name: vm-openclaw
