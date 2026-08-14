@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@v1
+      - uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@<sha> # vX.Y.Z
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}

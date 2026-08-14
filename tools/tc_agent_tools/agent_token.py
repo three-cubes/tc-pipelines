@@ -18,10 +18,10 @@ compatible with existing `uvx ... agent-token` consumers.
 Install + use (pinned, single-source — no per-repo copy):
 
     # canonical org App (default), pure token on stdout:
-    export GH_TOKEN="$(uvx --from 'git+https://github.com/three-cubes/tc-pipelines@v1#subdirectory=tools' agent-token)"
+    export GH_TOKEN="$(uvx --from 'git+https://github.com/three-cubes/tc-pipelines@v1.19.1#subdirectory=tools' agent-token)"
 
     # a per-agent App, and set the git author to its [bot] identity in one step:
-    export GH_TOKEN="$(uvx --from 'git+https://github.com/three-cubes/tc-pipelines@v1#subdirectory=tools' agent-token --agent builder --git-config)"
+    export GH_TOKEN="$(uvx --from 'git+https://github.com/three-cubes/tc-pipelines@v1.19.1#subdirectory=tools' agent-token --agent builder --git-config)"
 
     git push / gh pr create / gh pr merge ...   # now act as the App, not a human
 """

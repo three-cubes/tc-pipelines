@@ -9,7 +9,7 @@
 ## How to use it (3 steps)
 
 1. **Add the workflow to your repo.** In your `.github/workflows`, call the shared check instead of writing your own job. The whole Python CI job is the caller YAML below — copy it and adjust the inputs.
-2. **Lock it to a version.** Always pin to `@v1` (the floating major). Never use `@main`. New versions roll out on the org's dependency-cooldown cadence, so you are never surprised by a change you did not ask for.
+2. **Pin it to a release commit.** Every `uses:` names a full commit SHA with the tag in a trailing comment — `@<sha> # vX.Y.Z`. Never `@main`, and never a floating major: `@v1` only stays correct while something advances that tag on every release, and nothing does. You repin deliberately, so no change reaches you unasked. See [`governance/standards/supply-chain-pinning.md`](governance/standards/supply-chain-pinning.md).
 3. **Run the same check locally before you push.** Install the full dev env and run the check the same way CI does:
    ```bash
    uv sync --all-extras --all-groups
@@ -60,7 +60,7 @@ repo-specific is config the tool reads — never baked into the workflow.
 # caller in a three-cubes repo — the WHOLE python job:
 jobs:
   quality:
-    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@v1
+    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@<sha> # vX.Y.Z
     with:
       python-version: "3.12"
       sync-args: "--locked --all-packages"   # workspace repo
@@ -104,7 +104,7 @@ Diff-scoped PR smoke example:
 ```yaml
 jobs:
   quality:
-    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@v1
+    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@<sha> # vX.Y.Z
     with:
       write-changed-files: true
       changed-files-path: .tc-fitness-changed-files
@@ -127,14 +127,14 @@ jobs:
 | Action | Purpose |
 |---|---|
 | [`actions/setup-uv-cached`](actions/setup-uv-cached/action.yml) | The org-standard install step: pinned `astral-sh/setup-uv` (cache on) + `uv sync <sync-args>` + optional `uv pip install --require-hashes` CI tools. |
-| [`actions/pre-commit-cached`](actions/pre-commit-cached/action.yml) | `setup-uv-cached` + `pre-commit/action`, from one source. Self-pins `setup-uv-cached@v1`. |
+| [`actions/pre-commit-cached`](actions/pre-commit-cached/action.yml) | `setup-uv-cached` + `pre-commit/action`, from one source. Self-pins `setup-uv-cached` at a release SHA. |
 | [`actions/license-present`](actions/license-present/action.yml) | Asserts a top-level LICENSE declaring the expected SPDX id — the whole-repo provenance check. Used by `meta-quality-gate.yml`'s license check. |
 
 ---
 
 ## Part 2 — Azure-VM deploy
 
-**The main consumer is [tc-agent-zone](https://github.com/three-cubes/tc-agent-zone)'s `deploy-on-merge` pipeline** — it calls [`azure-vm-deploy.yml@v1`](.github/workflows/azure-vm-deploy.yml) to establish a recovery point → apply → smoke on every merge to `main`. The default recovery point is a host snapshot. The governed container-only exception uses a protected path/configuration backup plus an immutable predecessor image and requires `snapshot-policy=forbidden`, `skip-snapshot=true`, and the verified `container-rollback-receipt-digest`; see [`snapshot-before-apply.md`](governance/standards/snapshot-before-apply.md). Other repos depend on this workflow's inputs, secrets, and permissions staying the same, so do not change them in place: if you need to change them, ship the change behind a major version bump (`@v2`) and leave `@v1` working.
+**The main consumer is [tc-agent-zone](https://github.com/three-cubes/tc-agent-zone)'s `deploy-on-merge` pipeline** — it calls [`azure-vm-deploy.yml`](.github/workflows/azure-vm-deploy.yml) at a release SHA to establish a recovery point → apply → smoke on every merge to `main`. The default recovery point is a host snapshot. The governed container-only exception uses a protected path/configuration backup plus an immutable predecessor image and requires `snapshot-policy=forbidden`, `skip-snapshot=true`, and the verified `container-rollback-receipt-digest`; see [`snapshot-before-apply.md`](governance/standards/snapshot-before-apply.md). Other repos depend on this workflow's inputs, secrets, and permissions staying the same, so do not change them in place: ship a breaking change as a new release and let each consumer repin on its own schedule.
 
 Every Three Cubes repo that deploys to Azure VMs does it the same way: composite actions for the small steps (snapshot, WIF login, apply via run-command, smoke check), one reusable workflow for the end-to-end flow, and a Bicep module for the Azure-side identity. Consumers call these instead of re-implementing them.
 
@@ -153,7 +153,7 @@ az deployment group create \
 # 3. Create the production environment
 gh api -X PUT /repos/three-cubes/YOUR-REPO/environments/production --silent
 
-# 4. Add a thin workflow in your repo that calls azure-vm-deploy.yml@v1 (see docs/MIGRATION.md).
+# 4. Add a thin workflow in your repo that calls azure-vm-deploy.yml at a release SHA (see docs/MIGRATION.md).
 ```
 
 ### Azure deploy surfaces
@@ -192,7 +192,7 @@ The canonical org App is `three-cubes-agent`. **Per-agent Apps** (`tc-agent-buil
 
 ```bash
 # off-CI (local / MCP agent), so an agent raises PRs as the App, never a human:
-export GH_TOKEN="$(uvx --from 'git+https://github.com/three-cubes/tc-pipelines@v1#subdirectory=tools' agent-token)"
+export GH_TOKEN="$(uvx --from 'git+https://github.com/three-cubes/tc-pipelines@v1.19.1#subdirectory=tools' agent-token)"
 git config user.name 'three-cubes-agent[bot]'
 git config user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com'
 # now git push / gh pr create act as the App
@@ -203,7 +203,7 @@ git config user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com
 permissions: { id-token: write, contents: read }
 steps:
   - id: app
-    uses: three-cubes/tc-pipelines/.github/actions/github-app-token@v1
+    uses: three-cubes/tc-pipelines/.github/actions/github-app-token@<sha> # vX.Y.Z
     with:
       client-id:       ${{ vars.AZURE_CLIENT_ID }}
       tenant-id:       ${{ vars.AZURE_TENANT_ID }}
@@ -220,9 +220,9 @@ Prereq: the repo's WIF identity needs Key Vault Secrets User on `kv-tc-agents` �
 
 - **One definition of the check.** The Python check is the `tc-fitness` program + the consuming repo's `[tool.tc_fitness]` config. CI and local both run it.
 - **Config lives in GitHub org/repo variables + secrets and each repo's `[tool.tc_fitness]`, never hardcoded here.** Reusable workflows take only orchestration-level config as `inputs`.
-- **Pin everything.** Third-party actions pinned to a full commit SHA; consumers pin this repo's reusables to `@v1`; this repo self-pins its own composites to `@v1`.
+- **Pin everything to a commit SHA** — third-party actions, this repo's reusables as consumers call them, and this repo's own composites as it self-references them. A floating major is not a pin; `test_uses_ref_pinning` and `test_self_pin_freshness` enforce both halves.
 - **Public, but no secrets.** Zero credentials in this repo.
 
 ## Versioning
 
-Consumers pin `@v1` (the floating major) so changes roll out on the org dependency-cooldown cadence; the `v1.x.y` immutable tags mark exact baselines. Breaking changes go out only through major version bumps. This repo self-pins its own composites to `@v1`.
+Consumers pin the release COMMIT with the tag in a trailing comment (`@<sha> # vX.Y.Z`) and repin deliberately, so nothing rolls out until they move the pin. The `vX.Y.Z` tags mark those baselines. This repo self-pins its own composites the same way, one release behind the tree by construction — see [`governance/standards/supply-chain-pinning.md`](governance/standards/supply-chain-pinning.md).

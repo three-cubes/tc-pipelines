@@ -77,7 +77,7 @@ A consumer workflow looks like this (full example in `docs/MIGRATION.md`):
 ```yaml
 jobs:
   deploy:
-    uses: three-cubes/tc-pipelines/.github/workflows/azure-vm-deploy.yml@v1
+    uses: three-cubes/tc-pipelines/.github/workflows/azure-vm-deploy.yml@<sha> # vX.Y.Z
     permissions:
       contents: read
       id-token: write     # required for WIF
@@ -163,9 +163,10 @@ When a new pattern is needed (e.g. ACR push before deploy, Bicep apply before VM
 
 ## Versioning policy
 
-- `v1`, `v2`, `v3`: major. Breaking changes to inputs/outputs of any composite or reusable workflow.
-- Within a major (`v1.x`): non-breaking improvements. Consumer pinned to `@v1` picks them up.
-- No `latest` tag. Consumers must pin a major — undeclared moving targets break trust.
+- `vX.Y.Z` releases are immutable. A major bump means a breaking change to the inputs, outputs or secrets of a composite or reusable workflow.
+- **Consumers pin the release COMMIT, not the tag** — `@<sha> # vX.Y.Z` — and repin deliberately. Nothing reaches a consumer until it moves its pin, which is what makes a breaking change safe to publish.
+- No floating ref of any kind: not `latest`, not `@main`, not a major like `@v1`. A floating major is only correct while something advances that tag on every release; nothing does, so it silently freezes while the tree beside it moves.
+- A self-pin inside this repo lags the tree by exactly one release, because no commit can pin the tag being cut. So a change to a composite reaches a consumer at the release AFTER the one carrying it — [`supply-chain-pinning.md`](../governance/standards/supply-chain-pinning.md) has the release order that follows from that.
 
 ## Security model
 
