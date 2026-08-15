@@ -8,6 +8,22 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+### Removed
+
+- **The floating `v1` tag is retired.** It resolved to `82e55fa` — 71 commits
+  behind `main` — and nothing advances it on release, so every consumer reading
+  it ran a frozen revision while the tree beside it moved. That is the shape of
+  the empty-rollback-handle incident, and one consumer was executing seven refs
+  through it including identity minting and cloud auth in release paths.
+
+  Those refs are pinned (three-cubes/kairix#788) and no workflow in any org repo
+  resolves through a floating tc-pipelines ref. The commit the tag held is
+  preserved as the immutable `v1.16.0`, so it is recreatable if anything outside
+  the org still needs it.
+
+  Consumers pin the release COMMIT, per
+  [`governance/standards/supply-chain-pinning.md`](governance/standards/supply-chain-pinning.md).
+
 ## [1.19.1] — 2026-08-13
 
 ### Fixed
