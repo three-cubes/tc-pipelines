@@ -80,29 +80,34 @@ This runs `uv lock --check` → `uv sync --locked --all-packages` → hashed `re
 
 ### Cache and venv resolution
 
-**One cache per machine, one venv per project.** A local entrypoint resolves both rather than naming a path:
+**One cache per machine; the venv stays local to the checkout.**
 
 ```bash
-# Cache: uv's own default when it is writable, one shared scratch when it is not.
-# A sandboxed agent that cannot write ~/.cache still works, without every repo
-# minting a full copy of the same wheels.
+# Cache: uv's own default when it is ACTUALLY writable. `mkdir -p` returns 0 on a
+# directory that exists but is read-only — precisely the sandbox case — so the
+# write is probed rather than assumed.
 if [[ -z "${UV_CACHE_DIR:-}" ]]; then
   _uv_home="${XDG_CACHE_HOME:-$HOME/.cache}/uv"
-  if mkdir -p "$_uv_home" 2>/dev/null; then UV_CACHE_DIR="$_uv_home"; else UV_CACHE_DIR=/tmp/uv-cache; fi
+  if mkdir -p "$_uv_home" 2>/dev/null && : >"$_uv_home/.write-probe" 2>/dev/null; then
+    rm -f "$_uv_home/.write-probe"
+    UV_CACHE_DIR="$_uv_home"
+  else
+    UV_CACHE_DIR=/tmp/uv-cache
+  fi
 fi
-
-# Venv: --git-common-dir names the PRIMARY checkout even from a worktree, so
-# worktrees share one venv instead of each building another.
-if [[ -z "${UV_PROJECT_ENVIRONMENT:-}" ]]; then
-  _common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-  [[ -n "$_common" ]] && UV_PROJECT_ENVIRONMENT="$(dirname "$_common")/.venv"
-fi
-export UV_CACHE_DIR UV_PROJECT_ENVIRONMENT
+export UV_CACHE_DIR
 ```
 
-A **per-repo** cache (`/tmp/<repo>-uv-cache`) stores the same wheels once per repo and once per script that names its own — measured on one machine: 47 such directories. **Do not force `UV_LINK_MODE`.** uv hardlinks out of the cache where the filesystem allows and falls back to copying where it does not; pinning `copy` makes every venv a full duplicate of the cache, which is what turns a worktree into ~450MB.
+A **per-repo** cache (`/tmp/<repo>-uv-cache`) stores the same wheels once per repo and once per script that names its own — measured on one machine: 47 such directories.
 
-Both are overridable: export `UV_CACHE_DIR` or `UV_PROJECT_ENVIRONMENT` to relocate, which is how a worktree opts out while it is changing dependencies.
+**Do not redirect `UV_PROJECT_ENVIRONMENT` at a venv outside the checkout.** Pointing a worktree at the primary checkout's venv looks like the tidy answer and is not safe:
+
+- `uv sync` removes extraneous packages by default, so two worktrees running gates concurrently rewrite one environment mid-test — and worktree isolation is exactly how parallel agents are run;
+- `uv pip install` discovers a venv from the cwd and ignores the variable, so a bootstrap in a worktree fails with `No virtual environment found`;
+- a sandboxed worktree may hold a write grant covering only itself, leaving the primary checkout readable but not writable;
+- a worktree of a **bare** repository reports the bare repo as its common dir, so deriving a path from its parent hands every bare repo beside it the same venv.
+
+**Do not force `UV_LINK_MODE`.** uv hardlinks out of the cache where the filesystem allows and falls back to copying where it does not. Pinning `copy` is what makes each venv a full duplicate of the cache — the actual cause of a ~450MB venv per worktree. Leave it unset and a second venv costs little, which is what makes per-checkout venvs affordable.
 
 CI is the exception — an ephemeral runner restores a cache by key, so a per-run path there is correct and these defaults do not apply.
 
