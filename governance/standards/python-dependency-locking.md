@@ -76,7 +76,35 @@ After a fresh clone (or after pulling a change that touched any `pyproject.toml`
 make bootstrap        # alias: make dev-env
 ```
 
-This runs `uv lock --check` → `uv sync --locked --all-packages` → hashed `requirements-ci.txt` → pinned `pnpm install`, mirroring CI exactly. It writes the uv cache to a path **outside `$HOME` and the repo** (e.g. `/tmp/<repo>-uv-cache`) so sandboxed agents — which can't write `~/.cache/uv`, and where the repo is read-only at deploy — can install and test. Override `UV_CACHE_DIR` / `UV_PROJECT_ENVIRONMENT` to relocate.
+This runs `uv lock --check` → `uv sync --locked --all-packages` → hashed `requirements-ci.txt` → pinned `pnpm install`, mirroring CI exactly.
+
+### Cache and venv resolution
+
+**One cache per machine, one venv per project.** A local entrypoint resolves both rather than naming a path:
+
+```bash
+# Cache: uv's own default when it is writable, one shared scratch when it is not.
+# A sandboxed agent that cannot write ~/.cache still works, without every repo
+# minting a full copy of the same wheels.
+if [[ -z "${UV_CACHE_DIR:-}" ]]; then
+  _uv_home="${XDG_CACHE_HOME:-$HOME/.cache}/uv"
+  if mkdir -p "$_uv_home" 2>/dev/null; then UV_CACHE_DIR="$_uv_home"; else UV_CACHE_DIR=/tmp/uv-cache; fi
+fi
+
+# Venv: --git-common-dir names the PRIMARY checkout even from a worktree, so
+# worktrees share one venv instead of each building another.
+if [[ -z "${UV_PROJECT_ENVIRONMENT:-}" ]]; then
+  _common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  [[ -n "$_common" ]] && UV_PROJECT_ENVIRONMENT="$(dirname "$_common")/.venv"
+fi
+export UV_CACHE_DIR UV_PROJECT_ENVIRONMENT
+```
+
+A **per-repo** cache (`/tmp/<repo>-uv-cache`) stores the same wheels once per repo and once per script that names its own — measured on one machine: 47 such directories. **Do not force `UV_LINK_MODE`.** uv hardlinks out of the cache where the filesystem allows and falls back to copying where it does not; pinning `copy` makes every venv a full duplicate of the cache, which is what turns a worktree into ~450MB.
+
+Both are overridable: export `UV_CACHE_DIR` or `UV_PROJECT_ENVIRONMENT` to relocate, which is how a worktree opts out while it is changing dependencies.
+
+CI is the exception — an ephemeral runner restores a cache by key, so a per-run path there is correct and these defaults do not apply.
 
 Manual equivalent (Python only):
 
