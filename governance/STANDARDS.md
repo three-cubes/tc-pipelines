@@ -61,8 +61,9 @@ org has had traces to a violation of one of these four rules:
    **not** a replay: it silently skips import-dependent fitness rules (they need the engine installed)
    and only checks the files you name, while CI runs `--all-files`. Repo-specific hooks that import
    repo code, `tc-fitness`, or tool dependencies must enter the locked uv environment and use a
-   sandbox-safe cache outside `$HOME` (`UV_CACHE_DIR=/tmp/<repo>-uv-cache`, plus
-   `UV_LINK_MODE=copy` when symlinked caches are not portable). Bare `python3` is allowed only for
+   locked uv environment, resolving ONE cache per machine and ONE venv per project
+   (see `standards/python-dependency-locking.md` §Cache and venv resolution — never a
+   per-repo cache, and never a forced `UV_LINK_MODE`). Bare `python3` is allowed only for
    stdlib-only hooks. If it is green locally but red in CI, that is an **O1 parity bug in the local
    loop** (§1, O1) — fix the loop; never paper over it.
 

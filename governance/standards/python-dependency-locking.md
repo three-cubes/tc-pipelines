@@ -76,7 +76,40 @@ After a fresh clone (or after pulling a change that touched any `pyproject.toml`
 make bootstrap        # alias: make dev-env
 ```
 
-This runs `uv lock --check` → `uv sync --locked --all-packages` → hashed `requirements-ci.txt` → pinned `pnpm install`, mirroring CI exactly. It writes the uv cache to a path **outside `$HOME` and the repo** (e.g. `/tmp/<repo>-uv-cache`) so sandboxed agents — which can't write `~/.cache/uv`, and where the repo is read-only at deploy — can install and test. Override `UV_CACHE_DIR` / `UV_PROJECT_ENVIRONMENT` to relocate.
+This runs `uv lock --check` → `uv sync --locked --all-packages` → hashed `requirements-ci.txt` → pinned `pnpm install`, mirroring CI exactly.
+
+### Cache and venv resolution
+
+**One cache per machine; the venv stays local to the checkout.**
+
+```bash
+# Cache: uv's own default when it is ACTUALLY writable. `mkdir -p` returns 0 on a
+# directory that exists but is read-only — precisely the sandbox case — so the
+# write is probed rather than assumed.
+if [[ -z "${UV_CACHE_DIR:-}" ]]; then
+  _uv_home="${XDG_CACHE_HOME:-$HOME/.cache}/uv"
+  if mkdir -p "$_uv_home" 2>/dev/null && : >"$_uv_home/.write-probe" 2>/dev/null; then
+    rm -f "$_uv_home/.write-probe"
+    UV_CACHE_DIR="$_uv_home"
+  else
+    UV_CACHE_DIR=/tmp/uv-cache
+  fi
+fi
+export UV_CACHE_DIR
+```
+
+A **per-repo** cache (`/tmp/<repo>-uv-cache`) stores the same wheels once per repo and once per script that names its own — measured on one machine: 47 such directories.
+
+**Do not redirect `UV_PROJECT_ENVIRONMENT` at a venv outside the checkout.** Pointing a worktree at the primary checkout's venv looks like the tidy answer and is not safe:
+
+- `uv sync` removes extraneous packages by default, so two worktrees running gates concurrently rewrite one environment mid-test — and worktree isolation is exactly how parallel agents are run;
+- `uv pip install` discovers a venv from the cwd and ignores the variable, so a bootstrap in a worktree fails with `No virtual environment found`;
+- a sandboxed worktree may hold a write grant covering only itself, leaving the primary checkout readable but not writable;
+- a worktree of a **bare** repository reports the bare repo as its common dir, so deriving a path from its parent hands every bare repo beside it the same venv.
+
+**Do not force `UV_LINK_MODE`.** uv hardlinks out of the cache where the filesystem allows and falls back to copying where it does not. Pinning `copy` is what makes each venv a full duplicate of the cache — the actual cause of a ~450MB venv per worktree. Leave it unset and a second venv costs little, which is what makes per-checkout venvs affordable.
+
+CI is the exception — an ephemeral runner restores a cache by key, so a per-run path there is correct and these defaults do not apply.
 
 Manual equivalent (Python only):
 

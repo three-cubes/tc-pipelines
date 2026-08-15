@@ -7,7 +7,9 @@
 # needed (e.g. a `tc-fitness run --staged` hook, bicep build, eslint).
 # Hooks that import repo code, tc-fitness, or tool dependencies must run through
 # the locked uv environment with a sandbox-safe cache, for example:
-# `env UV_CACHE_DIR=/tmp/<repo>-uv-cache UV_LINK_MODE=copy uv run --frozen python ...`.
+# `uv run --frozen python ...` — the environment resolves one cache per machine
+# and one venv per project (standards/python-dependency-locking.md); naming a
+# per-repo cache or forcing UV_LINK_MODE here is what that standard forbids.
 # Use bare `python3` only for stdlib-only hooks.
 
 repos:
