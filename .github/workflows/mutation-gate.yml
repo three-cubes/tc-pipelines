@@ -210,7 +210,7 @@ jobs:
       # ── Python deps: uv composite OR editable pip ───────────────────────
       - name: Locked uv install
         if: ${{ inputs.language-partition != 'typescript' && inputs.install-mode == 'uv' }}
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@0ef5ba0fff39ccc9ad60a134d61bda0270a51e47 # v1.19.6
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@9fc61fcb8484764a0f1ef05173595eef4257ed69 # v1.19.7
         with:
           uv-version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}

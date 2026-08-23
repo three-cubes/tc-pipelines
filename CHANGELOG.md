@@ -8,6 +8,24 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.19.8] — 2026-08-23
+
+### Fixed
+
+- **The canonical pre-evaluation-normalisation capability is consumer-ready.**
+  The reusable quality and duration workflows now resolve their updated gate
+  body through the preceding immutable self-pin release, so every downstream
+  repository receives the same normalisation phase.
+
+## [1.19.7] — 2026-08-23
+
+### Added
+
+- **`python-quality-gate.yml` and `pytest-durations-refresh.yml` forward
+  `pre-evaluation-normalize` across every execution lane.** Contract tests lock
+  the input, ordering, and local/CI parity requirement; all internal action and
+  workflow pins advance together to preserve the one-release self-pin bound.
+
 ## [1.19.6] — 2026-08-23
 
 ### Fixed
