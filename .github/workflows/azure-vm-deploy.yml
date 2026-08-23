@@ -234,7 +234,7 @@ jobs:
           PY
 
       - name: WIF Azure login
-        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@0541f75d6a3491ff83e643bc752d9722f17d865e # v1.19.1
+        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@59a069b7a108938c852d4ccfec651691ab0d84ea # v1.19.2
         with:
           client-id: ${{ inputs.azure-client-id }}
           tenant-id: ${{ inputs.azure-tenant-id }}
@@ -391,7 +391,7 @@ jobs:
       - name: Snapshot all VMs
         id: snapshot
         if: ${{ inputs.snapshot-policy != 'forbidden' }}
-        uses: three-cubes/tc-pipelines/.github/actions/snapshot-azure-vm-disk@0541f75d6a3491ff83e643bc752d9722f17d865e # v1.19.1
+        uses: three-cubes/tc-pipelines/.github/actions/snapshot-azure-vm-disk@59a069b7a108938c852d4ccfec651691ab0d84ea # v1.19.2
         with:
           resource-group: ${{ inputs.resource-group }}
           vm-names: ${{ steps.parse.outputs.vm-list }}

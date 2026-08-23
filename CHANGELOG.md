@@ -8,6 +8,24 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.19.3] — 2026-08-23
+
+### Fixed
+
+- **The hash-locked CI tool-install boundary advances one composite level.** All 25
+  internal `uses:` self-pins now name `v1.19.2`, the release containing the
+  `setup-uv-cached` `--no-config` correction. A second self-pin hop is required
+  before a consumer can execute the updated nested `python-gate-body` action.
+
+## [1.19.2] — 2026-08-23
+
+### Fixed
+
+- **Hash-locked CI-only tool installs are isolated from consumer project
+  overrides.** `setup-uv-cached` now invokes `uv pip install` with
+  `--no-config`, so a consumer's root `pyproject.toml` cannot inject unhashed
+  dependencies into the hash-enforced CI requirements install.
+
 ### Removed
 
 - **The floating `v1` tag is retired.** It resolved to `82e55fa` — 71 commits
