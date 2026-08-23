@@ -8,6 +8,17 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.19.9] — 2026-08-23
+
+### Fixed
+
+- **Pre-evaluation normalisation now preserves one source state through every
+  evaluator.** The reusable gate re-syncs after normalisation, restores
+  hash-locked CI tools, includes normalizer-only paths in diff-scoped runs, and
+  recreates the same Python/Node checkout before coverage XML generation or the
+  changed-line floor. This is the immutable action source for the following
+  self-pin release; consumers receive it from `v1.19.10`.
+
 ## [1.19.8] — 2026-08-23
 
 ### Fixed
