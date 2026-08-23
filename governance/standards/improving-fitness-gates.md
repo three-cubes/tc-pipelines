@@ -27,6 +27,25 @@ The pin bump touches the gate's own definition, so it is a control-plane change:
 
 Exercise the caller before merge: a change-detection filter can gate a `uses:` job off on the very PR that changes it, so a broken `workflow_call` contract can reach `main` and fail at workflow startup. Force a triggering change in the same PR.
 
+### Pre-evaluation normalisation
+
+`python-quality-gate.yml` exposes `pre-evaluation-normalize` for deterministic,
+safe source repairs that must happen before any evaluator reads the checkout.
+It runs after the requested Python/Node toolchains are installed and before
+changed-file capture, repo-specific `pre-steps`, and `tc-fitness run`. Typical
+usage is a repo-owned script that runs safe linter fixes and formatting, such as
+Ruff's `--fix` mode. The input is forwarded through every unsharded, sharded,
+and non-shard lane, plus `pytest-durations-refresh.yml`, so no quality lane or
+timing map can observe a different source state.
+
+The command is deliberately opt-in and empty by default. It may modify only the
+runner checkout; it must not deploy, write remotely, use credentials, or fetch
+from the network. A consumer that opts in must invoke the exact same
+repo-owned command in `make check` before its local `tc-fitness run`, and carry
+a contract test that locks the local command to the reusable input. This keeps
+the fast local loop and every CI lane aligned without making a formatter choice
+an organisation-wide mandatory dependency.
+
 ## Every repo's harness must reference this canon
 
 The `harness_canon_reference` gate (tc-fitness v0.11.0) fails any repo whose harness does not reference [`governance/STANDARDS.md`](../STANDARDS.md) — the canonical engineering-standards index. Keep that reference in place so an agent editing a gate always lands on the canonical home, not a repo-local fork.

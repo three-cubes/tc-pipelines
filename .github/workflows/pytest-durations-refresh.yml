@@ -112,6 +112,15 @@ on:
         type: string
         required: false
         default: ""
+      pre-evaluation-normalize:
+        description: >-
+          Deterministic safe source-normalisation command, forwarded to the
+          shared gate body before the timed suite. Must match the consumer's
+          python-quality-gate input so the durations map times the same source
+          state as the quality gate. Empty string skips the phase.
+        type: string
+        required: false
+        default: ""
       pre-steps:
         description: >-
           Shell run BEFORE the suite, matching what the consumer's gate call
@@ -157,7 +166,7 @@ jobs:
           exit 1
 
       - name: Run the suite and store durations
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@6cc90f35b855a589a3bb4b08d145b1ecebab5b95 # v1.19.3 # SHA pin (SGO-266)
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@0ef5ba0fff39ccc9ad60a134d61bda0270a51e47 # v1.19.6 # SHA pin (SGO-266)
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -168,6 +177,7 @@ jobs:
           write-changed-files: false
           changed-files-path: ""
           run-no-attribution: false
+          pre-evaluation-normalize: ${{ inputs.pre-evaluation-normalize }}
           # The composite checks out before it runs pre-steps, so clearing the
           # map has to happen HERE — a step ahead of the composite would be undone
           # by that checkout. A consumer commits its map, so the file is on disk
