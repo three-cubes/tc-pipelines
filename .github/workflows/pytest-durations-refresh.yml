@@ -157,7 +157,7 @@ jobs:
           exit 1
 
       - name: Run the suite and store durations
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@59a069b7a108938c852d4ccfec651691ab0d84ea # v1.19.2 # SHA pin (SGO-266)
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@6cc90f35b855a589a3bb4b08d145b1ecebab5b95 # v1.19.3 # SHA pin (SGO-266)
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}

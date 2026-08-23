@@ -8,6 +8,15 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.19.4] — 2026-08-23
+
+### Fixed
+
+- **The hash-locked CI tool-install boundary now reaches consumers.** All 25
+  internal `uses:` self-pins now name `v1.19.3`, whose `python-gate-body`
+  action loads the corrected `setup-uv-cached` install boundary from `v1.19.2`.
+  Consumers take the correction from the tag cut from this commit.
+
 ## [1.19.3] — 2026-08-23
 
 ### Fixed
