@@ -8,6 +8,26 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.19.6] — 2026-08-23
+
+### Fixed
+
+- **The pre-evaluation-normalisation composite release is now a documented,
+  consumer-safe trust root.** `v1.19.5` introduced the action seam but was
+  tagged before its changelog entry was committed. It remains immutable; this
+  successor records the release metadata before its tag is cut and is the
+  revision that internal callers may pin.
+
+## [1.19.5] — 2026-08-23
+
+### Added
+
+- **`python-gate-body` accepts a first-class pre-evaluation normalisation
+  command.** The optional, repository-owned command runs only after requested
+  toolchains are installed and before changed-file capture, consumer pre-steps,
+  and `tc-fitness run`. It is for deterministic local mechanical repairs, never
+  credentials, network operations, deployment, or other remote writes.
+
 ## [1.19.4] — 2026-08-23
 
 ### Fixed
