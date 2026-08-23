@@ -9,7 +9,7 @@ description: |
   aren't enough).
 
   Typical usage:
-    - uses: three-cubes/tc-pipelines/.github/actions/apply-on-vm-via-runcommand@9fc61fcb8484764a0f1ef05173595eef4257ed69 # v1.19.7
+    - uses: three-cubes/tc-pipelines/.github/actions/apply-on-vm-via-runcommand@a7d52df86fae159973fec718c8bf2bf7834bf293 # v1.19.8
       with:
         resource-group: RG-AGENTS-CORE
         vm-name: vm-openclaw
