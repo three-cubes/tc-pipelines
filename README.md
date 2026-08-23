@@ -126,7 +126,7 @@ jobs:
 
 | Action | Purpose |
 |---|---|
-| [`actions/setup-uv-cached`](actions/setup-uv-cached/action.yml) | The org-standard install step: pinned `astral-sh/setup-uv` (cache on) + `uv sync <sync-args>` + optional `uv pip install --require-hashes` CI tools. |
+| [`actions/setup-uv-cached`](actions/setup-uv-cached/action.yml) | The org-standard install step: pinned `astral-sh/setup-uv` (cache on) + `uv sync <sync-args>` + optional `uv pip install --no-config --require-hashes` CI tools. |
 | [`actions/pre-commit-cached`](actions/pre-commit-cached/action.yml) | `setup-uv-cached` + `pre-commit/action`, from one source. Self-pins `setup-uv-cached` at a release SHA. |
 | [`actions/license-present`](actions/license-present/action.yml) | Asserts a top-level LICENSE declaring the expected SPDX id — the whole-repo provenance check. Used by `meta-quality-gate.yml`'s license check. |
 
