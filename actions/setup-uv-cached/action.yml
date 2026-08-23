@@ -49,4 +49,7 @@ runs:
       if: inputs.ci-requirements != ''
       shell: bash
       run: |
-        uv pip install --require-hashes --only-binary :all: -r "${{ inputs.ci-requirements }}"
+        # `uv sync` above has already resolved the project under its checked-in
+        # configuration. This independent, hash-locked tool surface must not
+        # re-apply project overrides as unhashed requirements.
+        uv pip install --no-config --require-hashes --only-binary :all: -r "${{ inputs.ci-requirements }}"
