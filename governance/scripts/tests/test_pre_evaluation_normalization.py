@@ -57,6 +57,43 @@ def test_gate_body_runs_normalization_before_any_evaluation() -> None:
     )
     assert names.index("Pre-evaluation normalization") < names.index("Pre-steps")
     assert names.index("Pre-evaluation normalization") < names.index("Fitness gate")
+    assert names.index("Pre-evaluation normalization") < names.index(
+        "Re-sync normalized project"
+    )
+    assert names.index("Re-sync normalized project") < names.index(
+        "Restore CI tools after normalization sync"
+    )
+
+
+def test_changed_file_capture_includes_normalizer_worktree_changes() -> None:
+    body_text = BODY.read_text(encoding="utf-8")
+
+    assert 'git diff --name-only "$base...$head"' in body_text
+    assert "git diff --name-only\n" in body_text
+    assert "git diff --name-only --cached" in body_text
+    assert "git ls-files --others --exclude-standard" in body_text
+    assert 'LC_ALL=C sort -u > "$CHANGED_FILES_PATH"' in body_text
+
+
+def test_coverage_combine_recreates_the_normalized_tree() -> None:
+    gate = _load(GATE)
+    steps = gate["jobs"]["coverage-combine"]["steps"]
+    names = [step.get("name") for step in steps]
+
+    normalizer = next(
+        step for step in steps if step.get("name") == "Pre-evaluation normalization"
+    )
+    assert normalizer["run"] == f"${{{{ inputs.{INPUT} }}}}"
+    assert names.index("Locked uv install") < names.index(
+        "Pre-evaluation normalization"
+    )
+    assert names.index("pnpm install") < names.index("Pre-evaluation normalization")
+    assert names.index("Pre-evaluation normalization") < names.index(
+        "Re-sync normalized project"
+    )
+    assert names.index("Re-sync normalized project") < names.index(
+        "Combine shard coverage → XML"
+    )
 
 
 def test_every_quality_lane_and_duration_refresh_forward_normalization() -> None:

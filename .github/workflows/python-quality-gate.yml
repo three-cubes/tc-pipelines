@@ -464,6 +464,38 @@ jobs:
           python-version: ${{ inputs.python-version }}
           sync-args: ${{ inputs.sync-args }}
           ci-requirements: ${{ inputs.ci-requirements-path }}
+      # The coverage data was produced against the normalised source tree in
+      # each quality lane. Recreate that exact tree here before coverage xml
+      # maps executed lines back to source and before the new-code floor reads
+      # the report.
+      - name: Set up pnpm
+        if: ${{ inputs.pre-evaluation-normalize != '' && inputs.run-node }}
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: ${{ inputs.pnpm-version }}
+      - name: Set up Node
+        if: ${{ inputs.pre-evaluation-normalize != '' && inputs.run-node }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: ${{ inputs.node-version-file }}
+          cache: pnpm
+      - name: pnpm install
+        if: ${{ inputs.pre-evaluation-normalize != '' && inputs.run-node }}
+        shell: bash
+        run: pnpm install ${{ inputs.pnpm-install-args }}
+      - name: Pre-evaluation normalization
+        if: ${{ inputs.pre-evaluation-normalize != '' }}
+        shell: bash
+        run: ${{ inputs.pre-evaluation-normalize }}
+      - name: Re-sync normalized project
+        if: ${{ inputs.pre-evaluation-normalize != '' }}
+        shell: bash
+        run: uv sync ${{ inputs.sync-args }}
+      - name: Restore CI tools after normalization sync
+        if: ${{ inputs.pre-evaluation-normalize != '' && inputs.ci-requirements-path != '' }}
+        shell: bash
+        run: |
+          uv pip install --no-config --require-hashes --only-binary :all: -r "${{ inputs.ci-requirements-path }}"
       - name: Download shard coverage
         if: ${{ inputs.pytest-shards > 1 }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0

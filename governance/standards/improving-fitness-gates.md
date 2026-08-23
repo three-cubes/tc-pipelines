@@ -38,6 +38,15 @@ Ruff's `--fix` mode. The input is forwarded through every unsharded, sharded,
 and non-shard lane, plus `pytest-durations-refresh.yml`, so no quality lane or
 timing map can observe a different source state.
 
+The reusable gate re-syncs the Python project after this command so
+non-editable installs cannot execute a stale site-packages copy. Its
+diff-scoped changed-file handoff unions the committed range with modified,
+staged, and untracked checkout paths created by the normalizer. When coverage
+combining or a changed-line floor is enabled, the coverage job provisions the
+same optional Node surface, repeats the normalizer, and re-syncs before it
+generates or scores coverage XML. These are part of the reusable contract, not
+consumer conventions.
+
 The command is deliberately opt-in and empty by default. It may modify only the
 runner checkout; it must not deploy, write remotely, use credentials, or fetch
 from the network. A consumer that opts in must invoke the exact same
