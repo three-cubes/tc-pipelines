@@ -45,7 +45,7 @@ jobs:
           # clone has none of those objects, so they would skip rather than check.
           fetch-depth: 0
       - name: Set up uv + Python
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@6cc90f35b855a589a3bb4b08d145b1ecebab5b95 # v1.19.3
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@a7d52df86fae159973fec718c8bf2bf7834bf293 # v1.19.8
         with:
           python-version: "3.12"
       - name: Install the harness dependencies

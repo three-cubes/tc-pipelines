@@ -68,8 +68,12 @@ def _calls() -> list[tuple[str, str, dict, dict]]:
             match = LOCAL_REUSABLE.match(str(job.get("uses", "")))
             if match and match.group(1) in reusables:
                 found.append(
-                    (path.name, f"{job_name} -> {match.group(1)}",
-                     reusables[match.group(1)], job.get("with") or {})
+                    (
+                        path.name,
+                        f"{job_name} -> {match.group(1)}",
+                        reusables[match.group(1)],
+                        job.get("with") or {},
+                    )
                 )
             for step in job.get("steps") or []:
                 if not isinstance(step, dict):
@@ -77,8 +81,12 @@ def _calls() -> list[tuple[str, str, dict, dict]]:
                 match = LOCAL_ACTION.match(str(step.get("uses", "")))
                 if match and match.group(1) in actions:
                     found.append(
-                        (path.name, f"{job_name} -> actions/{match.group(1)}",
-                         actions[match.group(1)], step.get("with") or {})
+                        (
+                            path.name,
+                            f"{job_name} -> actions/{match.group(1)}",
+                            actions[match.group(1)],
+                            step.get("with") or {},
+                        )
                     )
     return found
 
@@ -103,7 +111,8 @@ def test_call_passes_every_required_input(
     source: str, label: str, declared: dict, passed: dict
 ) -> None:
     required = {
-        name for name, spec in declared.items()
+        name
+        for name, spec in declared.items()
         if spec.get("required") and "default" not in spec
     }
     missing = sorted(required - set(passed))
@@ -136,7 +145,9 @@ def _gate_body_calls() -> dict[str, dict]:
     calls = {}
     for job_name, job in (document.get("jobs") or {}).items():
         for step in (job.get("steps") or []) if isinstance(job, dict) else []:
-            if isinstance(step, dict) and "python-gate-body" in str(step.get("uses", "")):
+            if isinstance(step, dict) and "python-gate-body" in str(
+                step.get("uses", "")
+            ):
                 calls[job_name] = step.get("with") or {}
     return calls
 
@@ -146,6 +157,7 @@ def _gate_body_calls() -> dict[str, dict]:
 # same fan-in context. Inputs a lane sets deliberately per-lane (tier, sharding,
 # coverage upload, the attribution scan) are excluded.
 CONSUMER_FORWARDED = (
+    "pre-evaluation-normalize",
     "pre-steps",
     "post-steps",
     "python-version",

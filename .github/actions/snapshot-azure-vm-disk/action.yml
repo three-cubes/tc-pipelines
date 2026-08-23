@@ -15,7 +15,7 @@ description: |
   the consuming repo (see docs/COST-OPTIMIZATION.md §Snapshot retention).
 
   Usage:
-    - uses: three-cubes/tc-pipelines/.github/actions/snapshot-azure-vm-disk@6cc90f35b855a589a3bb4b08d145b1ecebab5b95 # v1.19.3
+    - uses: three-cubes/tc-pipelines/.github/actions/snapshot-azure-vm-disk@a7d52df86fae159973fec718c8bf2bf7834bf293 # v1.19.8
       with:
         resource-group: RG-AGENTS-CORE
         vm-names: 'vm-openclaw,vm-hermes-poc'

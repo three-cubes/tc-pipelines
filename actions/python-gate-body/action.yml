@@ -26,6 +26,17 @@ inputs:
     required: true
   run-no-attribution:
     required: true
+  pre-evaluation-normalize:
+    description: >-
+      Optional repo-owned command that applies deterministic, safe source
+      normalisation after all requested toolchains are installed and before
+      any evaluation, changed-file capture, or `tc-fitness run`. The gate
+      re-syncs the project afterwards so non-editable installs execute the
+      normalised tree. Empty skips the phase. Use this for mechanical fixes
+      such as `ruff check --fix` and `ruff format`; do not use it for network,
+      credential, deploy, or remote write operations. The consumer's local
+      `make check` must invoke the same command before its fitness gate.
+    required: true
   pre-steps:
     required: true
   post-steps:
@@ -90,7 +101,7 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       # install` has run that includes every `node_modules` tree. Measured on
       # a consumer: 79s here, against 1.1s in a job that installs uv first.
     - name: Locked uv install
-      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@6cc90f35b855a589a3bb4b08d145b1ecebab5b95 # v1.19.3
+      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@a7d52df86fae159973fec718c8bf2bf7834bf293 # v1.19.8
       with:
         uv-version: ${{ inputs.uv-version }}
         python-version: ${{ inputs.python-version }}
@@ -113,6 +124,33 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       if: inputs.run-node == 'true'
       shell: bash
       run: pnpm install ${{ inputs.pnpm-install-args }}
+
+    # ── Deterministic source normalization (opt-in) ─────────────────────
+    # This is deliberately distinct from pre-steps: its contract is to make
+    # safe, mechanical repairs before *any* evaluator observes the tree. It is
+    # forwarded through every quality lane and the duration-refresh reusable
+    # so an unsharded, sharded, or timing run cannot see a different source.
+    - name: Pre-evaluation normalization
+      if: inputs.pre-evaluation-normalize != ''
+      shell: bash
+      run: ${{ inputs.pre-evaluation-normalize }}
+
+    # `--no-editable` installs the project into site-packages. Re-sync after a
+    # normalizer changes source so pytest and source-based evaluators cannot
+    # observe different trees. A normalizer may also update generated package
+    # inputs without using --no-editable, so this applies to every opt-in run.
+    - name: Re-sync normalized project
+      if: inputs.pre-evaluation-normalize != ''
+      shell: bash
+      run: uv sync ${{ inputs.sync-args }}
+
+    # `uv sync` can remove CI-only tools installed by setup-uv-cached. Restore
+    # that hash-locked surface before the evaluator runs.
+    - name: Restore CI tools after normalization sync
+      if: inputs.pre-evaluation-normalize != '' && inputs.ci-requirements-path != ''
+      shell: bash
+      run: |
+        uv pip install --no-config --require-hashes --only-binary :all: -r "${{ inputs.ci-requirements-path }}"
 
     # ── Diff-scoped smoke support (opt-in) ─────────────────────────────
     - name: Write changed-file list
@@ -162,7 +200,15 @@ runs:  # ${{ inputs.probe-undeclared-input }}
         ensure_commit "$base"
         ensure_commit "$head"
         mkdir -p "$(dirname -- "$CHANGED_FILES_PATH")"
-        git diff --name-only "$base...$head" > "$CHANGED_FILES_PATH"
+        # The normalizer has already run. Include its tracked and untracked
+        # changes in addition to the commit range so a diff-scoped evaluator
+        # cannot skip a source path it will actually inspect.
+        {
+          git diff --name-only "$base...$head"
+          git diff --name-only
+          git diff --name-only --cached
+          git ls-files --others --exclude-standard
+        } | LC_ALL=C sort -u > "$CHANGED_FILES_PATH"
         count="$(wc -l < "$CHANGED_FILES_PATH" | tr -d ' ')"
         echo "changed-files: wrote $count path(s) to $CHANGED_FILES_PATH."
 

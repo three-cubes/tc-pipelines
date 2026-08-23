@@ -105,6 +105,17 @@ on:
           title/body are scanned.
         type: boolean
         default: true
+      pre-evaluation-normalize:
+        description: >-
+          Optional repo-owned deterministic source-normalisation command run
+          after the requested Python and Node toolchains are installed, before
+          changed-file capture or any evaluator. Use only safe mechanical
+          repairs (for example `ruff check --fix` and `ruff format`), never a
+          deploy, remote write, credential action, or network fetch. The same
+          command must run in the consumer's local `make check` before
+          `tc-fitness run`. Empty string preserves the prior behaviour.
+        type: string
+        default: ""
       pre-steps:
         description: >-
           Optional bash run before `tc-fitness run`, for repo-specific
@@ -290,7 +301,7 @@ jobs:
         # Immutable SHA pin (SGO-280 shipped the action to main; its bootstrap
         # branch ref was left dangling after the branch was deleted, breaking the
         # self-test — SGO-303 repins it as the release step intended).
-        uses: three-cubes/tc-pipelines/actions/detect-code-changes@6cc90f35b855a589a3bb4b08d145b1ecebab5b95 # v1.19.3
+        uses: three-cubes/tc-pipelines/actions/detect-code-changes@a7d52df86fae159973fec718c8bf2bf7834bf293 # v1.19.8
         with:
           code-change-filter: ${{ inputs.code-change-filter }}
           fetch-depth: ${{ inputs.fetch-depth }}
@@ -307,7 +318,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run the gate (unsharded)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@6cc90f35b855a589a3bb4b08d145b1ecebab5b95 # v1.19.3
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@a7d52df86fae159973fec718c8bf2bf7834bf293 # v1.19.8
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -318,6 +329,7 @@ jobs:
           write-changed-files: ${{ inputs.write-changed-files }}
           changed-files-path: ${{ inputs.changed-files-path }}
           run-no-attribution: ${{ inputs.run-no-attribution }}
+          pre-evaluation-normalize: ${{ inputs.pre-evaluation-normalize }}
           pre-steps: ${{ inputs.pre-steps }}
           post-steps: ${{ inputs.post-steps }}
           run-node: ${{ inputs.run-node }}
@@ -369,7 +381,7 @@ jobs:
         shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Run the gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@6cc90f35b855a589a3bb4b08d145b1ecebab5b95 # v1.19.3
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@a7d52df86fae159973fec718c8bf2bf7834bf293 # v1.19.8
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -380,6 +392,7 @@ jobs:
           write-changed-files: ${{ inputs.write-changed-files }}
           changed-files-path: ${{ inputs.changed-files-path }}
           run-no-attribution: ${{ inputs.run-no-attribution }}
+          pre-evaluation-normalize: ${{ inputs.pre-evaluation-normalize }}
           pre-steps: ${{ inputs.pre-steps }}
           post-steps: ${{ inputs.post-steps }}
           run-node: ${{ inputs.run-node }}
@@ -445,12 +458,44 @@ jobs:
           git fetch --no-tags origin "+refs/heads/${base}:refs/remotes/origin/${base}" || \
             echo "::warning::could not fetch ${BASE_REF}; the new-code floor may soft-pass."
       - name: Locked uv install
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@6cc90f35b855a589a3bb4b08d145b1ecebab5b95 # v1.19.3
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@a7d52df86fae159973fec718c8bf2bf7834bf293 # v1.19.8
         with:
           uv-version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}
           sync-args: ${{ inputs.sync-args }}
           ci-requirements: ${{ inputs.ci-requirements-path }}
+      # The coverage data was produced against the normalised source tree in
+      # each quality lane. Recreate that exact tree here before coverage xml
+      # maps executed lines back to source and before the new-code floor reads
+      # the report.
+      - name: Set up pnpm
+        if: ${{ inputs.pre-evaluation-normalize != '' && inputs.run-node }}
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: ${{ inputs.pnpm-version }}
+      - name: Set up Node
+        if: ${{ inputs.pre-evaluation-normalize != '' && inputs.run-node }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: ${{ inputs.node-version-file }}
+          cache: pnpm
+      - name: pnpm install
+        if: ${{ inputs.pre-evaluation-normalize != '' && inputs.run-node }}
+        shell: bash
+        run: pnpm install ${{ inputs.pnpm-install-args }}
+      - name: Pre-evaluation normalization
+        if: ${{ inputs.pre-evaluation-normalize != '' }}
+        shell: bash
+        run: ${{ inputs.pre-evaluation-normalize }}
+      - name: Re-sync normalized project
+        if: ${{ inputs.pre-evaluation-normalize != '' }}
+        shell: bash
+        run: uv sync ${{ inputs.sync-args }}
+      - name: Restore CI tools after normalization sync
+        if: ${{ inputs.pre-evaluation-normalize != '' && inputs.ci-requirements-path != '' }}
+        shell: bash
+        run: |
+          uv pip install --no-config --require-hashes --only-binary :all: -r "${{ inputs.ci-requirements-path }}"
       - name: Download shard coverage
         if: ${{ inputs.pytest-shards > 1 }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -585,7 +630,7 @@ jobs:
           echo "::error::shard-tier is set but non-shard-tier is empty — every step outside the shard tier would drop out of the gate while it still reported green. fix: set non-shard-tier to the tier holding those steps. next: re-run."
           exit 1
       - name: Run the gate (non-shard tier)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@6cc90f35b855a589a3bb4b08d145b1ecebab5b95 # v1.19.3
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@a7d52df86fae159973fec718c8bf2bf7834bf293 # v1.19.8
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -600,6 +645,7 @@ jobs:
           # starts a service in pre-steps would otherwise have this lane run its
           # checks against an unprepared environment, while the shard lanes ran
           # against a prepared one.
+          pre-evaluation-normalize: ${{ inputs.pre-evaluation-normalize }}
           pre-steps: ${{ inputs.pre-steps }}
           post-steps: ${{ inputs.post-steps }}
           run-node: ${{ inputs.run-node }}
