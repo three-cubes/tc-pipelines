@@ -8,6 +8,16 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.19.10] — 2026-08-23
+
+### Fixed
+
+- **The v1.19.9 source-state remediation is now consumer-reachable.** Every
+  internal reusable workflow and composite action self-pin advances to the
+  immutable `v1.19.9` commit, so downstream callers of this release execute
+  the corrected normalisation, coverage, changed-file, and non-editable
+  install paths.
+
 ## [1.19.9] — 2026-08-23
 
 ### Fixed
