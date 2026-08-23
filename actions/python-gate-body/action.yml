@@ -26,6 +26,16 @@ inputs:
     required: true
   run-no-attribution:
     required: true
+  pre-evaluation-normalize:
+    description: >-
+      Optional repo-owned command that applies deterministic, safe source
+      normalisation after all requested toolchains are installed and before
+      any evaluation, changed-file capture, or `tc-fitness run`. Empty skips
+      the phase. Use this for mechanical fixes such as `ruff check --fix` and
+      `ruff format`; do not use it for network, credential, deploy, or remote
+      write operations. The consumer's local `make check` must invoke the
+      same command before its fitness gate.
+    required: true
   pre-steps:
     required: true
   post-steps:
@@ -113,6 +123,16 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       if: inputs.run-node == 'true'
       shell: bash
       run: pnpm install ${{ inputs.pnpm-install-args }}
+
+    # ── Deterministic source normalization (opt-in) ─────────────────────
+    # This is deliberately distinct from pre-steps: its contract is to make
+    # safe, mechanical repairs before *any* evaluator observes the tree. It is
+    # forwarded through every quality lane and the duration-refresh reusable
+    # so an unsharded, sharded, or timing run cannot see a different source.
+    - name: Pre-evaluation normalization
+      if: inputs.pre-evaluation-normalize != ''
+      shell: bash
+      run: ${{ inputs.pre-evaluation-normalize }}
 
     # ── Diff-scoped smoke support (opt-in) ─────────────────────────────
     - name: Write changed-file list
