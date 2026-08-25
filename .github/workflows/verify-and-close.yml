@@ -473,7 +473,7 @@ jobs:
         # The azure-* inputs are typically vars.AZURE_CLIENT_ID / _TENANT_ID /
         # _SUBSCRIPTION_ID on the caller. Requires `id-token: write`.
         if: inputs.linear-key-vault != '' && steps.resolve.outputs.resolved == 'true'
-        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@522f93cd6682c5d5c9fe7132bc7b1085aaa9b28b # v1.19.9
+        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@f45821518462ed0956398e29529067a1aaa291ca # v1.19.10
         with:
           client-id: ${{ inputs.azure-client-id }}
           tenant-id: ${{ inputs.azure-tenant-id }}
