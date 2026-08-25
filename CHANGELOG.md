@@ -8,6 +8,16 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [1.19.11] — 2026-08-26
+
+### Fixed
+
+- **Protected Azure VM applies now retain an actionable, secret-safe failure
+  receipt.** The reusable deployment workflow streams only a caller-declared,
+  bounded diagnostic code together with the exact remote exit proof; it never
+  persists arbitrary protected output. Invalid diagnostic configuration is
+  rejected before Azure login, preflight, or snapshot work.
+
 ## [1.19.10] — 2026-08-23
 
 ### Fixed
