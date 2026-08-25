@@ -119,6 +119,7 @@ def test_protected_parameter_contract_is_fail_closed_and_bounded() -> None:
         "snapshot-policy=forbidden requires a verified container rollback receipt"
         in script
     )
+    assert "protected-diagnostic-prefix must be an uppercase ASCII prefix" in _apply_step()["run"]
     steps = _workflow()["jobs"]["deploy"]["steps"]
     assert steps.index(_validation_step()) < next(
         index
@@ -180,6 +181,26 @@ def test_apply_requires_a_unique_remote_exit_token() -> None:
     assert 'managed_apply_create "$VM" "$RUN_COMMAND_NAME" "$REMOTE_SCRIPT"' in apply
     assert "remote_rc=\\$?" in apply
     assert any("exit" in line and "remote_rc" in line for line in apply.splitlines())
+    assert "classified remote exit {remote_exit}" in apply
+
+
+def test_protected_apply_can_surface_only_a_bounded_safe_diagnostic() -> None:
+    """Secret-bearing Run Commands retain one validated diagnostic code."""
+
+    workflow = _workflow()
+    protected_input = workflow["on"]["workflow_call"]["inputs"][
+        "protected-diagnostic-prefix"
+    ]
+    apply = _apply_step()["run"]
+
+    assert protected_input["default"] == ""
+    assert "PROTECTED_DIAGNOSTIC_PREFIX" in _apply_step()["env"]
+    assert "^[A-Z][A-Z0-9_]{2,63}=$" in apply
+    assert "[a-z0-9][a-z0-9-]{0,79}" in apply
+    assert "remote_log=$(mktemp /run/tc-pipelines-apply-output.XXXXXXXX)" in apply
+    assert 'rm -f -- "$remote_log"' in apply
+    assert "MANAGED_DIAGNOSTICS" in apply
+    assert "sort -u" in apply
 
 
 def test_token_apply_uses_unique_managed_command_with_separate_protected_parameters() -> (
@@ -386,7 +407,7 @@ def test_managed_failure_preserves_apply_output_gate_and_legacy_output_order() -
     assert 'MANAGED_FAILURE="managed command cleanup failed' in script[cleanup:output]
 
 
-def test_managed_output_is_reduced_to_the_exit_proof_before_logs_or_outputs() -> None:
+def test_managed_output_keeps_only_validated_diagnostics_and_exit_proof() -> None:
     """Protected runs never surface arbitrary instanceView output."""
 
     script = _apply_step()["run"]
@@ -397,7 +418,9 @@ def test_managed_output_is_reduced_to_the_exit_proof_before_logs_or_outputs() ->
     assert extract < reduce < output
     assert "instanceView.output" in script[extract:reduce]
     assert "instanceView.error" in script[extract:reduce]
-    assert "REMOTE_GROUP_END=') >/dev/null 2>&1'" in script
+    assert "REMOTE_GROUP_END=') >\"$remote_log\" 2>&1'" in script
+    assert "REMOTE_DIAGNOSTIC_PREFIX" in script
+    assert "MANAGED_DIAGNOSTICS" in script
     assert "MSG=$(jq -r" not in script
 
 
@@ -477,8 +500,12 @@ case "$op" in
     fi
     token=$(protected_values)
     marker=$(<"$FAKE_AZ_STATE_DIR/remote-exit-marker")
+    diagnostic=""
+    if [[ -n "${PROTECTED_DIAGNOSTIC_PREFIX:-}" ]]; then
+      diagnostic="\n${PROTECTED_DIAGNOSTIC_PREFIX}stage-input-invalid"
+    fi
     echo 'benign show warning' >&2
-    jq -cn --arg token "$token" --arg marker "$marker" '{instanceView:{executionState:"Succeeded",exitCode:0,output:("result-" + $token + "\n" + $marker + "=0"),error:""}}'
+    jq -cn --arg token "$token" --arg marker "$marker" --arg diagnostic "$diagnostic" '{instanceView:{executionState:"Succeeded",exitCode:0,output:("result-" + $token + "\n" + $marker + "=0" + $diagnostic),error:""}}'
     ;;
   delete)
     echo deleted
@@ -515,6 +542,7 @@ def _run_apply(
     *,
     token: str,
     runtime_secret: str = "",
+    diagnostic_prefix: str = "",
     apply_script: str = "true",
     legacy_exit: str = "0",
 ) -> subprocess.CompletedProcess[str]:
@@ -528,6 +556,7 @@ def _run_apply(
             "FAKE_AZ_LEGACY_EXIT": legacy_exit,
             "GHCR_ACTIONS_TOKEN": token,
             "HERMES_RUNTIME_SECRETS_B64": runtime_secret,
+            "PROTECTED_DIAGNOSTIC_PREFIX": diagnostic_prefix,
             "FAKE_YQ_SCRIPT": apply_script,
             "GITHUB_ENV": str(tmp_path / "github-env"),
             "GITHUB_OUTPUT": str(tmp_path / "github-output"),
@@ -644,6 +673,25 @@ def test_fake_azure_runtime_secret_alone_uses_managed_transport_without_exposure
     assert secret not in workflow_output
     assert "result-" not in result.stdout
     assert "TC_APPLY_REMOTE_EXIT_123456_2_0_" in result.stdout
+
+
+def test_fake_azure_surfaces_only_a_validated_protected_diagnostic(
+    tmp_path: Path, fake_apply_tools: tuple[Path, Path]
+) -> None:
+    """The explicit diagnostic is retained while the secret-bearing output is not."""
+
+    token = "test-ghcr-diagnostic-token"
+    result = _run_apply(
+        tmp_path,
+        fake_apply_tools,
+        token=token,
+        diagnostic_prefix="TC_HERMES_STAGE_DIAGNOSTIC=",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "TC_HERMES_STAGE_DIAGNOSTIC=stage-input-invalid" in result.stdout
+    assert token not in result.stdout
+    assert token not in result.stderr
 
 
 def test_fake_azure_combines_both_protected_values_and_redacts_cleanup_output(
