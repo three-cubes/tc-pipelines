@@ -664,12 +664,13 @@ jobs:
               # truncated secret cannot be redacted reliably, so protected
               # runs emit only an independently validated diagnostic code and
               # exact exit proof.
-              REMOTE_GROUP_END=') >"$remote_log" 2>&1'
+              REMOTE_GROUP_END=") >\"\$remote_log\" 2>&1"
             fi
             REMOTE_SCRIPT=$(
               printf '%s\n' \
                 'set +e' \
-                'remote_log=$(mktemp /run/tc-pipelines-apply-output.XXXXXXXX)' \
+                "remote_log=\$(mktemp /run/tc-pipelines-apply-output.XXXXXXXX)" \
+                "trap 'rm -f -- \"\$remote_log\"' EXIT" \
                 '(' \
                 '  set -e' \
                 '  export HOME=/root' \
@@ -680,8 +681,7 @@ jobs:
                 "remote_rc=\$?" \
                 "if [[ -n $(printf '%q' "$REMOTE_DIAGNOSTIC_PREFIX") ]]; then" \
                 "  /usr/bin/grep -E \"^$(printf '%s' "$REMOTE_DIAGNOSTIC_PREFIX")[a-z0-9][a-z0-9-]{0,79}\$\" \"\$remote_log\" || true" \
-                'fi' \
-                'rm -f -- "$remote_log"' \
+                "fi" \
                 "printf '%s=%s\\n' '${REMOTE_EXIT_SENTINEL}' \"\$remote_rc\"" \
                 "exit \"\$remote_rc\""
             )

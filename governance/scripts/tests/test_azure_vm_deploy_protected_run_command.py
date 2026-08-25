@@ -197,8 +197,8 @@ def test_protected_apply_can_surface_only_a_bounded_safe_diagnostic() -> None:
     assert "PROTECTED_DIAGNOSTIC_PREFIX" in _apply_step()["env"]
     assert "^[A-Z][A-Z0-9_]{2,63}=$" in apply
     assert "[a-z0-9][a-z0-9-]{0,79}" in apply
-    assert "remote_log=$(mktemp /run/tc-pipelines-apply-output.XXXXXXXX)" in apply
-    assert 'rm -f -- "$remote_log"' in apply
+    assert 'remote_log=\\$(mktemp /run/tc-pipelines-apply-output.XXXXXXXX)' in apply
+    assert "trap 'rm -f -- \\\"\\$remote_log\\\"' EXIT" in apply
     assert "MANAGED_DIAGNOSTICS" in apply
     assert "sort -u" in apply
 
@@ -418,7 +418,7 @@ def test_managed_output_keeps_only_validated_diagnostics_and_exit_proof() -> Non
     assert extract < reduce < output
     assert "instanceView.output" in script[extract:reduce]
     assert "instanceView.error" in script[extract:reduce]
-    assert "REMOTE_GROUP_END=') >\"$remote_log\" 2>&1'" in script
+    assert 'REMOTE_GROUP_END=") >\\"\\$remote_log\\" 2>&1"' in script
     assert "REMOTE_DIAGNOSTIC_PREFIX" in script
     assert "MANAGED_DIAGNOSTICS" in script
     assert "MSG=$(jq -r" not in script
