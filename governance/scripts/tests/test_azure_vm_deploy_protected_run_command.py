@@ -119,7 +119,8 @@ def test_protected_parameter_contract_is_fail_closed_and_bounded() -> None:
         "snapshot-policy=forbidden requires a verified container rollback receipt"
         in script
     )
-    assert "protected-diagnostic-prefix must be an uppercase ASCII prefix" in _apply_step()["run"]
+    assert "protected-diagnostic-prefix must be an uppercase ASCII prefix" in _validation_step()["run"]
+    assert "PROTECTED_DIAGNOSTIC_PREFIX" in _validation_step()["env"]
     steps = _workflow()["jobs"]["deploy"]["steps"]
     assert steps.index(_validation_step()) < next(
         index
@@ -179,7 +180,7 @@ def test_apply_requires_a_unique_remote_exit_token() -> None:
     assert 'gate_run_command_output "$VM" "$REMOTE_EXIT_SENTINEL" "$MSG_FILE"' in apply
     assert '--scripts "$REMOTE_SCRIPT"' in apply
     assert 'managed_apply_create "$VM" "$RUN_COMMAND_NAME" "$REMOTE_SCRIPT"' in apply
-    assert "remote_rc=\\$?" in apply
+    assert "REMOTE_EXIT_CAPTURE='remote_rc=$?'" in apply
     assert any("exit" in line and "remote_rc" in line for line in apply.splitlines())
     assert "classified remote exit {remote_exit}" in apply
 
@@ -195,10 +196,11 @@ def test_protected_apply_can_surface_only_a_bounded_safe_diagnostic() -> None:
 
     assert protected_input["default"] == ""
     assert "PROTECTED_DIAGNOSTIC_PREFIX" in _apply_step()["env"]
-    assert "^[A-Z][A-Z0-9_]{2,63}=$" in apply
+    assert "^[A-Z][A-Z0-9_]{2,63}=$" in _validation_step()["run"]
     assert "[a-z0-9][a-z0-9-]{0,79}" in apply
-    assert 'remote_log=\\$(mktemp /run/tc-pipelines-apply-output.XXXXXXXX)' in apply
-    assert "trap 'rm -f -- \\\"\\$remote_log\\\"' EXIT" in apply
+    assert "/run/tc-pipelines-apply-output" not in apply
+    assert 'REMOTE_EXIT_CAPTURE="remote_rc=\\${PIPESTATUS[0]}"' in apply
+    assert "/usr/bin/grep -E" in apply
     assert "MANAGED_DIAGNOSTICS" in apply
     assert "sort -u" in apply
 
@@ -418,7 +420,9 @@ def test_managed_output_keeps_only_validated_diagnostics_and_exit_proof() -> Non
     assert extract < reduce < output
     assert "instanceView.output" in script[extract:reduce]
     assert "instanceView.error" in script[extract:reduce]
-    assert 'REMOTE_GROUP_END=") >\\"\\$remote_log\\" 2>&1"' in script
+    assert 'REMOTE_GROUP_END=") 2>&1 | /usr/bin/grep -E' in script
+    assert 'REMOTE_EXIT_CAPTURE="remote_rc=\\${PIPESTATUS[0]}"' in script
+    assert "/run/tc-pipelines-apply-output" not in script
     assert "REMOTE_DIAGNOSTIC_PREFIX" in script
     assert "MANAGED_DIAGNOSTICS" in script
     assert "MSG=$(jq -r" not in script
@@ -583,6 +587,7 @@ def _run_validation(
     tmp_path: Path,
     *,
     runtime_secret: str = "",
+    diagnostic_prefix: str = "",
     skip_snapshot: str = "false",
     snapshot_policy: str = "allowed",
     rollback_receipt_digest: str = "",
@@ -596,6 +601,7 @@ def _run_validation(
             "SKIP_SNAPSHOT": skip_snapshot,
             "SNAPSHOT_POLICY": snapshot_policy,
             "CONTAINER_ROLLBACK_RECEIPT_DIGEST": rollback_receipt_digest,
+            "PROTECTED_DIAGNOSTIC_PREFIX": diagnostic_prefix,
         }
     )
     return subprocess.run(
@@ -606,6 +612,17 @@ def _run_validation(
         capture_output=True,
         check=False,
     )
+
+
+def test_validation_rejects_malformed_protected_diagnostic_prefix_before_azure_work(
+    tmp_path: Path,
+) -> None:
+    """The optional receipt prefix is rejected in the initial policy step."""
+
+    result = _run_validation(tmp_path, diagnostic_prefix="not-safe=")
+
+    assert result.returncode != 0
+    assert "protected-diagnostic-prefix must be an uppercase ASCII prefix" in result.stderr
 
 
 def test_fake_azure_conflict_then_warning_keeps_json_and_token_private(

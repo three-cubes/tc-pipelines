@@ -110,8 +110,9 @@ on:
           value the apply script printed (e.g. a benchmark/eval marker) in a
           downstream job. Off by default — apply output is not surfaced unless
           a consumer opts in. Protected Managed Run Command invocations expose
-          only the generated exit proof because their arbitrary output is
-          suppressed to prevent truncated secret disclosure.
+          only the generated exit proof and, when configured, validated
+          diagnostic lines because their arbitrary output is suppressed to
+          prevent truncated secret disclosure.
         required: false
         type: string
         default: 'false'
@@ -157,7 +158,8 @@ on:
         description: |
           Concatenated apply-script output when surface-apply-output is true;
           empty otherwise. Protected invocations contribute only their
-          generated exit proof, never arbitrary remote output.
+          generated exit proof and validated diagnostic lines, never arbitrary
+          remote output.
         value: ${{ jobs.deploy.outputs.apply-output }}
 
 jobs:
@@ -182,9 +184,11 @@ jobs:
           SKIP_SNAPSHOT: ${{ inputs.skip-snapshot }}
           SNAPSHOT_POLICY: ${{ inputs.snapshot-policy }}
           CONTAINER_ROLLBACK_RECEIPT_DIGEST: ${{ inputs.container-rollback-receipt-digest }}
+          PROTECTED_DIAGNOSTIC_PREFIX: ${{ inputs.protected-diagnostic-prefix }}
         run: |
           set -euo pipefail
           SKIP_SNAPSHOT="${SKIP_SNAPSHOT:-false}"
+          PROTECTED_DIAGNOSTIC_PREFIX="${PROTECTED_DIAGNOSTIC_PREFIX:-}"
           case "$SNAPSHOT_POLICY" in
             allowed|forbidden) ;;
             *)
@@ -205,6 +209,12 @@ jobs:
           fi
           if [[ "$SNAPSHOT_POLICY" == "forbidden" && ! "$CONTAINER_ROLLBACK_RECEIPT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::snapshot-policy=forbidden requires a verified container rollback receipt digest (sha256:<64 lowercase hex>)" >&2
+            exit 1
+          fi
+          if [[ -n "$PROTECTED_DIAGNOSTIC_PREFIX" ]] \
+            && ! [[ "$PROTECTED_DIAGNOSTIC_PREFIX" =~ ^[A-Z][A-Z0-9_]{2,63}=$ ]]
+          then
+            echo "::error::protected-diagnostic-prefix must be an uppercase ASCII prefix ending in =" >&2
             exit 1
           fi
           python3 - <<'PY'
@@ -480,12 +490,6 @@ jobs:
           readonly HERMES_RUNTIME_SECRETS_B64
           PROTECTED_DIAGNOSTIC_PREFIX="${PROTECTED_DIAGNOSTIC_PREFIX:-}"
           readonly PROTECTED_DIAGNOSTIC_PREFIX
-          if [[ -n "$PROTECTED_DIAGNOSTIC_PREFIX" ]] \
-            && ! [[ "$PROTECTED_DIAGNOSTIC_PREFIX" =~ ^[A-Z][A-Z0-9_]{2,63}=$ ]]
-          then
-            echo "::error::protected-diagnostic-prefix must be an uppercase ASCII prefix ending in =" >&2
-            exit 1
-          fi
 
           INVOCATION_SUFFIX=""
           MANAGED_COMMAND_MANIFEST=""
@@ -659,18 +663,18 @@ jobs:
             REMOTE_EXIT_SENTINEL="TC_APPLY_REMOTE_EXIT_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_${i}_${RANDOM}"
             REMOTE_DIAGNOSTIC_PREFIX="$PROTECTED_DIAGNOSTIC_PREFIX"
             REMOTE_GROUP_END=')'
+            REMOTE_EXIT_CAPTURE='remote_rc=$?'
             if [[ -n "$GHCR_ACTIONS_TOKEN$HERMES_RUNTIME_SECRETS_B64" ]]; then
               # Azure retains only the last 4 KiB of instanceView output. A
               # truncated secret cannot be redacted reliably, so protected
-              # runs emit only an independently validated diagnostic code and
-              # exact exit proof.
-              REMOTE_GROUP_END=") >\"\$remote_log\" 2>&1"
+              # runs stream only independently validated diagnostic codes and
+              # the exact exit proof; arbitrary output is never materialised.
+              REMOTE_GROUP_END=") 2>&1 | /usr/bin/grep -E \"^$(printf '%s' "$REMOTE_DIAGNOSTIC_PREFIX")[a-z0-9][a-z0-9-]{0,79}\$\""
+              REMOTE_EXIT_CAPTURE="remote_rc=\${PIPESTATUS[0]}"
             fi
             REMOTE_SCRIPT=$(
               printf '%s\n' \
                 'set +e' \
-                "remote_log=\$(mktemp /run/tc-pipelines-apply-output.XXXXXXXX)" \
-                "trap 'rm -f -- \"\$remote_log\"' EXIT" \
                 '(' \
                 '  set -e' \
                 '  export HOME=/root' \
@@ -678,10 +682,7 @@ jobs:
                 '  flock 9' \
                 "$SCRIPT" \
                 "$REMOTE_GROUP_END" \
-                "remote_rc=\$?" \
-                "if [[ -n $(printf '%q' "$REMOTE_DIAGNOSTIC_PREFIX") ]]; then" \
-                "  /usr/bin/grep -E \"^$(printf '%s' "$REMOTE_DIAGNOSTIC_PREFIX")[a-z0-9][a-z0-9-]{0,79}\$\" \"\$remote_log\" || true" \
-                "fi" \
+                "$REMOTE_EXIT_CAPTURE" \
                 "printf '%s=%s\\n' '${REMOTE_EXIT_SENTINEL}' \"\$remote_rc\"" \
                 "exit \"\$remote_rc\""
             )
