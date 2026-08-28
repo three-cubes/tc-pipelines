@@ -109,6 +109,7 @@ level — see §3–§4 — and are not duplicated below.)
 | SDLC & workflow | [`testing-strategy.md`](standards/testing-strategy.md) | The test pyramid (contract/integration/E2E) + quality gates. |
 | SDLC & workflow | [`validation-and-backpressure.md`](standards/validation-and-backpressure.md) | The syntax→unit→contract→integration→BDD ladder + stop conditions. |
 | SDLC & workflow | [`sdlc-release-workflow.md`](standards/sdlc-release-workflow.md) | Trunk-based release: tag from `main`, CHANGELOG-driven notes. |
+| SDLC & workflow | [`ci-release-deployment-architecture.md`](standards/ci-release-deployment-architecture.md) | Merge-queue exact validation, attested candidates, protected publish and deploy. |
 | SDLC & workflow | [`contract-test-patterns.md`](standards/contract-test-patterns.md) | Copy-paste contract-test skeletons (TS + Python) + baseline-shrink. |
 | SDLC & workflow | [`process-shared-repo-pr-review-and-merge.md`](standards/process-shared-repo-pr-review-and-merge.md) | Review + merge process for shared repos the author can't self-approve. |
 | SDLC & workflow | [`agent-process-controls.md`](standards/agent-process-controls.md) | The control hierarchy for agent-behaviour risks — push high-value risks from guidance up to structural gates. |

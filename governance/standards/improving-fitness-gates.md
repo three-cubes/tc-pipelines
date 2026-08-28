@@ -27,6 +27,12 @@ The pin bump touches the gate's own definition, so it is a control-plane change:
 
 Exercise the caller before merge: a change-detection filter can gate a `uses:` job off on the very PR that changes it, so a broken `workflow_call` contract can reach `main` and fail at workflow startup. Force a triggering change in the same PR.
 
+For a change to merge admission, release or deployment orchestration, also
+follow [`ci-release-deployment-architecture.md`](ci-release-deployment-architecture.md).
+In particular, do not replace post-merge validation with a lightweight
+attestation until the target ruleset has enabled merge queue and the consumer's
+`merge_group` run has proven the required contexts on an exact synthetic merge.
+
 ### Pre-evaluation normalisation
 
 `python-quality-gate.yml` exposes `pre-evaluation-normalize` for deterministic,
