@@ -88,7 +88,7 @@ Each workflow's inputs, secrets, and defaults are documented in the header of th
 | Input | Default | Purpose |
 |---|---|---|
 | `python-version` | `"3.12"` | Python uv resolves against |
-| `uv-version` | `"0.11.16"` | pinned uv version |
+| `uv-version` | `"0.12.5"` | pinned uv version |
 | `fetch-depth` | `2` | checkout depth (`0` for full-history scans) |
 | `sync-args` | `"--locked --all-packages"` | `uv sync` args (single-package repos: `--all-extras --all-groups`) |
 | `ci-requirements-path` | `".github/requirements-ci.txt"` | `--require-hashes` CI-tools file; `""` skips |

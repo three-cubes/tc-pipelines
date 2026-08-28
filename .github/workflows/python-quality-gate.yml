@@ -52,7 +52,7 @@ on:
       uv-version:
         description: "Pinned uv version (org standard)."
         type: string
-        default: "0.11.16"
+        default: "0.12.5"
       fetch-depth:
         description: "checkout fetch-depth. 0 = full history (secret scanning / new-code); 2 = HEAD~1 for changed-file diffs."
         type: number

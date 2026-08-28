@@ -8,6 +8,12 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The default `uv` installer is updated to 0.12.5.** Reusable actions and
+  workflows now use a version that supports hash-locked CI tool installation
+  without reapplying project configuration.
+
 ## [1.19.11] — 2026-08-26
 
 ### Fixed
