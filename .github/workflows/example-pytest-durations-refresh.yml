@@ -34,7 +34,7 @@ jobs:
     uses: ./.github/workflows/pytest-durations-refresh.yml
     with:
       python-version: "3.12"
-      uv-version: "0.11.16"
+      uv-version: "0.12.5"
       sync-args: --locked --all-packages
       ci-requirements-path: .github/requirements-ci.txt
       tc-fitness-args: run --only platform-pytest
@@ -50,7 +50,7 @@ jobs:
     uses: ./.github/workflows/pytest-durations-refresh.yml
     with:
       python-version: "3.12"
-      uv-version: "0.11.16"
+      uv-version: "0.12.5"
       sync-args: --all-extras --all-groups
       ci-requirements-path: .github/requirements-ci.txt
       tc-fitness-args: run --only platform-pytest
