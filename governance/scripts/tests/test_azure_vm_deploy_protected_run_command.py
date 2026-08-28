@@ -509,7 +509,8 @@ case "$op" in
       diagnostic="\n${PROTECTED_DIAGNOSTIC_PREFIX}stage-input-invalid"
     fi
     echo 'benign show warning' >&2
-    jq -cn --arg token "$token" --arg marker "$marker" --arg diagnostic "$diagnostic" '{instanceView:{executionState:"Succeeded",exitCode:0,output:("result-" + $token + "\n" + $marker + "=0" + $diagnostic),error:""}}'
+    managed_exit="${FAKE_AZ_MANAGED_EXIT:-0}"
+    jq -cn --arg token "$token" --arg marker "$marker" --arg diagnostic "$diagnostic" --argjson exit_code "$managed_exit" '{instanceView:{executionState:"Succeeded",exitCode:$exit_code,output:("result-" + $token + "\n" + $marker + "=" + ($exit_code | tostring) + $diagnostic),error:""}}'
     ;;
   delete)
     echo deleted
@@ -549,6 +550,7 @@ def _run_apply(
     diagnostic_prefix: str = "",
     apply_script: str = "true",
     legacy_exit: str = "0",
+    managed_exit: str = "0",
 ) -> subprocess.CompletedProcess[str]:
     bin_dir, state_dir = fake_apply_tools
     script = tmp_path / "apply.sh"
@@ -558,6 +560,7 @@ def _run_apply(
         {
             "FAKE_AZ_STATE_DIR": str(state_dir),
             "FAKE_AZ_LEGACY_EXIT": legacy_exit,
+            "FAKE_AZ_MANAGED_EXIT": managed_exit,
             "GHCR_ACTIONS_TOKEN": token,
             "HERMES_RUNTIME_SECRETS_B64": runtime_secret,
             "PROTECTED_DIAGNOSTIC_PREFIX": diagnostic_prefix,
@@ -707,6 +710,29 @@ def test_fake_azure_surfaces_only_a_validated_protected_diagnostic(
 
     assert result.returncode == 0, result.stderr
     assert "TC_HERMES_STAGE_DIAGNOSTIC=stage-input-invalid" in result.stdout
+    assert token not in result.stdout
+    assert token not in result.stderr
+
+
+def test_failed_managed_apply_surfaces_validated_diagnostic_before_red_gate(
+    tmp_path: Path, fake_apply_tools: tuple[Path, Path]
+) -> None:
+    """A protected remote failure is actionable without exposing arbitrary output."""
+
+    token = "test-ghcr-failed-diagnostic-token"
+    result = _run_apply(
+        tmp_path,
+        fake_apply_tools,
+        token=token,
+        diagnostic_prefix="TC_HERMES_STAGE_DIAGNOSTIC=",
+        managed_exit="20",
+    )
+
+    assert result.returncode != 0
+    assert "TC_HERMES_STAGE_DIAGNOSTIC=stage-input-invalid" in result.stdout
+    assert "classified remote exit 20" in result.stderr
+    assert "result-" not in result.stdout
+    assert "result-" not in result.stderr
     assert token not in result.stdout
     assert token not in result.stderr
 
