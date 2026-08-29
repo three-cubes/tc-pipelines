@@ -77,7 +77,7 @@ on:
         description: |
           Snapshot policy for this deployment. "allowed" preserves the
           existing snapshot behavior. "forbidden" selects the governed
-          container-only deployment exception and requires skip-snapshot=true
+          container-only deployment path and requires skip-snapshot=true
           plus container-rollback-receipt-digest.
         required: false
         type: string

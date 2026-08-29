@@ -916,7 +916,7 @@ def test_forbidden_policy_skips_snapshot_action_and_runs_only_a_notice() -> None
     assert "snapshot" not in notice["run"].lower()
 
 
-def test_container_only_exception_is_tied_to_canonical_governance() -> None:
+def test_container_only_path_is_tied_to_canonical_governance() -> None:
     workflow = _workflow()
     snapshot_input = workflow["on"]["workflow_call"]["inputs"]["snapshot-policy"]
     standard = " ".join(SNAPSHOT_STANDARD.read_text(encoding="utf-8").split())
@@ -924,24 +924,24 @@ def test_container_only_exception_is_tied_to_canonical_governance() -> None:
     readme = " ".join(README.read_text(encoding="utf-8").split())
 
     assert (
-        "container-only deployment exception" in snapshot_input["description"].lower()
+        "container-only deployment path" in snapshot_input["description"].lower()
     )
     for required in (
-        "Container-only deployment exception",
+        "Container-only deployment path",
         "`snapshot-policy=forbidden`",
         "protected path and configuration backup",
         "immutable predecessor container image",
         "`container-rollback-receipt-digest`",
         "archive and manifest digests",
-        "no Azure storage command",
-        "Host disaster recovery remains a separate manual operation",
-        "`snapshot-policy=forbidden` without `skip-snapshot=true` fails admission",
-        "`snapshot-policy=allowed` with `skip-snapshot=true` remains",
+        "workflow skips the snapshot action and Azure storage operations",
+        "Host disaster recovery runs as a separate manual operation",
+        "Admission accepts `snapshot-policy=forbidden` with `skip-snapshot=true`",
+        "`snapshot-policy=allowed` with `skip-snapshot=true` provides",
     ):
         assert required in standard
-    assert "container-only exception" in development.lower()
+    assert "container-only path" in development.lower()
     assert "snapshot-before-apply.md" in development
-    assert "container-only exception" in readme.lower()
+    assert "container-only deployment path" in readme.lower()
     assert "snapshot-before-apply.md" in readme
 
 
