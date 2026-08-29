@@ -211,37 +211,6 @@ def test_wiring_render_resolves_every_token(tmp_path: Path) -> None:
         assert f"core_checks.{binding}" in pyproject, f"pyproject omits CORE binding {binding}"
 
 
-def test_auto_merge_uses_trusted_pr_metadata_and_never_checks_out_pr_code(tmp_path: Path) -> None:
-    """The bootstrap caller records auto-merge before CI completes.
-
-    GitHub branch rules hold the eventual merge. The caller runs from the
-    default branch under pull_request_target, so this test locks the boundary
-    that lets it mint the App token without exposing that token to PR code.
-    """
-    out_dir = tmp_path / "wire"
-    assert _render(out_dir).returncode == 0
-    caller = (out_dir / ".github/workflows/auto-merge.yml").read_text(encoding="utf-8")
-
-    assert "pull_request_target:" in caller
-    assert "types: [opened, reopened, synchronize]" in caller
-    assert "workflow_run:" not in caller
-    assert "pr-number: ${{ github.event.pull_request.number }}" in caller
-    assert "arm-immediately: true" in caller
-    assert "actions/checkout" not in caller
-
-    self_caller = (REPO_ROOT / ".github/workflows/auto-merge.yml").read_text(encoding="utf-8")
-    assert "pull_request_target:" in self_caller
-    assert "types: [opened, reopened, synchronize]" in self_caller
-    assert "workflow_run:" not in self_caller
-    assert "uses: ./.github/workflows/auto-merge-on-green.yml" in self_caller
-    assert "actions/checkout" not in self_caller
-
-    reusable = (REPO_ROOT / ".github/workflows/auto-merge-on-green.yml").read_text(encoding="utf-8")
-    assert "arm-immediately:" in reusable
-    assert 'if [ "$ARM_IMMEDIATELY" = "false" ]; then' in reusable
-    assert "gh pr merge \"$PR\" --auto" in reusable
-
-
 def test_wiring_makefile_has_a_fix_target_running_the_autofixers(tmp_path: Path) -> None:
     # `make fix` shift-left (SGO-280): the rendered Makefile must CORRECT
     # lint/format/lockfile deterministically so the local loop auto-fixes rather

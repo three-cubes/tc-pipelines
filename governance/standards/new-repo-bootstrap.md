@@ -96,9 +96,8 @@ complete drop-in:
   *bare* required-status-check context names — a reusable call surfaces
   `<caller> / <reusable job>` checks, never a bare name, so these thin aggregators
   are what the org rulesets resolve against.
-- **`.github/workflows/auto-merge.yml`** — records `gh pr merge --auto` from a
-  metadata-only `pull_request_target` job. GitHub branch rules merge after the
-  required checks and reviews pass.
+- **`.github/workflows/auto-merge.yml`** — arms `gh pr merge --auto` on the green
+  `Quality gate` fan-in check.
 - **`main` branch protection** — enforced org-wide by the rulesets in
   tc-pipelines `governance/rulesets/` (`main-product` / `main-core` /
   `main-baseline`); the bootstrap ensures `ci.yml` emits exactly the contexts
@@ -142,8 +141,7 @@ rulesets in tc-pipelines `governance/rulesets/` (`main-product` / `main-core` /
 `main-baseline`), which require the fitness contexts — `Quality gate` and
 `no-attribution` — plus a code-owner review, and block deletion +
 non-fast-forward. Ship one feature = one branch = one PR authored by the
-three-cubes-agent App; `auto-merge.yml` records the auto-merge request and
-GitHub completes the merge after the branch rules pass. See
+three-cubes-agent App; `auto-merge.yml` merges on green. See
 [development-workflow](development-workflow.md).
 
 Cut releases the canonical way via [sdlc-release-workflow](sdlc-release-workflow.md);
