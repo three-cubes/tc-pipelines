@@ -416,7 +416,7 @@ jobs:
       - name: Snapshot all VMs
         id: snapshot
         if: ${{ inputs.snapshot-policy != 'forbidden' }}
-        uses: three-cubes/tc-pipelines/.github/actions/snapshot-azure-vm-disk@1c2944c0cca248bd42fa2e56e84fc3d97a9c698b # v1.19.11
+        uses: ./.github/actions/snapshot-azure-vm-disk
         with:
           resource-group: ${{ inputs.resource-group }}
           vm-names: ${{ steps.parse.outputs.vm-list }}

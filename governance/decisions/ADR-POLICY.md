@@ -114,7 +114,7 @@ authoritative text — read the source.
 | `WIF-D3` | The federated-credential subject is pinned to `repo:OWNER/NAME:ref:refs/heads/main` + `:environment:NAME`, so PR-from-fork cannot deploy. | `docs/IMPLEMENTATION.md` |
 | `WIF-D4` | The identity + federated credential + RBAC grants are provisioned as Bicep (`ci-deploy-identity.bicep`) — idempotent, audit-tracked in Azure deployment history. | `docs/IMPLEMENTATION.md` (why Bicep); `infra/bicep/` |
 | `WIF-D5` | tc-pipelines is **public** (workflows + Bicep + docs, no secrets), sidestepping the private-repo Actions plan-tier limit for cross-repo reuse. | `docs/IMPLEMENTATION.md` (why public visibility) |
-| `COST-D1` | Every deploy-snapshotting consumer runs a snapshot-prune cron (**14-day** retention) so per-deploy snapshots don't accumulate cost indefinitely. | `docs/COST-OPTIMIZATION.md` |
+| `COST-D1` | Every deploy-snapshotting consumer runs the reusable snapshot-prune action with a **48-hour** recovery window, including one legacy migration run after adoption. | `docs/COST-OPTIMIZATION.md` |
 | `COST-D2` | Right-size / stop-when-idle always-on VMs and prefer ephemeral PR envs or smoke-on-prod over a permanently-paid staging tier. | `docs/COST-OPTIMIZATION.md` |
 
 The broader `AUTONOMOUS-DELIVERY-STANDARD.md` locked decisions **D1–D8** (no-attribution, guard-forward-only,
