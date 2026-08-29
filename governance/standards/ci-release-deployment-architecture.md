@@ -61,6 +61,27 @@ The published candidate dispatches production deployment. The protected
 Environment controls the decision. Target-side deployment verifies the public
 immutable assets and candidate receipt before apply.
 
+## Production verification and PVT
+
+Production verification is an executable stage of the deployment workflow. A
+deployment that declares an attested PVT invokes the product-owned live PVT
+runner after the target-side apply and smoke boundary. The runner writes a
+receipt bound to the release identity, runtime identity, probes and captured
+evidence. A green receipt promotes the deployed candidate to known-good; a
+held or failed receipt retains the evidence and enters the product's explicit
+hold, rollback or fix-forward path.
+
+The release publisher creates this handoff with a short-lived GitHub App token.
+GitHub's default workflow token does not emit follow-on workflow events, so an
+App-authenticated `workflow_dispatch` is the portable release-to-deployment
+mechanism. The publisher records the release tag, target workflow and PVT
+contract in its job summary. The target workflow owns production approval and
+the terminal PVT verdict.
+
+Generic infrastructure deployment workflows expose only the checks they run.
+They record component smoke and their own rollback result. A generic smoke
+notice is not PVT evidence and cannot complete a product release.
+
 At publish and deploy time, verify that the candidate SHA is an ancestor of the
 protected branch, its exact merge-queue contexts passed, its attested assets
 match the candidate record, and its generation is the next deployable generation.
@@ -99,8 +120,12 @@ bootstrap and reusable jobs resolve the same values.
 5. Approve the protected publish Environment after reviewing the candidate
    summary. GitHub publishes the exact prepared bytes.
 6. Approve the protected production Environment. The deploy stages, verifies,
-   applies and smoke-tests the published candidate.
-7. If a stage fails, use the recorded candidate/attempt identity to resume,
+   applies, smoke-tests and executes the attested PVT for the published
+   candidate.
+7. Read the deployment's PVT receipt and terminal state. A green receipt is the
+   production completion record; a held or failed receipt names the recovery
+   operation and preserved evidence.
+8. If a stage fails, use the recorded candidate/attempt identity to resume,
    roll back, or fix forward from the recorded identity.
 
 ## Migration and verification
@@ -110,8 +135,11 @@ bootstrap and reusable jobs resolve the same values.
 2. Prove a queue run emits every required context on a synthetic merge.
 3. Replace separate prepare/publish dispatches with one workflow DAG separated
    by the protected publish Environment.
-4. Replace manual deployment dispatch with a candidate-record handoff.
-5. Remove the VERSION-only trigger and verify that a release no longer causes a
+4. Replace manual deployment dispatch with an App-authenticated candidate-record
+   handoff and retain the protected production approval in the target workflow.
+5. Bind the deployment's live PVT receipt to candidate promotion and recovery
+   state.
+6. Remove the VERSION-only trigger and verify that a release no longer causes a
    second full language/E2E matrix.
 
 The reusable-workflow implementation belongs in `tc-pipelines`; Hermetic build,
