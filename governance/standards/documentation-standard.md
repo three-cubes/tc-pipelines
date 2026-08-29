@@ -31,6 +31,26 @@ This standard incorporates the useful patterns from The Good Docs Project withou
 5. **Make maintenance visible.** Include owner, status, last reviewed/date where the document governs behaviour.
 6. **Keep lineage out of runtime prose.** Use `lineage.yaml` and source registry sidecars for source/IP traceability.
 7. **Validate links and examples.** Local links must resolve; executable instructions need current command evidence where practical.
+8. **State behaviour directly.** Name the actor, action, purpose, procedure, evidence, and recovery path that the reader uses.
+
+## Plain Language Pattern
+
+Lead each operational statement with the selected behaviour. Use concrete verbs
+and named actors. Explain the purpose, then give the command, input, output, or
+recovery action the reader needs.
+
+| Element | Include | Example |
+|---|---|---|
+| Actor | The person, workflow, service, or component that acts. | `release.yml` |
+| Action | The concrete operation. | publishes the release assets and dispatches deployment |
+| Purpose | The result the action provides. | creates an immutable deployment input |
+| Procedure | The command, step, or decision. | approve `hermes-production` for the displayed tag |
+| Evidence | The observable result. | the PVT receipt records the release and runtime identities |
+| Recovery | The action after a held or failed result. | select the recorded hold, rollback, or fix-forward path |
+
+Use this structure in procedures, runbooks, workflow descriptions, and
+troubleshooting guidance. Keep qualifiers that change an operator decision;
+remove decorative qualifiers and abstract framing.
 
 ## Document Types
 
