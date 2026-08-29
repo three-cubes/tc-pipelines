@@ -1,0 +1,35 @@
+{
+  "name": "org-immutable-release-tags",
+  "target": "tag",
+  "enforcement": "active",
+  "bypass_actors": [
+    {
+      "actor_id": 18141275,
+      "actor_type": "Team",
+      "bypass_mode": "always"
+    }
+  ],
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "refs/tags/v*"
+      ]
+    },
+    "repository_name": {
+      "exclude": [],
+      "include": [
+        "~ALL"
+      ],
+      "protected": false
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "update"
+    }
+  ]
+}
