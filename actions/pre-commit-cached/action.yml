@@ -10,11 +10,11 @@ description: >-
   only near-term consumer; the inputs stay kairix-shaped.
 inputs:
   uv-version:
-    description: uv version to pin (forwarded to setup-uv-cached; keep in step with the org standard).
-    default: "0.12.5"
+    description: Explicit uv version for a compatibility matrix; empty reads `.uv-version`.
+    default: ""
   python-version:
-    description: Python version uv resolves against (forwarded to setup-uv-cached).
-    default: "3.12"
+    description: Explicit Python version for a compatibility matrix; empty reads `.python-version`.
+    default: ""
   sync-args:
     description: >-
       Arguments to `uv sync` (forwarded to setup-uv-cached). kairix is a

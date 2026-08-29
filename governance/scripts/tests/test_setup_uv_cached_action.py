@@ -13,8 +13,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 ACTION = REPO_ROOT / "actions" / "setup-uv-cached" / "action.yml"
 UV_DEFAULT_CALLERS = (
     REPO_ROOT / "actions" / "pre-commit-cached" / "action.yml",
-    REPO_ROOT / ".github" / "workflows" / "fitness-engine-canary.yml",
-    REPO_ROOT / ".github" / "workflows" / "mutation-gate.yml",
     REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml",
 )
 
@@ -36,10 +34,16 @@ def _caller_uv_default(path: Path) -> str:
     return triggers["workflow_call"]["inputs"]["uv-version"]["default"]
 
 
-def test_org_default_uses_the_supported_hash_lock_installer() -> None:
-    """The reusable default must consume the hashes it generates."""
+def test_org_action_resolves_repository_toolchain_files_before_legacy_fallback() -> None:
+    """One source file drives local bootstrap and every reusable gate lane."""
 
-    assert _action_uv_default() == "0.12.5"
+    action = ACTION.read_text(encoding="utf-8")
+    assert _action_uv_default() == ""
+    assert _yaml(ACTION)["inputs"]["python-version"]["default"] == ""
+    assert "resolve_version uv_version \"$INPUT_UV_VERSION\" .uv-version 0.12.5" in action
+    assert "resolve_version python_version \"$INPUT_PYTHON_VERSION\" .python-version 3.12" in action
+    assert "version: ${{ steps.toolchain.outputs.uv_version }}" in action
+    assert "python-version: ${{ steps.toolchain.outputs.python_version }}" in action
 
 
 @pytest.mark.parametrize("path", UV_DEFAULT_CALLERS)

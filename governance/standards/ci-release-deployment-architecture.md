@@ -113,9 +113,9 @@ Each toolchain has one authored source:
 | Python | `.python-version` | local bootstrap and setup action |
 | uv | `.uv-version` | local bootstrap and setup action |
 
-The migration first adds file resolution to the shared setup action and its
-parity test. Consumers then move Python and uv values into those files; local
-bootstrap and reusable jobs resolve the same values.
+`setup-uv-cached` resolves the repository files after checkout. A workflow can
+pass an explicit value only for a deliberate compatibility matrix. The action
+retains legacy fallbacks while repositories add the source files.
 
 ## Operational runbook
 
