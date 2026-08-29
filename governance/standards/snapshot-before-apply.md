@@ -1,6 +1,6 @@
 # Snapshot-before-apply
 
-Every apply script that mutates deployed application, configuration, data, or infrastructure bytes MUST take a recovery point before its first destructive op — the concrete example throughout this doc is an Azure VM OS-disk snapshot. The snapshot is the last-known-good the rollback drill reverts to. The only exceptions are the bounded pre-snapshot admission and container-only deployment contracts below.
+Every apply script that mutates deployed application, configuration, data, or infrastructure bytes takes a recovery point before its first destructive operation. This document uses an Azure VM OS-disk snapshot as the example. The snapshot provides the last-known-good state for the rollback drill. The reversible pre-snapshot admission path and container-only deployment path define the bounded alternatives.
 
 ## Why
 
@@ -34,15 +34,16 @@ The consumer's `deploy-on-merge.yml` calls the tc-pipelines [`azure-vm-deploy.ym
 
 After the snapshot succeeds, the workflow invokes the apply scripts with `--no-snapshot` so the in-script attempt below is skipped.
 
-### Reversible pre-snapshot admission exception
+### Reversible pre-snapshot admission path
 
 The reusable may run an explicitly configured remote admission preflight before
 the snapshot when the deploy must freeze writers or acquire a lease before it
-can prove that runtime-authored state has been captured. This is a narrow
-coordination exception, not permission to apply early:
+can prove that runtime-authored state has been captured. It limits the work to
+reversible coordination:
 
-- Preflight must not change deployed application or configuration bytes, publish
-  a tree, restart a service, replace an image, or alter durable business data.
+- Keep preflight to writer freezes and lease acquisition. Apply, publish,
+  service restart, image replacement, and durable data changes begin after the
+  recovery point.
 - Any freeze or lease must be exactly reversible by the declared
   `failure-cleanup-script`; cleanup must be safe to run on every target.
 - The workflow records the cleanup obligation before the first remote
@@ -57,11 +58,11 @@ coordination exception, not permission to apply early:
 
 If a preflight cannot meet every condition, take the recovery point before it.
 
-### Container-only deployment exception
+### Container-only deployment path
 
-A production deployment may set `snapshot-policy=forbidden` only when its
-rollback boundary is wholly inside governed container and configuration paths.
-Every condition below is mandatory:
+A production deployment sets `snapshot-policy=forbidden` when its rollback
+boundary is wholly inside governed container and configuration paths. The path
+uses every condition below:
 
 - Before the first mutation, create and verify a protected path and configuration backup
   that binds the exact restored paths, archive, manifest, and digests without
@@ -72,24 +73,22 @@ Every condition below is mandatory:
   must bind the exact protected paths, backup archive and manifest digests, and
   predecessor OCI image digest. Pass its content address through the reusable
   workflow's `container-rollback-receipt-digest` input as
-  `sha256:<64 lowercase hex>`; a missing or malformed digest blocks the
-  container-only exception before WIF or cloud operations.
+  `sha256:<64 lowercase hex>`; admission validates the digest before WIF or
+  cloud operations.
 - Limit normal apply and rollback to the container workload and its governed
-  configuration. The workflow must skip the snapshot action and execute no
-  Azure storage command.
+  configuration. The workflow skips the snapshot action and Azure storage
+  operations.
 - Set `snapshot-policy=forbidden`, `skip-snapshot=true`, and the verified
-  `container-rollback-receipt-digest` on the reusable workflow.
-  `snapshot-policy=forbidden` without `skip-snapshot=true` fails admission
-  before WIF or cloud operations. A missing or malformed receipt digest fails
-  at the same boundary. `snapshot-policy=allowed` with
-  `skip-snapshot=true` remains the explicit legacy/development override and is
-  not the governed container-only exception.
-- Treat host disaster recovery separately. Host disaster recovery remains a
-  separate manual operation and is not evidence of application rollback.
+  `container-rollback-receipt-digest` on the reusable workflow. Admission
+  accepts `snapshot-policy=forbidden` with `skip-snapshot=true` and a valid
+  receipt digest before WIF or cloud operations. `snapshot-policy=allowed` with
+  `skip-snapshot=true` provides the explicit development override.
+- Treat host disaster recovery separately. Host disaster recovery runs as a
+  separate manual operation; the container rollback receipt records the
+  application recovery path.
 
-This exception does not permit host package, kernel, filesystem-layout, disk,
-VM, network, or other infrastructure mutation. Those changes still require the
-normal host recovery point before apply.
+Host package, kernel, filesystem-layout, disk, VM, network, and other
+infrastructure changes use the normal host recovery point before apply.
 
 ### Apply scripts — best-effort fallback
 
@@ -115,17 +114,18 @@ The helper:
 
 ## How — the override
 
-Three paths can bypass the snapshot:
+Three paths select an alternative to the default snapshot:
 
 - **`--no-snapshot`** flag on either apply script. Use during iterative dev when you know the VM is throwaway. The script logs `SKIP_SNAPSHOT=true` to make the override visible.
 - **Dry-run**. `--dry-run` skips the snapshot entirely since no state is mutated.
-- **Governed container-only deployment**. The reusable workflow admits this
-  only with `snapshot-policy=forbidden`, `skip-snapshot=true`, and a verified
-  `container-rollback-receipt-digest`, and only when the container-only
-  exception above is satisfied.
+- **Governed container-only deployment path**. The reusable workflow admits it
+  with `snapshot-policy=forbidden`, `skip-snapshot=true`, and a verified
+  `container-rollback-receipt-digest` when the container-only deployment path
+  above is satisfied.
 
-Production apply (operator OR CI-driven) MUST omit `--no-snapshot` unless the
-reusable workflow has admitted the governed container-only exception.
+Production apply (operator or CI-driven) uses a recovery point. The reusable
+admits the container-only deployment path with `snapshot-policy=forbidden`,
+`skip-snapshot=true`, and a verified `container-rollback-receipt-digest`.
 
 ## Failure modes the helper catches
 
@@ -149,7 +149,7 @@ The current convention is to keep snapshots for 14 days; a dedicated prune cron 
 
 ## CI-driven apply integration
 
-The consumer's CI apply workflow (`.github/workflows/deploy-on-merge.yml`) inherits this discipline. It calls the tc-pipelines [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable. The optional reversible admission preflight runs first. By default, the [`snapshot-azure-vm-disk`](../../.github/actions/snapshot-azure-vm-disk/action.yml) composite then takes the recovery point from the pipeline (WIF) identity before apply and passes `--no-snapshot` to the apply script. Under the governed container-only exception, the reusable skips that action entirely and admits apply only after `snapshot-policy=forbidden` and `skip-snapshot=true` agree. The in-script `take_snapshot` fallback fires only for operator-driven runs outside that admitted exception.
+The consumer's CI apply workflow (`.github/workflows/deploy-on-merge.yml`) calls the tc-pipelines [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable. The optional reversible admission preflight runs first. By default, the [`snapshot-azure-vm-disk`](../../.github/actions/snapshot-azure-vm-disk/action.yml) composite takes the recovery point from the pipeline WIF identity before apply and passes `--no-snapshot` to the apply script. The governed container-only deployment path skips that action when `snapshot-policy=forbidden` and `skip-snapshot=true` agree. The in-script `take_snapshot` fallback serves operator-driven runs.
 
 For pure infrastructure changes (Bicep applies), the snapshot lives in the runbook — Bicep applies use a different rollback shape (`az deployment ... what-if` + redeploy from prior template), not OS-disk revert.
 
