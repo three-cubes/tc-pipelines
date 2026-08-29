@@ -136,6 +136,22 @@ NEEDS = list(_jobs(_load(GATE)).get(FAN_IN, {}).get("needs") or [])
 LANES = sorted(set(_jobs(_load(GATE))) - {FAN_IN})
 
 
+@pytest.mark.parametrize("name", ("main-core.json", "main-product.json"))
+def test_queue_less_profiles_require_current_base_status_checks(name: str) -> None:
+    """A queue-less repository validates the current main tip before merge."""
+    rules = json.loads((RULESET_DIR / name).read_text(encoding="utf-8")).get("rules") or []
+    required = next(rule for rule in rules if rule.get("type") == "required_status_checks")
+    assert required["parameters"]["strict_required_status_checks_policy"] is True
+
+
+def test_release_tags_are_immutable() -> None:
+    """Release identity remains bound to a tag after candidate allocation."""
+    payload = json.loads((RULESET_DIR / "release-tags.json").read_text(encoding="utf-8"))
+    assert payload["target"] == "tag"
+    assert "refs/tags/v*" in payload["conditions"]["ref_name"]["include"]
+    assert {rule["type"] for rule in payload["rules"]} >= {"deletion", "update"}
+
+
 def test_the_scan_found_contexts_lanes_and_an_aggregation_step() -> None:
     """A scan that silently matches nothing would pass every assertion below."""
     assert len(CONTEXTS) >= 2, (
