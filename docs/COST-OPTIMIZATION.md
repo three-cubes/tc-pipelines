@@ -46,10 +46,12 @@ Every CI deploy from `azure-vm-deploy.yml` creates one snapshot per target VM. A
 - OS disk snapshot ~30 GB × $0.05/GB-month = **$1.50/snapshot/month**
 - 1 deploy/day × 2 VMs × 30 days = 60 snapshots = **$90/month accumulating** indefinitely
 
-**The cron** (add to every consumer repo):
+**The scheduled pruner** runs in each consumer repo and deletes only the
+snapshots created by this reusable workflow after their tagged 48-hour recovery
+window:
 
 ```yaml
-name: "Prune deploy snapshots (14d retention)"
+name: "Prune deploy snapshots (48h retention)"
 on:
   schedule:
     - cron: '17 4 * * *'   # 4:17 UTC daily
@@ -69,12 +71,12 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Delete snapshots older than 14 days
+      - name: Delete expired deploy snapshots
         run: |
           set -euo pipefail
-          CUTOFF=$(date -u -d '14 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           NAMES=$(az snapshot list -g RG-AGENTS-CORE \
-            --query "[?contains(name, 'pre-deploy') && timeCreated < '$CUTOFF'].name" -o tsv)
+            --query "[?tags.'tc-managed-by' == 'tc-pipelines' && tags.'tc-expires-at' < '$NOW'].name" -o tsv)
           for n in $NAMES; do
             echo "Deleting $n"
             az snapshot delete -g RG-AGENTS-CORE -n "$n" --no-wait
@@ -174,7 +176,7 @@ Trigger conditions for each move:
 
 | Saving | When to act |
 |---|---|
-| Snapshot prune cron | NOW — every PR you merge adds ~$3/month accumulating |
+| Snapshot prune workflow | NOW — every deployment adds recoverable storage until its 48-hour expiry |
 | Right-size VMs | Within 1 week of having `az monitor` data showing < 30% CPU peak |
 | Auto-shutdown VMs | If both VMs are dev-hours-only AND you're OK with morning cold-start |
 | Self-hosted runner on B1s | When private-endpoint testing matters (FEAT-159 staging tier) |
@@ -187,6 +189,6 @@ To know if these decisions stay right as you scale:
 
 1. **GitHub Actions billing API** — `gh api /orgs/three-cubes/settings/billing/actions` returns total minutes used + spend. Add a monthly cron that posts the report to Slack.
 2. **Azure Cost Management API** — daily cost rollup by resource tag. Tag every Three Cubes resource with `Repo=<name>` so you can attribute spend per repo.
-3. **Snapshot count** — `az snapshot list -g RG-AGENTS-CORE --query 'length(@)'` should stay under ~30 (14-day retention × 2 daily snapshots).
+3. **Snapshot count** — `az snapshot list -g RG-AGENTS-CORE --query 'length(@)'` should stay close to the last 48 hours of deploys plus any deliberately retained recovery points.
 
 If any of these trends 2× month-over-month, revisit this doc.

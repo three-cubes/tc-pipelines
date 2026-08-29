@@ -73,6 +73,11 @@ on:
         required: false
         type: string
         default: 'false'
+      snapshot-retention-hours:
+        description: Recovery window in whole hours for host snapshots. The default is 48 hours and is recorded in the snapshot expiry tag.
+        required: false
+        type: string
+        default: '48'
       snapshot-policy:
         description: |
           Snapshot policy for this deployment. "allowed" preserves the
@@ -417,6 +422,7 @@ jobs:
           vm-names: ${{ steps.parse.outputs.vm-list }}
           op-tag: ${{ inputs.op-tag }}
           skip: ${{ inputs.skip-snapshot }}
+          retention-hours: ${{ inputs.snapshot-retention-hours }}
 
       - name: Verify host snapshots are forbidden
         if: ${{ inputs.snapshot-policy == 'forbidden' }}

@@ -22,13 +22,19 @@ The consumer's `deploy-on-merge.yml` calls the tc-pipelines [`azure-vm-deploy.ym
 - name: Snapshot vm-openclaw + vm-hermes-poc
   run: |
     STAMP=$(date -u +%Y%m%d-%H%M%S)
+    CREATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    EXPIRES_AT=$(date -u -d '+48 hours' +%Y-%m-%dT%H:%M:%SZ)
     for vm in vm-openclaw vm-hermes-poc; do
       OSDISK_ID=$(az vm show -g RG-AGENTS-CORE -n "$vm" \
         --query 'storageProfile.osDisk.managedDisk.id' -o tsv)
       az snapshot create \
         -g RG-AGENTS-CORE \
         -n "${vm}-osdisk-pre-deploy-on-merge-${STAMP}" \
-        --source "$OSDISK_ID"
+        --source "$OSDISK_ID" \
+        --incremental true \
+        --tags tc-managed-by=tc-pipelines tc-purpose=pre-deploy-recovery \
+          "tc-source-vm=${vm}" "tc-created-at=${CREATED_AT}" \
+          "tc-expires-at=${EXPIRES_AT}"
     done
 ```
 
@@ -140,12 +146,20 @@ Every failure surfaces with `fix:` + `next:` lines so the next agent (human or L
 
 ## Retention
 
-The apply scripts do NOT clean up snapshots. Two reasons:
+The reusable deploy workflow creates incremental snapshots and writes these tags:
 
-- An apply that succeeds at T may still need rollback later (e.g. a slow-burn cli-proxy memory leak surfacing 24h after deploy).
-- Snapshot deletion is a privileged op that fits better in a dedicated `prune-snapshots.sh` cron than inline in apply.
+- `tc-managed-by=tc-pipelines`
+- `tc-purpose=pre-deploy-recovery`
+- `tc-source-vm`, `tc-operation`, and `tc-created-at` identify the deployment.
+- `tc-expires-at` defines the recovery window.
 
-The current convention is to keep snapshots for 14 days; a dedicated prune cron (bound to a narrowly-scoped `Snapshot Reader + Disk Pool Operator` role) will formalise this.
+The default recovery window is 48 hours. A caller may set
+`snapshot-retention-hours` to a positive whole number when its rollback window
+requires more time. The consuming repository runs a scheduled privileged
+pruner that deletes only snapshots with `tc-managed-by=tc-pipelines` whose
+`tc-expires-at` timestamp has passed. An operator extends a specific recovery
+point by changing its expiry tag or removing the `tc-managed-by` tag before the
+scheduled prune.
 
 ## CI-driven apply integration
 

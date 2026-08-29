@@ -259,6 +259,33 @@ def test_snapshot_action_surfaces_created_resource_ids() -> None:
     assert action["outputs"]["snapshot-resource-ids"]["value"] == (
         "${{ steps.snap.outputs.snapshot-resource-ids }}"
     )
+
+
+def test_snapshot_lifecycle_is_incremental_and_tagged_for_the_48_hour_pruner() -> None:
+    action = yaml.load(
+        SNAPSHOT_ACTION.read_text(encoding="utf-8"), Loader=GithubActionsLoader
+    )
+    step = action["runs"]["steps"][0]
+    workflow_inputs = _workflow()["on"]["workflow_call"]["inputs"]
+
+    assert action["inputs"]["retention-hours"]["default"] == "48"
+    assert action["outputs"]["snapshot-expires-at"]["value"] == (
+        "${{ steps.snap.outputs.snapshot-expires-at }}"
+    )
+    assert workflow_inputs["snapshot-retention-hours"]["default"] == "48"
+    assert "retention-hours: ${{ inputs.snapshot-retention-hours }}" in WORKFLOW.read_text(
+        encoding="utf-8"
+    )
+    assert "--incremental true" in step["run"]
+    for tag in (
+        "tc-managed-by=tc-pipelines",
+        "tc-purpose=pre-deploy-recovery",
+        "tc-source-vm=${vm}",
+        "tc-created-at=${CREATED_AT}",
+        "tc-expires-at=${EXPIRES_AT}",
+    ):
+        assert tag in step["run"]
+    assert "retention-hours must be a positive whole number of hours" in step["run"]
     run = action["runs"]["steps"][0]["run"]
     assert "--query '{state:provisioningState,id:id}'" in run
     assert "snapshot-resource-ids<<EOF" in run

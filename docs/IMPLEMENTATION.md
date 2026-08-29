@@ -112,6 +112,7 @@ The contract:
 | `targets` | YAML string | List of `{vm-name, apply-script, smoke-units}` maps. `smoke-units` can be empty. |
 | `op-tag` | string | Snapshot name prefix. Use the deploy mode (`deploy-on-merge`, `manual-apply`). |
 | `skip-snapshot` | string | "true" or "false". Maps to the `SKIP_SNAPSHOT=true` env var the snapshot action honours. |
+| `snapshot-retention-hours` | string | Positive whole-number recovery window for host snapshots. Defaults to `48`; the reusable records the expiry in `tc-expires-at`. |
 | `snapshot-policy` | string | `allowed` by default. `forbidden` selects the governed container-only exception and requires `skip-snapshot=true` plus `container-rollback-receipt-digest`. |
 | `container-rollback-receipt-digest` | string | Optional for normal callers; required as `sha256:<64 lowercase hex>` with `snapshot-policy=forbidden`. It identifies the verified pre-apply receipt binding protected backup paths, archive/manifest digests, and predecessor OCI image digest. |
 | `azure-{client,tenant,subscription}-id` | string | Repo variables. WIF needs these to mint the OIDC token. |
