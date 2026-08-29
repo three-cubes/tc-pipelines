@@ -8,8 +8,9 @@ tags: [ci, release, deployment, merge-queue, operations]
 
 # CI, Release and Deployment Architecture
 
-This architecture gives trunk-based repositories fast PR feedback, exact-merge
-validation, immutable release evidence and protected production deployment.
+This standard defines the release path for trunk-based repositories: PR
+feedback, exact-merge validation, immutable release evidence, and protected
+production deployment.
 
 ## The required flow
 
@@ -17,33 +18,30 @@ validation, immutable release evidence and protected production deployment.
 PR fast feedback ─┐
                   ├─ merge queue: exact integration gate ─ candidate record
                   │                                        │
-                  └─ (PR never deploys)                    ├─ protected publish
+                  └─ PR feedback                           ├─ protected publish
                                                            │
                                                            └─ protected production deploy
 ```
 
-The validation lanes have distinct roles:
+The validation lanes provide:
 
 1. **PR feedback** gives an author fast, path-aware evidence before merge.
 2. **Merge-queue validation** proves the synthetic exact integration commit.
 
-The merge queue validates the integration commit. Post-merge attestation records
-provenance for that same candidate.
+The merge queue validates the integration commit. The release workflow records
+provenance for that commit in the candidate record.
 
 ## Required repository configuration
 
-Queue-capable repositories enable GitHub merge queue on the protected default
-branch and require the queue contexts. Consumer CI subscribes to `merge_group`.
-Private repositories without merge-queue support use the strict required-status
-ruleset profile (`main-core.json` or `main-product.json`) and retain exact-main
-validation. During migration, the consumer keeps
-its exact-main post-merge validation until a queue run has emitted the required
-contexts for a synthetic merge.
+Repositories with merge queue enable it on the protected default branch, require
+the queue contexts, and subscribe CI to `merge_group`. Queue-less private
+repositories use the strict `main-core.json` or `main-product.json` ruleset and
+exact-main validation. During migration, keep exact-main validation until a
+queue run emits the required synthetic-merge contexts.
 
-Every release repository also applies the `release-tags.json` ruleset. It blocks
-updates and deletion for release tags while preserving a recorded, auditable
-bypass path. The publish job creates immutable release assets and verifies their
-digest before deployment.
+Release repositories apply `release-tags.json`. It protects release tags from
+updates and deletion, records bypasses, and lets the publish job verify the
+immutable asset digest before deployment.
 
 ## Candidate, publish and deploy
 
@@ -62,54 +60,45 @@ A release candidate is a durable machine record:
 }
 ```
 
-The preparation job serializes release identity allocation, reserves one unique
-repository-native version tag, builds and verifies exact candidate bytes, then
-records the identity. `generation` is the next deployable positive generation;
-`state` is one of `active`, `revoked`, `superseded`, or `deployed`; and
-`release_notes_mode` is the selected `changelog` or `generated` mode. The
-protected publish job consumes that complete artifact directly.
+The preparation job allocates the version tag, builds and verifies the release
+bytes, and writes this record. `generation` identifies the next deployable
+generation. `state` records `active`, `revoked`, `superseded`, or `deployed`.
+`release_notes_mode` records `changelog` or `generated`. The protected publish
+job reads the record and publishes the referenced bytes.
 
 The published candidate dispatches production deployment. The protected
-Environment controls the decision. Target-side deployment verifies the public
-immutable assets and candidate receipt before apply.
+Environment approves the deployment. The target verifies the release assets and
+candidate receipt before apply.
 
 ## Production verification and PVT
 
-Production verification is an executable stage of the deployment workflow. A
-deployment that declares an attested PVT invokes the product-owned live PVT
-runner after the target-side apply and smoke boundary. The runner writes a
-receipt bound to the release identity, runtime identity, probes and captured
-evidence. A green receipt promotes the deployed candidate to known-good; a
-held or failed receipt retains the evidence and enters the product's explicit
-hold, rollback or fix-forward path.
+The product deployment workflow runs live PVT after target-side apply and smoke
+checks. The PVT runner writes a receipt containing the release identity, runtime
+identity, probes, and evidence. A green receipt promotes the candidate to
+known-good. A held or failed receipt preserves the evidence and selects the
+product's hold, rollback, or fix-forward path.
 
-Same-repository `workflow_dispatch` may use the scoped `GITHUB_TOKEN`: GitHub
-creates a run for this event. Cross-repository dispatch and handoffs that need
-the canonical App identity use a short-lived GitHub App token. The publisher
-records the release tag, target workflow and PVT contract in its job summary.
-The target workflow owns production approval and the terminal PVT verdict.
+Same-repository `workflow_dispatch` uses the scoped `GITHUB_TOKEN`. A
+cross-repository handoff or App-audited handoff uses a short-lived GitHub App
+token. The publisher summary records the release tag, target workflow, and PVT
+contract. The target workflow records production approval and the PVT verdict.
 
-Generic infrastructure deployment workflows expose only the checks they run.
-They record component smoke and their own rollback result. A generic smoke
-notice is not PVT evidence and cannot complete a product release.
+Generic infrastructure deployment workflows record their component smoke and
+rollback result. The product deployment workflow writes the PVT receipt that
+completes the product release.
 
-At publish and deploy time, verify that the candidate SHA is the successful
-merge-group head with a durable mapping to the resulting protected-branch tip,
-or the successful exact-main head for queue-less repositories. Its attested
-assets match the candidate record and its generation is the next deployable
-generation. An arbitrary merged ancestor is not a release candidate.
-Candidate state records `active`, `revoked`, `superseded` and `deployed`; an
-explicit rollback operation selects an earlier deployed generation.
+At publish and deploy time, use the successful merge-group head with its durable
+mapping to the protected-branch tip. A queue-less repository uses its successful
+exact-main head. Verify that the assets match the candidate record and that the
+generation is next. Candidate state records `active`, `revoked`, `superseded`,
+and `deployed`. Rollback selects an earlier deployed generation.
 
 ## Release metadata
 
-Each repository keeps its established version scheme. For a repository whose
-release policy selects CalVer and whose version is not an input to a package
-build, derive CalVer from the protected immutable tag set in the release
-workflow and store it in the candidate record. Repositories with a semantic or
-other native version format allocate that format instead. The migration adds
-reusable `changelog` and `generated` release-note modes; the selected mode is
-part of the candidate record.
+Each repository uses its established version scheme. A CalVer repository derives
+its tag from the protected tag set in the release workflow. A repository with a
+semantic or other native format allocates that format. The candidate record
+stores the selected `changelog` or `generated` release-note mode.
 
 ## Toolchain ownership
 
@@ -129,11 +118,11 @@ bootstrap and reusable jobs resolve the same values.
 
 1. Author a PR and use the repository's under-60-second local smoke command.
 2. Let the green PR enter the merge queue.
-3. The queue's exact integration result becomes the only merge admission.
-4. Start one release candidate operation for the successful merge-group head
-   mapped to the resulting main tip, or for the successful exact-main head in a
-   queue-less repository. It records the candidate identity and preparation
-   evidence.
+3. The queue's exact integration result provides merge admission.
+4. Start the release candidate operation for the successful merge-group head
+   and its main-tip mapping, or for the successful exact-main head in a
+   queue-less repository. The operation records candidate identity and
+   preparation evidence.
 5. Approve the protected publish Environment after reviewing the candidate
    summary. GitHub publishes the exact prepared bytes.
 6. Approve the protected production Environment. The deploy stages, verifies,
@@ -152,17 +141,16 @@ bootstrap and reusable jobs resolve the same values.
 2. Prove a queue run emits every required context on a synthetic merge.
 3. Replace separate prepare/publish dispatches with one workflow DAG separated
    by the protected publish Environment.
-4. Replace manual deployment dispatch with a candidate-record handoff and
-   retain the protected production approval in the target workflow. Use
-   `GITHUB_TOKEN` for same-repository dispatch or an App token where the
-   handoff crosses repositories or requires App identity.
+4. Replace manual deployment dispatch with the candidate-record handoff and
+   retain protected production approval in the target workflow. Use
+   `GITHUB_TOKEN` for same-repository dispatch. Use an App token for
+   cross-repository or App-audited handoffs.
 5. Bind the deployment's live PVT receipt to candidate promotion and recovery
    state.
-6. Scope `deploy-on-merge` to generic infrastructure work and remove product
-   release qualification from that workflow. Published candidates remain the
-   only production handoff for product release paths.
-7. Remove the VERSION-only trigger and verify that a release no longer causes a
-   second full language/E2E matrix.
+6. Scope `deploy-on-merge` to generic infrastructure work. Dispatch product
+   deployment from published candidates.
+7. Configure the release trigger once and verify that each release runs one
+   full language/E2E matrix.
 
 The reusable-workflow implementation belongs in `tc-pipelines`; Hermetic build,
 runtime provenance and VM-specific verification stay with the consuming product
