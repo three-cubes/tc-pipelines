@@ -60,11 +60,12 @@ A release candidate is a durable machine record:
 }
 ```
 
-The preparation job allocates the version tag, builds and verifies the release
-bytes, and writes this record. `generation` identifies the next deployable
-generation. `state` records `active`, `revoked`, `superseded`, or `deployed`.
-`release_notes_mode` records `changelog` or `generated`. The protected publish
-job reads the record and publishes the referenced bytes.
+The preparation job serializes release identity allocation, reserves one unique
+repository-native version tag, builds and verifies the release bytes, and writes
+this record. `generation` identifies the next deployable generation. `state`
+records `active`, `revoked`, `superseded`, or `deployed`. `release_notes_mode`
+records `changelog` or `generated`. The protected publish job reads the record
+and publishes the referenced bytes.
 
 The published candidate dispatches production deployment. The protected
 Environment approves the deployment. The target verifies the release assets and
@@ -95,10 +96,12 @@ and `deployed`. Rollback selects an earlier deployed generation.
 
 ## Release metadata
 
-Each repository uses its established version scheme. A CalVer repository derives
-its tag from the protected tag set in the release workflow. A repository with a
-semantic or other native format allocates that format. The candidate record
-stores the selected `changelog` or `generated` release-note mode.
+Each repository uses its established version scheme. A CalVer package build uses
+the version that its package metadata supplies. A CalVer release process that
+controls the version derives its tag from the protected tag set in the release
+workflow. A repository with a semantic or other native format allocates that
+format. The candidate record stores the selected `changelog` or `generated`
+release-note mode.
 
 ## Toolchain ownership
 
