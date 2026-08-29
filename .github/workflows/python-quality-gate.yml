@@ -46,11 +46,11 @@ on:
     inputs:
       # ── Toolchain pins (forwarded to setup-uv-cached) ───────────────────
       python-version:
-        description: "Python version uv resolves against."
+        description: "Explicit Python compatibility-matrix value. The carrier release keeps the existing 3.12 default."
         type: string
         default: "3.12"
       uv-version:
-        description: "Pinned uv version (org standard)."
+        description: "Explicit uv compatibility-matrix value. The carrier release keeps the existing 0.12.5 default."
         type: string
         default: "0.12.5"
       fetch-depth:

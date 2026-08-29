@@ -2,11 +2,16 @@ name: setup-uv-cached
 description: Pinned uv with a cached venv for three-cubes Python repos. The org-standard install seam.
 inputs:
   uv-version:
-    description: uv version to pin (keep in step with the org standard).
-    default: "0.12.5"
+    description: >-
+      Explicit uv version for a compatibility matrix. Empty reads `.uv-version`
+      from the checked-out repository, then uses the legacy fallback.
+    default: ""
   python-version:
-    description: Python version uv resolves against.
-    default: "3.12"
+    description: >-
+      Explicit Python version for a compatibility matrix. Empty reads
+      `.python-version` from the checked-out repository, then uses the legacy
+      fallback.
+    default: ""
   sync-args:
     description: >-
       Arguments to `uv sync`. Workspace repos use `--locked --all-packages`;
@@ -20,11 +25,48 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Resolve repository toolchain
+      id: toolchain
+      shell: bash
+      env:
+        INPUT_UV_VERSION: ${{ inputs.uv-version }}
+        INPUT_PYTHON_VERSION: ${{ inputs.python-version }}
+      run: |
+        set -euo pipefail
+
+        valid_uv_version() {
+          [[ "$1" =~ ^[0-9][0-9A-Za-z.+-]*$ ]]
+        }
+
+        valid_python_request() {
+          [[ "$1" =~ ^([A-Za-z0-9][A-Za-z0-9@._+~-]*|[<>=!~]+[0-9][A-Za-z0-9@<>=,!._+~-]*)$ ]]
+        }
+
+        resolve_version() {
+          local output_name="$1" input_value="$2" version_file="$3" fallback="$4" validator="$5"
+          local value="$input_value"
+          if [[ -z "$value" && -f "$version_file" ]]; then
+            value="$(head -n 1 "$version_file")"
+          fi
+          value="${value%$'\r'}"
+          value="${value:-$fallback}"
+          "$validator" "$value" || {
+            echo "::error title=Invalid toolchain version::${version_file} or the explicit input contains '${value}'." >&2
+            exit 1
+          }
+          printf '%s=%s\n' "$output_name" "$value" >> "$GITHUB_OUTPUT"
+        }
+
+        # Repository files are the authored source. Explicit inputs make an
+        # intentional compatibility matrix possible. Fallbacks keep existing
+        # consumers working while they add the two source files.
+        resolve_version uv_version "$INPUT_UV_VERSION" .uv-version 0.12.5 valid_uv_version
+        resolve_version python_version "$INPUT_PYTHON_VERSION" .python-version 3.12 valid_python_request
     - name: Install pinned uv (cached)
       uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       with:
-        version: ${{ inputs.uv-version }}
-        python-version: ${{ inputs.python-version }}
+        version: ${{ steps.toolchain.outputs.uv_version }}
+        python-version: ${{ steps.toolchain.outputs.python_version }}
         enable-cache: true
         # Root-anchored, with no `**`. The action's default glob walks the
         # whole workspace, so in a repo that also carries a pnpm workspace it
@@ -44,6 +86,8 @@ runs:
           pyproject.toml
     - name: uv sync
       shell: bash
+      env:
+        UV_PYTHON: ${{ steps.toolchain.outputs.python_version }}
       run: uv sync ${{ inputs.sync-args }}
     - name: Install CI tools (require-hashes)
       if: inputs.ci-requirements != ''

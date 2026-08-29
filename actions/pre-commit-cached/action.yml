@@ -10,10 +10,10 @@ description: >-
   only near-term consumer; the inputs stay kairix-shaped.
 inputs:
   uv-version:
-    description: uv version to pin (forwarded to setup-uv-cached; keep in step with the org standard).
+    description: Explicit uv compatibility-matrix value. The carrier release keeps the existing 0.12.5 default.
     default: "0.12.5"
   python-version:
-    description: Python version uv resolves against (forwarded to setup-uv-cached).
+    description: Explicit Python compatibility-matrix value. The carrier release keeps the existing 3.12 default.
     default: "3.12"
   sync-args:
     description: >-

@@ -46,8 +46,6 @@ jobs:
           fetch-depth: 0
       - name: Set up uv + Python
         uses: three-cubes/tc-pipelines/actions/setup-uv-cached@1c2944c0cca248bd42fa2e56e84fc3d97a9c698b # v1.19.11
-        with:
-          python-version: "3.12"
       - name: Install the harness dependencies
         run: uv sync --locked
       - name: Run the contract tests
