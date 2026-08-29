@@ -73,6 +73,11 @@ on:
         required: false
         type: string
         default: 'false'
+      snapshot-retention-hours:
+        description: Recovery window in whole hours for host snapshots. The default is 48 hours and is recorded in the snapshot expiry tag.
+        required: false
+        type: string
+        default: '48'
       snapshot-policy:
         description: |
           Snapshot policy for this deployment. "allowed" preserves the
@@ -411,12 +416,13 @@ jobs:
       - name: Snapshot all VMs
         id: snapshot
         if: ${{ inputs.snapshot-policy != 'forbidden' }}
-        uses: three-cubes/tc-pipelines/.github/actions/snapshot-azure-vm-disk@1c2944c0cca248bd42fa2e56e84fc3d97a9c698b # v1.19.11
+        uses: ./.github/actions/snapshot-azure-vm-disk
         with:
           resource-group: ${{ inputs.resource-group }}
           vm-names: ${{ steps.parse.outputs.vm-list }}
           op-tag: ${{ inputs.op-tag }}
           skip: ${{ inputs.skip-snapshot }}
+          retention-hours: ${{ inputs.snapshot-retention-hours }}
 
       - name: Verify host snapshots are forbidden
         if: ${{ inputs.snapshot-policy == 'forbidden' }}

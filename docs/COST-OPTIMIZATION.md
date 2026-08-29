@@ -6,7 +6,7 @@ Where the money goes in a Three Cubes-shaped Azure + GitHub CI/CD setup, and the
 
 | Move | Effort | Monthly saving (typical) |
 |---|---|---|
-| Add a snapshot-prune cron (14-day retention) | 1h | $20–$150 |
+| Add a snapshot-prune cron (48-hour retention) | 1h | $20–$150 |
 | Right-size always-on VMs to B-series or stop-when-idle | 4h | $30–$200 |
 | Move CI to a self-hosted runner on an existing local box (Mac mini / NUC) | 1d setup | $0–$30 (you're likely in free Actions tier today; this is insurance) |
 | Skip permanent staging tier; use ephemeral PR envs OR smoke-on-prod | n/a | $50–$300 (a tier you don't pay for) |
@@ -46,14 +46,22 @@ Every CI deploy from `azure-vm-deploy.yml` creates one snapshot per target VM. A
 - OS disk snapshot ~30 GB × $0.05/GB-month = **$1.50/snapshot/month**
 - 1 deploy/day × 2 VMs × 30 days = 60 snapshots = **$90/month accumulating** indefinitely
 
-**The cron** (add to every consumer repo):
+**The scheduled pruner** runs in each consumer repo and deletes tagged
+pre-deploy recovery snapshots after their 48-hour recovery window. It calls the
+same reusable lifecycle action that defines the Azure query and deletion logic:
 
 ```yaml
-name: "Prune deploy snapshots (14d retention)"
+name: "Prune deploy snapshots"
 on:
   schedule:
     - cron: '17 4 * * *'   # 4:17 UTC daily
   workflow_dispatch:
+    inputs:
+      prune-legacy-deployment-snapshots:
+        description: Include untagged snapshots created before lifecycle tags.
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -69,17 +77,18 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Delete snapshots older than 14 days
-        run: |
-          set -euo pipefail
-          CUTOFF=$(date -u -d '14 days ago' +%Y-%m-%dT%H:%M:%SZ)
-          NAMES=$(az snapshot list -g RG-AGENTS-CORE \
-            --query "[?contains(name, 'pre-deploy') && timeCreated < '$CUTOFF'].name" -o tsv)
-          for n in $NAMES; do
-            echo "Deleting $n"
-            az snapshot delete -g RG-AGENTS-CORE -n "$n" --no-wait
-          done
+      - uses: three-cubes/tc-pipelines/.github/actions/prune-azure-vm-snapshots@<sha> # vX.Y.Z
+        with:
+          resource-group: RG-AGENTS-CORE
+          retention-hours: '48'
+          prune-legacy-deployment-snapshots: ${{ inputs.prune-legacy-deployment-snapshots || 'false' }}
 ```
+
+Run the workflow once with `prune-legacy-deployment-snapshots=true` after
+adopting lifecycle tags. That migration deletes only untagged snapshots whose
+name matches the former `*-osdisk-pre-*` deployment convention and whose
+creation time is older than 48 hours. Later scheduled runs delete tagged
+snapshots by their expiry timestamp.
 
 (`Disk Snapshot Contributor` already grants `snapshots/delete` — no extra RBAC needed.)
 
@@ -174,7 +183,7 @@ Trigger conditions for each move:
 
 | Saving | When to act |
 |---|---|
-| Snapshot prune cron | NOW — every PR you merge adds ~$3/month accumulating |
+| Snapshot prune workflow | NOW — every deployment adds recoverable storage until its 48-hour expiry |
 | Right-size VMs | Within 1 week of having `az monitor` data showing < 30% CPU peak |
 | Auto-shutdown VMs | If both VMs are dev-hours-only AND you're OK with morning cold-start |
 | Self-hosted runner on B1s | When private-endpoint testing matters (FEAT-159 staging tier) |
@@ -187,6 +196,6 @@ To know if these decisions stay right as you scale:
 
 1. **GitHub Actions billing API** — `gh api /orgs/three-cubes/settings/billing/actions` returns total minutes used + spend. Add a monthly cron that posts the report to Slack.
 2. **Azure Cost Management API** — daily cost rollup by resource tag. Tag every Three Cubes resource with `Repo=<name>` so you can attribute spend per repo.
-3. **Snapshot count** — `az snapshot list -g RG-AGENTS-CORE --query 'length(@)'` should stay under ~30 (14-day retention × 2 daily snapshots).
+3. **Snapshot count** — `az snapshot list -g RG-AGENTS-CORE --query 'length(@)'` should stay close to the last 48 hours of deploys plus any deliberately retained recovery points.
 
 If any of these trends 2× month-over-month, revisit this doc.

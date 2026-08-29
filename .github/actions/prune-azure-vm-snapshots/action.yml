@@ -1,0 +1,77 @@
+name: 'Prune Azure deployment snapshots'
+description: |
+  Deletes expired pre-deploy recovery snapshots created by tc-pipelines.
+  Set prune-legacy-deployment-snapshots=true for one manually dispatched run
+  after migrating from untagged snapshot names.
+
+inputs:
+  resource-group:
+    description: Azure resource group containing the snapshots.
+    required: true
+  retention-hours:
+    description: Whole-hour age used by the one-time legacy migration.
+    required: false
+    default: '48'
+  prune-legacy-deployment-snapshots:
+    description: Include untagged legacy snapshots named *-osdisk-pre-* older than retention-hours.
+    required: false
+    default: 'false'
+
+outputs:
+  pruned-snapshot-names:
+    description: Newline-separated snapshot names submitted for deletion.
+    value: ${{ steps.prune.outputs.pruned-snapshot-names }}
+
+runs:
+  using: composite
+  steps:
+    - name: Delete expired deployment snapshots
+      id: prune
+      shell: bash
+      env:
+        RG: ${{ inputs.resource-group }}
+        RETENTION_HOURS: ${{ inputs.retention-hours }}
+        PRUNE_LEGACY: ${{ inputs.prune-legacy-deployment-snapshots }}
+      run: |
+        set -euo pipefail
+        if [[ ! "$RETENTION_HOURS" =~ ^[1-9][0-9]*$ ]]; then
+          echo "::error::retention-hours must be a positive whole number of hours"
+          exit 1
+        fi
+        if [[ "$PRUNE_LEGACY" != "true" && "$PRUNE_LEGACY" != "false" ]]; then
+          echo "::error::prune-legacy-deployment-snapshots must be true or false"
+          exit 1
+        fi
+
+        mapfile -t LIFECYCLE_TIMESTAMPS < <(python3 - "$RETENTION_HOURS" <<'PY'
+        import datetime as dt
+        import sys
+
+        now = dt.datetime.now(dt.UTC).replace(microsecond=0)
+        print(now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        print((now - dt.timedelta(hours=int(sys.argv[1]))).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        PY
+        )
+        NOW="${LIFECYCLE_TIMESTAMPS[0]}"
+        LEGACY_CUTOFF="${LIFECYCLE_TIMESTAMPS[1]}"
+        TAGGED_QUERY="[?tags.\"tc-managed-by\" == 'tc-pipelines' && tags.\"tc-purpose\" == 'pre-deploy-recovery' && tags.\"tc-expires-at\" < '$NOW'].name"
+        TAGGED_NAMES=$(az snapshot list -g "$RG" --query "$TAGGED_QUERY" -o tsv)
+        mapfile -t NAMES <<< "$TAGGED_NAMES"
+
+        if [[ "$PRUNE_LEGACY" == "true" ]]; then
+          LEGACY_QUERY="[?tags.\"tc-managed-by\" == null && contains(name, '-osdisk-pre-') && timeCreated < '$LEGACY_CUTOFF'].name"
+          LEGACY_OUTPUT=$(az snapshot list -g "$RG" --query "$LEGACY_QUERY" -o tsv)
+          mapfile -t LEGACY_NAMES <<< "$LEGACY_OUTPUT"
+          NAMES+=("${LEGACY_NAMES[@]}")
+        fi
+
+        {
+          echo "pruned-snapshot-names<<EOF"
+          for name in "${NAMES[@]}"; do
+            [[ -n "$name" ]] || continue
+            echo "Deleting $name"
+            az snapshot delete -g "$RG" -n "$name" --no-wait
+            echo "$name"
+          done
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"

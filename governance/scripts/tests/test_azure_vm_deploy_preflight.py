@@ -259,7 +259,105 @@ def test_snapshot_action_surfaces_created_resource_ids() -> None:
     assert action["outputs"]["snapshot-resource-ids"]["value"] == (
         "${{ steps.snap.outputs.snapshot-resource-ids }}"
     )
+
+
+def test_snapshot_lifecycle_is_incremental_and_tagged_for_the_48_hour_pruner() -> None:
+    action = yaml.load(
+        SNAPSHOT_ACTION.read_text(encoding="utf-8"), Loader=GithubActionsLoader
+    )
+    step = action["runs"]["steps"][0]
+    workflow_inputs = _workflow()["on"]["workflow_call"]["inputs"]
+
+    assert action["inputs"]["retention-hours"]["default"] == "48"
+    assert action["outputs"]["snapshot-expires-at"]["value"] == (
+        "${{ steps.snap.outputs.snapshot-expires-at }}"
+    )
+    assert workflow_inputs["snapshot-retention-hours"]["default"] == "48"
+    assert "retention-hours: ${{ inputs.snapshot-retention-hours }}" in WORKFLOW.read_text(
+        encoding="utf-8"
+    )
+    assert "--incremental true" in step["run"]
+    for tag in (
+        "tc-managed-by=tc-pipelines",
+        "tc-purpose=pre-deploy-recovery",
+        "tc-source-vm=${vm}",
+        "tc-created-at=${CREATED_AT}",
+        "tc-expires-at=${EXPIRES_AT}",
+    ):
+        assert tag in step["run"]
+    assert "retention-hours must be a positive whole number of hours" in step["run"]
     run = action["runs"]["steps"][0]["run"]
     assert "--query '{state:provisioningState,id:id}'" in run
     assert "snapshot-resource-ids<<EOF" in run
     assert "trap publish_outputs EXIT" in run
+
+
+def test_snapshot_pruner_uses_valid_tag_queries_and_explicit_legacy_migration() -> None:
+    pruner_path = REPO_ROOT / ".github" / "actions" / "prune-azure-vm-snapshots" / "action.yml"
+    pruner = yaml.load(pruner_path.read_text(encoding="utf-8"), Loader=GithubActionsLoader)
+    run = pruner["runs"]["steps"][0]["run"]
+
+    assert pruner["inputs"]["retention-hours"]["default"] == "48"
+    assert pruner["inputs"]["prune-legacy-deployment-snapshots"]["default"] == "false"
+    assert 'tags.\\"tc-managed-by\\"' in run
+    assert 'tags.\\"tc-expires-at\\"' in run
+    assert 'tags.\\"tc-purpose\\"' in run
+    assert "PRUNE_LEGACY" in run
+    assert "contains(name, '-osdisk-pre-')" in run
+    assert "timeCreated < '$LEGACY_CUTOFF'" in run
+
+
+def test_snapshot_pruner_executes_tagged_and_legacy_lifecycle_queries(tmp_path: Path) -> None:
+    pruner_path = REPO_ROOT / ".github" / "actions" / "prune-azure-vm-snapshots" / "action.yml"
+    pruner = yaml.load(pruner_path.read_text(encoding="utf-8"), Loader=GithubActionsLoader)
+    runner = tmp_path / "prune.sh"
+    runner.write_text(pruner["runs"]["steps"][0]["run"], encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "az.log"
+    az = bin_dir / "az"
+    az.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$FAKE_AZ_LOG"
+if [[ "$1 $2" == "snapshot list" ]]; then
+  query=""
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "--query" ]]; then query="$2"; break; fi
+    shift
+  done
+  if [[ "$query" == *"== null"* ]]; then
+    printf '%s\\n' legacy-osdisk-pre-deploy-1
+  else
+    printf '%s\\n' tagged-osdisk-pre-deploy-2
+  fi
+fi
+""",
+        encoding="utf-8",
+    )
+    az.chmod(az.stat().st_mode | stat.S_IXUSR)
+    output = tmp_path / "github-output"
+    result = subprocess.run(
+        ["bash", str(runner)],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RG": "rg-test",
+            "RETENTION_HOURS": "48",
+            "PRUNE_LEGACY": "true",
+            "GITHUB_OUTPUT": str(output),
+            "FAKE_AZ_LOG": str(log),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = log.read_text(encoding="utf-8")
+    assert 'tags."tc-managed-by"' in calls
+    assert "contains(name, '-osdisk-pre-')" in calls
+    assert "snapshot delete -g rg-test -n tagged-osdisk-pre-deploy-2 --no-wait" in calls
+    assert "snapshot delete -g rg-test -n legacy-osdisk-pre-deploy-1 --no-wait" in calls
+    assert "tagged-osdisk-pre-deploy-2" in output.read_text(encoding="utf-8")
+    assert "legacy-osdisk-pre-deploy-1" in output.read_text(encoding="utf-8")
