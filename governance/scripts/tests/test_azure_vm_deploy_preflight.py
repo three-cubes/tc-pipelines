@@ -240,13 +240,13 @@ def test_terminal_conflict_does_not_sleep_before_failure() -> None:
         assert script.index(terminal_guard) < script.index('sleep "$wait_seconds"')
 
 
-def test_snapshot_standard_documents_reversible_preflight_exception() -> None:
+def test_snapshot_standard_documents_reversible_preflight_path() -> None:
     standard = (
         REPO_ROOT / "governance" / "standards" / "snapshot-before-apply.md"
     ).read_text(encoding="utf-8")
 
-    assert "Reversible pre-snapshot admission exception" in standard
-    assert "must not change deployed application or configuration bytes" in standard
+    assert "Reversible pre-snapshot admission path" in standard
+    assert "Keep preflight to writer freezes and lease acquisition" in standard
     assert "partial preflight" in standard
     assert "failure or cancellation" in standard
 
