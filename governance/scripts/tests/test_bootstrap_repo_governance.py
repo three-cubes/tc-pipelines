@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.contract
 
@@ -76,6 +77,11 @@ def _required_contexts(ruleset: Path) -> list[str]:
         if rule.get("type") == "required_status_checks":
             return [c["context"] for c in rule["parameters"]["required_status_checks"]]
     return []
+
+
+def _workflow_triggers(ci_yaml: Path) -> dict:
+    workflow = yaml.safe_load(ci_yaml.read_text(encoding="utf-8"))
+    return workflow.get(True, workflow.get("on"))
 
 
 def test_help_exits_zero_and_documents_the_flags() -> None:
@@ -172,6 +178,7 @@ def test_help_lists_the_quality_gate_wiring_flags() -> None:
         "--fitness-tag",
         "--pipelines-tag",
         "--with-release",
+        "--merge-queue",
         "--out-dir",
         "--verify",
         "--verify-only",
@@ -246,6 +253,35 @@ def test_wiring_ci_emits_every_required_ruleset_context(tmp_path: Path) -> None:
         assert ctx in names or ctx in EXTERNAL_CONTEXTS, (
             f"ruleset requires '{ctx}' but ci.yml emits no job of that name"
         )
+
+
+def test_wiring_renders_the_validation_trigger_for_each_merge_profile(tmp_path: Path) -> None:
+    """Queue-less repos validate main; queue repos validate the synthetic merge."""
+
+    queue_less = tmp_path / "queue-less"
+    assert _render(queue_less).returncode == 0
+    queue_less_triggers = _workflow_triggers(queue_less / ".github/workflows/ci.yml")
+    assert {"pull_request", "push", "merge_group"} <= set(queue_less_triggers)
+    assert queue_less_triggers["push"]["branches"] == ["main"]
+
+    queue = tmp_path / "queue"
+    assert _render(queue, "--merge-queue").returncode == 0
+    queue_triggers = _workflow_triggers(queue / ".github/workflows/ci.yml")
+    assert {"pull_request", "merge_group"} <= set(queue_triggers)
+    assert "push" not in queue_triggers
+
+
+def test_wiring_auto_merge_listens_to_the_rendered_quality_workflow(tmp_path: Path) -> None:
+    """A workflow_run listener must track the workflow name, not its old label."""
+    out_dir = tmp_path / "wire"
+    assert _render(out_dir).returncode == 0
+
+    ci = yaml.safe_load((out_dir / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    auto_merge = yaml.safe_load(
+        (out_dir / ".github/workflows/auto-merge.yml").read_text(encoding="utf-8")
+    )
+    triggers = auto_merge.get(True, auto_merge.get("on"))
+    assert triggers["workflow_run"]["workflows"] == [ci["name"]]
 
 
 def test_verify_passes_on_a_clean_render(tmp_path: Path) -> None:

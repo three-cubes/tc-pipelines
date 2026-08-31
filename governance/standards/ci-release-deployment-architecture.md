@@ -39,6 +39,13 @@ repositories use the strict `main-core.json` or `main-product.json` ruleset and
 exact-main validation. During migration, keep exact-main validation until a
 queue run emits the required synthetic-merge contexts.
 
+The governance bootstrap renders the queue-less profile by default: PR,
+`merge_group`, and exact-main `push` triggers. After the merge queue is enabled
+in the GitHub UI and a queue run has emitted every required context, render with
+`--merge-queue`; that profile keeps PR and `merge_group` triggers and removes
+the post-merge full gate. This prevents duplicate full CI without losing the
+release evidence for the final integrated commit.
+
 Release repositories apply `release-tags.json`. It protects release tags from
 updates and deletion, records bypasses, and lets the publish job verify the
 immutable asset digest before deployment.

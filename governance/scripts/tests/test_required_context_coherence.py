@@ -37,6 +37,7 @@ WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
 RULESET_DIR = REPO_ROOT / "governance" / "rulesets"
 
 SELF_CHECK = WORKFLOW_DIR / "ci.yml"
+LOOP_DISPATCH = WORKFLOW_DIR / "loop-dispatch.yml"
 GATE = WORKFLOW_DIR / "python-quality-gate.yml"
 FAN_IN = "gate"
 
@@ -76,6 +77,12 @@ SKIP_IS_LEGITIMATE: dict[str, str] = {
 
 def _load(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def _triggers(path: Path) -> dict:
+    """Load Actions event names without YAML 1.1 turning ``on`` into ``True``."""
+    document = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader) or {}
+    return document.get("on") or {}
 
 
 def _jobs(document: dict) -> dict:
@@ -142,6 +149,25 @@ def test_queue_less_profiles_require_current_base_status_checks(name: str) -> No
     rules = json.loads((RULESET_DIR / name).read_text(encoding="utf-8")).get("rules") or []
     required = next(rule for rule in rules if rule.get("type") == "required_status_checks")
     assert required["parameters"]["strict_required_status_checks_policy"] is True
+
+
+def test_self_check_is_ready_for_queue_validation_and_cancels_superseded_pr_runs() -> None:
+    """Keep the dogfood gate aligned with the profile that bootstrap ships."""
+    triggers = _triggers(SELF_CHECK)
+    assert {"pull_request", "push", "merge_group"} <= set(triggers)
+    assert triggers["push"]["branches"] == ["main"]
+
+    workflow = yaml.load(SELF_CHECK.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    concurrency = workflow.get("concurrency") or {}
+    assert "github.event.pull_request.number" in concurrency.get("group", "")
+    assert concurrency.get("cancel-in-progress") == "true"
+
+
+def test_loop_dispatch_has_no_idle_hosted_runner_schedule() -> None:
+    """An operational loop is invoked deliberately; cron dry-runs waste CI minutes."""
+    triggers = _triggers(LOOP_DISPATCH)
+    assert "workflow_dispatch" in triggers
+    assert "schedule" not in triggers
 
 
 def test_release_tags_are_immutable() -> None:

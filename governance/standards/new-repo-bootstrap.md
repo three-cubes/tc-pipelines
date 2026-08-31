@@ -22,6 +22,12 @@ Run the script against the target repo:
 governance/scripts/bootstrap-repo-governance.sh --repo three-cubes/<name>
 ```
 
+This renders the queue-less validation profile: PR feedback, `merge_group`
+readiness, and exact-main validation. After the repository has merge queue
+enabled in GitHub and a queue run has emitted every required context, add
+`--merge-queue` to remove the post-merge full gate. The migration steps and
+proof are defined in [CI, Release and Deployment Architecture](ci-release-deployment-architecture.md).
+
 It runs seven sections in order, each independently toggleable via a flag:
 
 1. **Repo variables** — reconcile `AZURE_CLIENT_ID` / `AZURE_SUBSCRIPTION_ID` /
@@ -222,7 +228,7 @@ the gate is proven green and deterministic — see
 
 For a new repo, in order:
 
-- [ ] Run `bootstrap-repo-governance.sh --repo three-cubes/<name>` (add `--verify`).
+- [ ] Run `bootstrap-repo-governance.sh --repo three-cubes/<name>` (add `--verify`; add `--merge-queue` only after its required-context proof).
 - [ ] On a branch, follow each printed `run (in a clone …)` sequence: the
       governance files, the affordance + harness payload, and the quality-gate
       wiring (merge the `pyproject` fragments into `pyproject.toml`).

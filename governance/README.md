@@ -7,9 +7,9 @@
 
 The canonical baseline a new Three Cubes repo adopts so its branch protection,
 review routing, dependency policy, and local gate all match the Golden Path —
-without hand-copying drift. Consumed by
-[`scripts/bootstrap-repo-governance.sh`](https://github.com/three-cubes/tc-agent-zone/blob/main/scripts/bootstrap-repo-governance.sh)
-(in tc-agent-zone), one command that wires a repo from these.
+without hand-copying drift. Applied by
+[`scripts/bootstrap-repo-governance.sh`](scripts/bootstrap-repo-governance.sh),
+which wires a repo from these templates.
 
 | File | What it sets | How it's applied |
 |---|---|---|

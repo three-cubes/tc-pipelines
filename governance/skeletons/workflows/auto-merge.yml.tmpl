@@ -1,7 +1,7 @@
 ---
 name: "auto-merge on green"
 
-# Lights-out merge for {{REPO}}: when the "Quality gate (PR + push)" workflow
+# Lights-out merge for {{REPO}}: when the "Quality gate" workflow
 # finishes for a PR and its fan-in "Quality gate" check-run is green, arm
 # `gh pr merge --auto` as the three-cubes-agent App. GitHub then merges ONLY once
 # branch protection is fully satisfied — including the CODEOWNERS review that
@@ -21,7 +21,7 @@ name: "auto-merge on green"
 
 on:
   workflow_run:
-    workflows: ["Quality gate (PR + push)"]
+    workflows: ["Quality gate"]
     types: [completed]
 
 permissions: {}
