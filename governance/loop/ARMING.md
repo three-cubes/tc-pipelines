@@ -1,12 +1,11 @@
-# ARMING — the runbook for the continuous-dispatch driver
+# ARMING — the runbook for the dispatch driver
 
-How the autonomous-delivery loop's **continuous-dispatch driver** is armed,
-disarmed, and escalated. The driver is
-[`loop_runner.py`](loop_runner.py), run on a cadence by
+How the autonomous-delivery loop's dispatch driver is armed, disarmed, and
+escalated. The driver is [`loop_runner.py`](loop_runner.py), invoked through
 [`.github/workflows/loop-dispatch.yml`](../../.github/workflows/loop-dispatch.yml).
-It is the piece that replaces the human hand-cranking the loop: each tick it
+It
 self-selects the next READY work item, guardrail-gates it, and — **only when
-armed and live** — hands it to an agent-spawn seam.
+armed, live, and explicitly requested** — hands it to an agent-spawn seam.
 
 > **The real spawn seam is now WIRED — and arming is STILL safe until the keys
 > are set.** The runtime is
@@ -14,14 +13,15 @@ armed and live** — hands it to an agent-spawn seam.
 > [`loop-implement.yml`](../../.github/workflows/loop-implement.yml) per item — a
 > GHA-hosted, headless `claude -p` run that implements the one work item and
 > opens the bot PR. It is selected by [`loop-dispatch.yml`](../../.github/workflows/loop-dispatch.yml)
-> **only** when `LOOP_ARMED == "true"` AND `LOOP_LIVE == "true"`; on every other
-> tick the runner falls back to the safe [`LoggingDispatchSink`](loop_runner.py)
+> **only** when `LOOP_ARMED == "true"`, `LOOP_LIVE == "true"`, and the dispatch
+> request sets `dry_run=false`; on every other invocation the runner falls back to the safe [`LoggingDispatchSink`](loop_runner.py)
 > (records the contract, **spawns nothing**). And even when the real sink is
 > wired, the runner's own gate ([`run_once`](loop_runner.py)) only *reaches* it
 > once armed + live + **past the soak window** + harness-green + not-halted — so a
 > disarmed / dry-run / soaking / red tick spawns nothing regardless. **Merging the
-> loop code changes NOTHING**: with the arming vars unset (the default) every tick
-> is dry-run and record-only. Arming for real is the deliberate two-key + soak act
+> loop code changes NOTHING**: it has no background schedule. With the arming
+> vars unset (the default), every requested run is dry-run and record-only.
+> Arming for real is the deliberate two-key + soak act
 > below.
 
 > **⛔ THE ENFORCEABILITY PRECONDITIONS THAT MAKE THE LIVE SINK SAFE — they must
@@ -51,8 +51,8 @@ flipping the arming variable's governance — takes **n+1 human review**.
 
 ## What "armed" means (and does not)
 
-Three gates must ALL hold before a **scheduled** tick can dispatch for real, and a
-fourth (soak) delays even that:
+Three gates must ALL hold before an explicitly live invocation can dispatch for
+real, and a fourth (soak) delays even that:
 
 1. **`LOOP_ARMED == "true"`** — a repo variable (the operator's first switch).
 2. **The guardrail harness self-validates THIS tick** — the runner re-runs the
@@ -60,7 +60,7 @@ fourth (soak) delays even that:
    (the harness file must exist and enough guardrail tests must run green); a red
    or missing harness `REFUSES` regardless of the variables.
 3. **`LOOP_LIVE == "true"`** — a **second, independent** repo variable (the "go
-   live" key). Until it is set, an armed scheduled tick stays **dry-run** so the
+   live" key). Until it is set, an armed invocation stays **dry-run** so the
    operator can review the recorded would-dispatch decisions (the soak).
 4. **Past the soak window** — even with 1–3, the runner keeps the first
    `LOOP_SOAK_TICKS` armed ticks record-only; only after that can it dispatch.
@@ -176,19 +176,20 @@ Three other candidates remain in `loop_runner.py` as documented STUBs (each rais
    # AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID = the repo WIF identity
    ```
 
-3. **Configure the soak window (recommended).** How many armed ticks stay
+3. **Configure the soak window (recommended).** How many armed invocations stay
    record-only before live is permitted (default `3` if unset):
 
    ```sh
    gh variable set LOOP_SOAK_TICKS --repo three-cubes/tc-pipelines --body 3
    ```
 
-4. **Enable the schedule.** Ensure the
-   [`loop-dispatch`](../../.github/workflows/loop-dispatch.yml) workflow is
-   enabled (Actions tab → `loop-dispatch` → *Enable workflow* if it was disabled).
-   The `*/30` cron then ticks every 30 minutes; each tick runs the runner. With
-   only `LOOP_ARMED` set, armed ticks stay **dry-run** and **soak** (record the
-   would-dispatch decision to the run log for review) — nothing goes live yet.
+4. **Run the soak deliberately.** GitHub-hosted cron is disabled because it
+   consumes runner minutes while the loop is idle. Request the required number
+   of record-only runs and review each run's would-dispatch decision:
+
+   ```sh
+   gh workflow run loop-dispatch.yml --repo three-cubes/tc-pipelines --ref main -f dry_run=true
+   ```
 
 5. **Review the soak, then flip the second key.** After watching the recorded
    would-dispatch decisions for at least `LOOP_SOAK_TICKS` armed ticks, set the
@@ -198,43 +199,42 @@ Three other candidates remain in `loop_runner.py` as documented STUBs (each rais
    gh variable set LOOP_LIVE --repo three-cubes/tc-pipelines --body true
    ```
 
-   Only now do scheduled ticks leave dry-run — and only once the runner's own
-   soak counter (persisted in the `loop-state` ref) has also elapsed, so the
-   very first armed tick still cannot dispatch. From this point a live tick
+   Only now can a request with `dry_run=false` leave dry-run — and only once the
+   runner's soak counter (persisted in the `loop-state` ref) has also elapsed, so
+   the first armed invocation still cannot dispatch. From this point a live invocation
    **fires the real `GitHubActionsDispatchSink`**: it triggers
    [`loop-implement.yml`](../../.github/workflows/loop-implement.yml) for the
    selected item, and a GHA-hosted `claude -p` run implements it and opens the
    bot PR. Confirm the App's installation permissions (precondition 4a) first.
 
-A scheduled tick goes live only when **`LOOP_ARMED` AND `LOOP_LIVE` are both
-`true` AND the soak has elapsed**. A **manual** run (`workflow_dispatch`) stays
-dry-run unless you set its `dry_run` input to `false` **and** both keys are set —
-a human must explicitly opt a manual tick into live on top of both repo keys.
+An invocation goes live only when **`LOOP_ARMED` AND `LOOP_LIVE` are both
+`true`, `dry_run=false`, and the soak has elapsed**. An operational scheduler
+may request this workflow after it has been provisioned and reviewed; the
+workflow does not create a standing schedule.
 
 ## SOAK — the mandatory dry-run before live
 
-After `LOOP_ARMED` flips true, the scheduled path does **not** go live on the next
-tick. Two layers enforce a soak so an operator can review "what would dispatch"
-before anything real happens, and the very first armed cron tick can never go
-live:
+After `LOOP_ARMED` flips true, the first live request does **not** dispatch. Two
+layers enforce a soak so an operator can review "what would dispatch" before
+anything real happens:
 
-- **The `LOOP_LIVE` second key.** Scheduled ticks stay dry-run until the operator
+- **The `LOOP_LIVE` second key.** Invocations stay dry-run until the operator
   ALSO sets `LOOP_LIVE=true` — a deliberate, separate confirmation made *after*
   reviewing the recorded would-dispatch decisions.
 - **The runner's soak counter.** Even once `LOOP_LIVE=true`, the runner keeps the
   first `LOOP_SOAK_TICKS` armed ticks record-only, incrementing a counter that
   **persists in the `loop-state` ref** (so the window elapses across the
   fresh-process ticks, not per-process). Only after the counter reaches
-  `LOOP_SOAK_TICKS` can a tick dispatch. This holds even if an operator sets both
-  keys at once — the cold armed tick still soaks.
+  `LOOP_SOAK_TICKS` can an invocation dispatch. This holds even if an operator
+  sets both keys at once — the cold armed invocation still soaks.
 
-Each soak tick records the `DispatchContract` it WOULD dispatch (visible in the
+Each soak invocation records the `DispatchContract` it WOULD dispatch (visible in the
 run log / JSON), with zero side effects. Manual `workflow_dispatch` runs stay
 dry-run by default regardless.
 
 ## DISARM / KILL-SWITCH
 
-Any one of these stops the loop; **it takes effect on the next tick**:
+Any one of these stops the loop; **it takes effect on the next invocation**:
 
 - **Set `LOOP_LIVE` to anything but `true`** (revert to soak/dry-run without
   fully disarming):
@@ -249,14 +249,14 @@ Any one of these stops the loop; **it takes effect on the next tick**:
   gh variable set LOOP_ARMED --repo three-cubes/tc-pipelines --body false
   ```
 
-  The next tick sees `armed=false` and reverts to dry-run (record-only).
+  The next invocation sees `armed=false` and reverts to dry-run (record-only).
 
-- **Disable the workflow** (Actions tab → `loop-dispatch` → *Disable workflow*),
-  or delete/comment the `schedule:` trigger. No further ticks fire.
+- **Disable the workflow** (Actions tab → `loop-dispatch` → *Disable workflow*).
+  No further invocations run.
 
 **In-flight work.** The real sink is now wired, so a live tick can have spawned a
 per-item [`loop-implement.yml`](../../.github/workflows/loop-implement.yml) run.
-Disarming (either key) stops *new* dispatch on the next tick, but does **not**
+Disarming (either key) stops *new* dispatch on the next invocation, but does **not**
 force-kill an already-spawned executor run: cancel that run from the Actions tab
 (`loop-implement` → the run for the issue → *Cancel*) to stop it mid-flight, or
 let it finish / hit its `--max-turns` + `timeout` bound. The kill-switch is

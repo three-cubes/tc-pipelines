@@ -1,10 +1,20 @@
 ---
 name: tc-pipelines self-check
 on:
-  push: { branches: [main] }
+  push: {branches: [main]}
   pull_request:
+  # Inert until this repository enables GitHub merge queue. Keeping the
+  # subscriber present means the fan-in check is available on the synthetic
+  # integration commit when that configuration changes.
+  merge_group:
 permissions:
   contents: read
+
+# A newer commit supersedes an in-flight PR validation. Exact-main validation
+# has its own ref-scoped group, so it is never coalesced with a PR run.
+concurrency:
+  group: tc-pipelines-self-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   # Dogfood: tc-pipelines runs the very meta gate it ships. A local-path
   # `uses:` (./.github/workflows/meta-quality-gate.yml) wires this self-check to

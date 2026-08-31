@@ -25,6 +25,7 @@
 #     --repo three-cubes/<name> \
 #     [--kv-name kv-tc-agents] \
 #     [--fitness-tag vX.Y.Z] [--pipelines-tag vN] \
+#     [--merge-queue] \
 #     [--sonar | --no-sonar] [--with-release] \
 #     [--sonar-project-key three-cubes_<name>] \
 #     [--out-dir <dir>] [--verify] [--verify-only] \
@@ -59,6 +60,7 @@ DRY_RUN=0
 FITNESS_TAG="v0.12.0"        # pinned tc-fitness engine (ships ci_consumes_shared_gate)
 PIPELINES_TAG="v1"           # pinned tc-pipelines reusables (floating major)
 DO_RELEASE=0                 # also render a release.yml caller
+MERGE_QUEUE=0                # exact-main push validation by default; queue profile opts out
 OUT_DIR=""                   # where wiring renders (default: a temp dir, reported)
 DO_VERIFY=0                  # run --verify after rendering
 VERIFY_ONLY=0                # verify an existing OUT_DIR, render nothing
@@ -92,6 +94,7 @@ while [[ $# -gt 0 ]]; do
     --no-wiring) DO_WIRING=0; shift ;;
     --fitness-tag) FITNESS_TAG="$2"; shift 2 ;;
     --pipelines-tag) PIPELINES_TAG="$2"; shift 2 ;;
+    --merge-queue) MERGE_QUEUE=1; shift ;;
     --with-release) DO_RELEASE=1; shift ;;
     --out-dir) OUT_DIR="$2"; shift 2 ;;
     --verify) DO_VERIFY=1; shift ;;
@@ -169,7 +172,20 @@ render_skeleton() {
 render_wiring() {
   local src="$1" dest="$2"
   mkdir -p "$(dirname "$dest")"
-  subst_tokens < "${SKELETON_DIR}/${src}" > "$dest"
+  subst_tokens < "${SKELETON_DIR}/${src}" | awk -v merge_queue="$MERGE_QUEUE" '
+    /\{\{EXACT_MAIN_PUSH_TRIGGER\}\}/ {
+      if (merge_queue != "1") {
+        print "  push:"
+        print "    branches: [main]"
+        print "    paths-ignore:"
+        print "      - \"**/*.md\""
+        print "      - \"CHANGELOG.md\""
+        print "      - \"docs/**\""
+      }
+      next
+    }
+    { print }
+  ' > "$dest"
 }
 
 # Render the canonical main ruleset to $2. Its required contexts are exactly the

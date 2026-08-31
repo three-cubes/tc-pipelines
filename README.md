@@ -175,7 +175,7 @@ Design notes: [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) · migration: [do
 
 ## Part 3 — Repo governance templates
 
-[`governance/`](governance/) holds the standard baseline a new repo adopts so its branch protection, review routing, dependency policy, and local check match the shared setup every repo uses: the `main` branch ruleset (`rulesets/main.json`), `CODEOWNERS`, `dependabot.yml`, and `pre-commit-config.yaml`. One command wires a repo from these — [`bootstrap-repo-governance.sh`](https://github.com/three-cubes/tc-agent-zone/blob/main/scripts/bootstrap-repo-governance.sh) (in tc-agent-zone). See [`governance/README.md`](governance/README.md).
+[`governance/`](governance/) holds the standard baseline a new repo adopts so its branch protection, review routing, dependency policy, and local check match the shared setup every repo uses: the `main` branch ruleset (`rulesets/main.json`), `CODEOWNERS`, `dependabot.yml`, and `pre-commit-config.yaml`. One command wires a repo from these — [`bootstrap-repo-governance.sh`](governance/scripts/bootstrap-repo-governance.sh). See [`governance/README.md`](governance/README.md).
 
 ---
 

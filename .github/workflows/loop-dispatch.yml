@@ -1,9 +1,8 @@
 name: loop-dispatch
 
-# The CONTINUOUS-DISPATCH DRIVER tick for the Autonomous Delivery Platform loop
+# The on-demand dispatch driver for the Autonomous Delivery Platform loop
 # (initiative pillar SP-C · Increment-3 "Shape-as-orchestrator + enforcing hooks"
 # · decision D5: the loop lives in committed GitHub-Actions event-dispatch). This
-# is the piece that replaces the human hand-cranking the loop: on a cadence it
 # runs `governance/loop/loop_runner.py`, which self-selects the next READY work
 # item, guardrail-gates it through the governor, and — only when ARMED and LIVE
 # and past the SOAK window — hands it to a dispatch sink.
@@ -14,7 +13,7 @@ name: loop-dispatch
 #   * It may move past dry-run ONLY when repo var LOOP_ARMED == "true" AND the
 #     runner self-confirms the guardrail harness validates THIS tick
 #     (arm_auto_dispatch precondition) AND the operator has set the SECOND key
-#     LOOP_LIVE == "true". Three gates for a scheduled live tick.
+#     LOOP_LIVE == "true". A caller must also set `dry_run=false`.
 #   * SOAK before live (FIX 3): even armed + live, the runner keeps the first
 #     LOOP_SOAK_TICKS armed ticks record-only — the very first armed tick can
 #     never dispatch. The soak counter lives in the durable ledger (below), so
@@ -27,7 +26,7 @@ name: loop-dispatch
 #     and be inert. An armed + live tick refuses to run without the durable file.
 #   * SINK SELECTION is belt-and-suspenders with the runner's own gate. On the
 #     go-live path ONLY — repo vars LOOP_ARMED == "true" AND LOOP_LIVE == "true"
-#     AND (a scheduled tick, or a manual tick with dry_run=false) — this workflow
+#     AND a `workflow_dispatch` request with dry_run=false — this workflow
 #     mints the bot App dispatch token and passes `--sink github-actions`, wiring
 #     the REAL GitHubActionsDispatchSink (which triggers loop-implement.yml per
 #     item). On EVERY other tick it passes nothing, so the runner falls back to
@@ -37,7 +36,7 @@ name: loop-dispatch
 #     even when the real sink is wired. See governance/loop/ARMING.md.
 #
 # KILL-SWITCH: set repo variable LOOP_ARMED (or LOOP_LIVE) to anything but "true"
-# (or disable this workflow). Takes effect on the NEXT tick: an already-spawned
+# (or disable this workflow). Takes effect on the next invocation: an already-spawned
 # per-item loop-implement.yml run is not force-killed — cancel that run from the
 # Actions tab to stop it — but no NEW item is dispatched. See ARMING.md.
 #
@@ -57,18 +56,12 @@ name: loop-dispatch
 # Part of the Autonomous Delivery Platform initiative (SP-C).
 
 on:
-  schedule:
-    # Every 30 minutes. The cadence is deliberately modest; the governor's
-    # dispatch rate-limit (PLA-241) is the real throttle once a runtime is wired.
-    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
         description: >-
-          Force dry-run (record-only) even if LOOP_ARMED=true. Default true, so a
-          MANUAL run is dry-run unless you explicitly set this false AND the repo
-          is armed AND LOOP_LIVE=true. Scheduled ticks ignore this and go live
-          only when armed + LOOP_LIVE + past the soak window.
+          Run record-only by default. A live invocation requires false here,
+          LOOP_ARMED=true, LOOP_LIVE=true, and a completed soak window.
         type: boolean
         default: true
 
@@ -82,7 +75,7 @@ permissions:
   contents: write
   id-token: write
 
-# One tick at a time. Never cancel an in-flight tick (it is read-only + short).
+# One invocation at a time. Never cancel an in-flight run.
 concurrency:
   group: loop-dispatch
   cancel-in-progress: false
@@ -141,8 +134,8 @@ jobs:
         # Belt-and-suspenders sink selection: mint the bot App installation token
         # that the runner's REAL GitHubActionsDispatchSink uses to POST the
         # per-item workflow_dispatch — but ONLY on the exact go-live condition
-        # (armed AND live AND a scheduled tick, or a manual tick with dry_run
-        # false). On every other tick this step is skipped, its token output is
+        # (armed AND live AND a request with dry_run=false). On every other
+        # invocation this step is skipped, its token output is
         # empty, and the runner falls back to the safe LoggingDispatchSink. The
         # token is scoped to THIS repo (tc-pipelines) — where loop-implement.yml
         # lives — and must be a non-Actions token so the dispatched workflow
@@ -150,7 +143,7 @@ jobs:
         id: dispatch_app
         if: >-
           vars.LOOP_ARMED == 'true' && vars.LOOP_LIVE == 'true' &&
-          (github.event_name == 'schedule' || github.event.inputs.dry_run == 'false')
+          github.event.inputs.dry_run == 'false'
         uses: ./.github/actions/github-app-token
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -187,21 +180,17 @@ jobs:
           armed=false
           if [[ "${LOOP_ARMED:-}" == "true" ]]; then armed=true; fi
 
-          # --- Dry-run decision. A tick may go live ONLY when armed AND the
+          # --- Dry-run decision. An invocation may go live ONLY when armed AND the
           #     operator has set the SECOND key LOOP_LIVE="true" (after reviewing
-          #     the soak's recorded would-dispatch decisions). A MANUAL tick
-          #     additionally honours the dry_run input (default true), so a human
-          #     must explicitly opt in on top of both repo keys. Even then the
+          #     the soak's recorded would-dispatch decisions). The caller must
+          #     explicitly opt in on top of both repo keys. Even then the
           #     runner enforces the soak window before any real dispatch. ---
           live_key=false
           if [[ "${LOOP_LIVE:-}" == "true" ]]; then live_key=true; fi
           dry_run=true
-          if [[ "$armed" == "true" && "$live_key" == "true" ]]; then
-            if [[ "$EVENT_NAME" == "schedule" ]]; then
-              dry_run=false
-            elif [[ "${REQUEST_DRY_RUN:-true}" == "false" ]]; then
-              dry_run=false
-            fi
+          if [[ "$armed" == "true" && "$live_key" == "true" \
+              && "${REQUEST_DRY_RUN:-true}" == "false" ]]; then
+            dry_run=false
           fi
 
           # --- Secret-free Linear key: fetch from Key Vault via the WIF session,

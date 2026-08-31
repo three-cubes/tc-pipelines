@@ -1,5 +1,5 @@
 ---
-name: "Quality gate (PR + push)"
+name: "Quality gate"
 
 # {{REPO}}'s single quality lane. The whole gate is the repo-local
 # `[tool.tc_fitness]` block in pyproject.toml; the org-shared reusable
@@ -20,12 +20,10 @@ name: "Quality gate (PR + push)"
 # bootstrap `--verify` step catches a `Quality gate` vs `CI gate` drift.
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - "CHANGELOG.md"
-      - "docs/**"
+  # Queue-less repositories validate the final main commit. The bootstrap
+  # renderer inserts this trigger by default and removes it only for the
+  # --merge-queue profile, where merge_group validates the synthetic merge.
+  # {{EXACT_MAIN_PUSH_TRIGGER}}
   pull_request:
     branches: [main]
   merge_group:
