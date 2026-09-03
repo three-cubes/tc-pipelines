@@ -50,9 +50,6 @@ jobs:
       tag-message: kairix $VERSION
       draft: true
       ref: main
-    secrets:
-      gh-token: dummy-token-shape-check-only
-
   release-taz:
     if: ${{ inputs.run-for-real }}
     uses: ./.github/workflows/release.yml

@@ -1,0 +1,133 @@
+name: dispatch consumer repins
+
+# A tc-pipelines release is immutable only when consumers adopt the exact commit
+# named by its tag. The App dispatches that tag/SHA pair to each enrolled
+# consumer; consumers verify the pair again before writing a bot PR.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Published immutable tc-pipelines release tag"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch-tc-agent-zone:
+    name: Dispatch tc-agent-zone repin
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+    steps:
+      - name: Validate immutable release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.version }}
+        run: |
+          set -euo pipefail
+          version="$RELEASE_TAG"
+          [[ "$version" =~ ^v[0-9]+(\.[0-9]+){2}([.-][0-9A-Za-z]+)*$ ]] || {
+            echo "::error::release tag must be an immutable vX.Y.Z tag"
+            exit 64
+          }
+          release="$(gh api "repos/three-cubes/tc-pipelines/releases/tags/${version}")" || {
+            echo "::error::${version} is not a GitHub Release"
+            exit 65
+          }
+          jq -e '.draft == false' <<<"$release" >/dev/null || {
+            echo "::error::${version} is a draft release and has not been published"
+            exit 66
+          }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the published tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.release.outputs.version }}
+          fetch-depth: 1
+
+      - name: Mint three-cubes-agent token for tc-agent-zone
+        id: app
+        uses: ./.github/actions/github-app-token
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          owner: three-cubes
+          repositories: tc-agent-zone
+
+      - name: Dispatch immutable release to tc-agent-zone
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::published tag did not resolve to a commit SHA"
+            exit 65
+          }
+          payload="$(jq -cn --arg sha "$sha" --arg version "$VERSION" '{event_type: "tc-pipelines-release", client_payload: {"sha": $sha, "version": $version}}')"
+          gh api --method POST repos/three-cubes/tc-agent-zone/dispatches --input - <<<"$payload"
+          {
+            echo "## Consumer repin dispatch"
+            echo ""
+            echo "- Consumer: \`three-cubes/tc-agent-zone\`"
+            echo "- Release: \`${VERSION}\`"
+            echo "- Commit: \`${sha}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mint three-cubes-agent token for tc-pipelines
+        id: self-app
+        uses: ./.github/actions/github-app-token
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          owner: three-cubes
+          repositories: tc-pipelines
+
+      - name: Open self-pin repin pull request
+        env:
+          GH_TOKEN: ${{ steps.self-app.outputs.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse "${VERSION}^{commit}")"
+          branch_version="${VERSION#v}"
+          branch_version="${branch_version//./-}"
+          BRANCH="three-cubes-agent/release-self-pins-v${branch_version}"
+          existing_pr="$(gh pr list --state open --head "$BRANCH" --json url --jq '.[0].url // empty')"
+          if [[ -n "$existing_pr" ]]; then
+            echo "Self-pin repin PR already open: $existing_pr" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git fetch origin main
+          git switch --create "$BRANCH" origin/main
+          governance/scripts/repin_self_references.py --sha "$SHA" --version "$VERSION"
+          governance/scripts/repin_self_references.py --check --sha "$SHA" --version "$VERSION"
+          if git diff --quiet; then
+            echo "tc-pipelines already pins $VERSION ($SHA)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git config user.name 'three-cubes-agent[bot]'
+          git config user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com'
+          git add .github/workflows .github/actions actions
+          git commit -m "chore: repin tc-pipelines self references ${VERSION}"
+          git push origin "HEAD:${BRANCH}"
+          pr_url="$(gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: repin tc-pipelines self references ${VERSION}" \
+            --body "Automated immutable self-pin adoption for ${VERSION} (${SHA}).")"
+          gh pr merge --auto --merge "$pr_url"
+          echo "- Self-pin PR: ${pr_url}" >> "$GITHUB_STEP_SUMMARY"
