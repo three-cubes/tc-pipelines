@@ -205,6 +205,25 @@ def test_protected_apply_can_surface_only_a_bounded_safe_diagnostic() -> None:
     assert "sort -u" in apply
 
 
+def test_protected_apply_can_surface_a_bounded_urlsafe_receipt() -> None:
+    """A caller can opt into a validated compact receipt without raw output."""
+
+    workflow = _workflow()
+    protected_input = workflow["on"]["workflow_call"]["inputs"][
+        "protected-diagnostic-receipt-prefix"
+    ]
+    validation = _validation_step()["run"]
+    apply = _apply_step()["run"]
+
+    assert protected_input["default"] == ""
+    assert "PROTECTED_DIAGNOSTIC_RECEIPT_PREFIX" in _apply_step()["env"]
+    assert "protected-diagnostic-receipt-prefix must identify a receipt-b64 marker" in validation
+    assert "[A-Za-z0-9_-]+" in apply
+    assert "REMOTE_DIAGNOSTIC_MAX_LINE_LENGTH=2190" in apply
+    assert "REMOTE_DIAGNOSTIC_RECEIPT_PREFIX" in apply
+    assert "/run/tc-pipelines-apply-output" not in apply
+
+
 def test_token_apply_uses_unique_managed_command_with_separate_protected_parameters() -> (
     None
 ):
@@ -479,7 +498,10 @@ case "$op" in
     : >"$FAKE_AZ_STATE_DIR/protected.txt"
     collecting=false
     while [[ $# -gt 0 ]]; do
-      if [[ "$1" == "--protected-parameters" ]]; then
+      if [[ "$1" == "--script" ]]; then
+        printf '%s' "$2" >"$FAKE_AZ_STATE_DIR/remote-script"
+        shift
+      elif [[ "$1" == "--protected-parameters" ]]; then
         collecting=true
       elif [[ "$collecting" == true && "$1" == --* ]]; then
         break
@@ -508,9 +530,13 @@ case "$op" in
     if [[ -n "${PROTECTED_DIAGNOSTIC_PREFIX:-}" ]]; then
       diagnostic="\n${PROTECTED_DIAGNOSTIC_PREFIX}stage-input-invalid"
     fi
+    receipt=""
+    if [[ -n "${PROTECTED_DIAGNOSTIC_RECEIPT_PREFIX:-}" ]]; then
+      receipt="\n${PROTECTED_DIAGNOSTIC_RECEIPT_PREFIX}${FAKE_PROTECTED_DIAGNOSTIC_RECEIPT:-}"
+    fi
     echo 'benign show warning' >&2
     managed_exit="${FAKE_AZ_MANAGED_EXIT:-0}"
-    jq -cn --arg token "$token" --arg marker "$marker" --arg diagnostic "$diagnostic" --argjson exit_code "$managed_exit" '{instanceView:{executionState:"Succeeded",exitCode:$exit_code,output:("result-" + $token + "\n" + $marker + "=" + ($exit_code | tostring) + $diagnostic),error:""}}'
+    jq -cn --arg token "$token" --arg marker "$marker" --arg diagnostic "$diagnostic" --arg receipt "$receipt" --argjson exit_code "$managed_exit" '{instanceView:{executionState:"Succeeded",exitCode:$exit_code,output:("result-" + $token + "\n" + $marker + "=" + ($exit_code | tostring) + $diagnostic + $receipt),error:""}}'
     ;;
   delete)
     echo deleted
@@ -548,6 +574,8 @@ def _run_apply(
     token: str,
     runtime_secret: str = "",
     diagnostic_prefix: str = "",
+    diagnostic_receipt_prefix: str = "",
+    diagnostic_receipt: str = "",
     apply_script: str = "true",
     legacy_exit: str = "0",
     managed_exit: str = "0",
@@ -564,6 +592,8 @@ def _run_apply(
             "GHCR_ACTIONS_TOKEN": token,
             "HERMES_RUNTIME_SECRETS_B64": runtime_secret,
             "PROTECTED_DIAGNOSTIC_PREFIX": diagnostic_prefix,
+            "PROTECTED_DIAGNOSTIC_RECEIPT_PREFIX": diagnostic_receipt_prefix,
+            "FAKE_PROTECTED_DIAGNOSTIC_RECEIPT": diagnostic_receipt,
             "FAKE_YQ_SCRIPT": apply_script,
             "GITHUB_ENV": str(tmp_path / "github-env"),
             "GITHUB_OUTPUT": str(tmp_path / "github-output"),
@@ -591,6 +621,7 @@ def _run_validation(
     *,
     runtime_secret: str = "",
     diagnostic_prefix: str = "",
+    diagnostic_receipt_prefix: str = "",
     skip_snapshot: str = "false",
     snapshot_policy: str = "allowed",
     rollback_receipt_digest: str = "",
@@ -605,6 +636,7 @@ def _run_validation(
             "SNAPSHOT_POLICY": snapshot_policy,
             "CONTAINER_ROLLBACK_RECEIPT_DIGEST": rollback_receipt_digest,
             "PROTECTED_DIAGNOSTIC_PREFIX": diagnostic_prefix,
+            "PROTECTED_DIAGNOSTIC_RECEIPT_PREFIX": diagnostic_receipt_prefix,
         }
     )
     return subprocess.run(
@@ -626,6 +658,20 @@ def test_validation_rejects_malformed_protected_diagnostic_prefix_before_azure_w
 
     assert result.returncode != 0
     assert "protected-diagnostic-prefix must be an uppercase ASCII prefix" in result.stderr
+
+
+def test_validation_rejects_malformed_protected_diagnostic_receipt_prefix_before_azure_work(
+    tmp_path: Path,
+) -> None:
+    """Receipt transport accepts only a fixed receipt-b64 marker."""
+
+    result = _run_validation(
+        tmp_path,
+        diagnostic_receipt_prefix="TC_HERMES_STAGE_DIAGNOSTIC=anything-goes-",
+    )
+
+    assert result.returncode != 0
+    assert "protected-diagnostic-receipt-prefix must identify a receipt-b64 marker" in result.stderr
 
 
 def test_fake_azure_conflict_then_warning_keeps_json_and_token_private(
@@ -712,6 +758,80 @@ def test_fake_azure_surfaces_only_a_validated_protected_diagnostic(
     assert "TC_HERMES_STAGE_DIAGNOSTIC=stage-input-invalid" in result.stdout
     assert token not in result.stdout
     assert token not in result.stderr
+
+
+def test_managed_remote_wrapper_discards_apply_output_without_a_diagnostic_opt_in(
+    tmp_path: Path, fake_apply_tools: tuple[Path, Path]
+) -> None:
+    """Protected execution must not retain arbitrary apply output by default."""
+
+    raw_output = "untrusted-apply-output"
+    result = _run_apply(
+        tmp_path,
+        fake_apply_tools,
+        token="test-ghcr-no-diagnostic-token",
+        apply_script=f"printf '%s\\n' '{raw_output}'",
+    )
+    _, state_dir = fake_apply_tools
+    assert result.returncode == 0, result.stderr
+    remote_script = (state_dir / "remote-script").read_text(encoding="utf-8")
+    remote_script = remote_script.replace(
+        "exec 9>/run/lock/tc-pipelines-azure-vm-deploy.lock",
+        f"exec 9>{tmp_path / 'deploy.lock'}",
+    )
+    remote_script = remote_script.replace("  flock 9", "  true")
+
+    remote = subprocess.run(
+        ["bash", "-c", remote_script],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert remote.returncode == 0
+    assert raw_output not in remote.stdout
+    assert raw_output not in remote.stderr
+
+
+def test_fake_azure_surfaces_only_a_bounded_urlsafe_protected_receipt(
+    tmp_path: Path, fake_apply_tools: tuple[Path, Path]
+) -> None:
+    """A compact receipt survives managed transport; token-bearing output does not."""
+
+    token = "test-ghcr-receipt-token"
+    receipt_prefix = "TC_HERMES_STAGE_DIAGNOSTIC=hermes-session-receipt-b64-"
+    receipt = "eyJzY2hlbWEiOiJoZXJtZXMtdGVzdC92MSJ9"
+    result = _run_apply(
+        tmp_path,
+        fake_apply_tools,
+        token=token,
+        diagnostic_receipt_prefix=receipt_prefix,
+        diagnostic_receipt=receipt,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert receipt_prefix + receipt in result.stdout
+    assert token not in result.stdout
+    assert token not in result.stderr
+
+
+def test_fake_azure_rejects_an_oversized_protected_receipt(
+    tmp_path: Path, fake_apply_tools: tuple[Path, Path]
+) -> None:
+    """The reusable refuses receipt payloads above the declared 2048-byte cap."""
+
+    receipt_prefix = "TC_HERMES_STAGE_DIAGNOSTIC=hermes-session-receipt-b64-"
+    oversized_receipt = "a" * 2049
+    result = _run_apply(
+        tmp_path,
+        fake_apply_tools,
+        token="test-ghcr-oversized-receipt-token",
+        diagnostic_receipt_prefix=receipt_prefix,
+        diagnostic_receipt=oversized_receipt,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert receipt_prefix + oversized_receipt not in result.stdout
 
 
 def test_failed_managed_apply_surfaces_validated_diagnostic_before_red_gate(
