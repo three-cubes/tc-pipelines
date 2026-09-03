@@ -522,14 +522,13 @@ on:
       changelog-label: { description: "CHANGELOG section label", required: true, type: string }
 permissions:
   contents: write
+  id-token: write
 jobs:
   release:
     uses: three-cubes/tc-pipelines/.github/workflows/release.yml@${PIPELINES_TAG}
     with:
       version: \${{ inputs.version }}
       changelog-label: \${{ inputs.changelog-label }}
-    secrets:
-      gh-token: \${{ secrets.GITHUB_TOKEN }}
 EOF
       echo "ok: rendered .github/workflows/release.yml"
     fi

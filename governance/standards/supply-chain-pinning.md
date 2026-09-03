@@ -83,3 +83,19 @@ imported the expected value could not detect a wrong one.
 Match on the SHA. A guard that also matches a human-readable version comment
 couples two files on a string that carries no control, and fails confusingly when
 only one is updated.
+
+## Automated consumer repins
+
+`dispatch-consumer-repins.yml` runs when a tc-pipelines release is published.
+It checks out the release tag, resolves that tag to its commit SHA, and sends the
+tag/SHA pair to each enrolled consumer as a `repository_dispatch` event using the
+`three-cubes-agent` App.
+
+Each consumer validates that the tag still resolves to the dispatched SHA through
+the GitHub API. It then runs its repository-local pin updater, runs the updater
+in check mode, creates one App-authored PR, and enables auto-merge. The consumer
+PR remains subject to its existing required checks and CODEOWNERS review.
+
+The dispatch carries the tag and its resolved commit as an immutable release
+coordinate. Consumers keep full-SHA pins, required checks, CODEOWNERS review,
+and deployment controls.

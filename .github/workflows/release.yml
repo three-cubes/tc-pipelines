@@ -83,34 +83,36 @@ on:
           Optional shell run AFTER the release is created, to dispatch downstream
           publish workflows. $VERSION and $REF are exported. Empty string skips the fan-out
           (taz has no fan-out; kairix dispatches docker-publish + publish-pypi).
-          Releases created via GITHUB_TOKEN don't auto-fan-out (GitHub's recursion
-          guard — kairix#230), so the dispatch is explicit here.
+          The release job uses the three-cubes-agent App token, so a published
+          release also emits its downstream release event.
         type: string
         default: |
           gh workflow run docker-publish.yml --ref "$REF" --field ref="$VERSION"
           gh workflow run publish-pypi.yml   --ref "$REF" --field ref="$VERSION"
-    secrets:
-      # The release needs a token that can create tags + releases and (for the
-      # fan-out) dispatch other workflows. Callers wire their own token here;
-      # when omitted, the run falls back to the job's github.token.
-      gh-token:
-        description: "Token for git push / gh release / gh workflow run. Falls back to github.token."
-        required: false
-
 # tag + release creation needs write; the fan-out dispatches workflows.
 permissions:
   contents: write
   actions: write
+  id-token: write
 
 jobs:
   release:
     name: Tag + GitHub Release (from CHANGELOG)
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: ${{ inputs.fetch-depth }}
+
+      - name: Mint three-cubes-agent token for release
+        id: app
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@8eac47d7519032e61b1d4fe00f3e4ac1ef67579e # v1.19.12
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Validate version format
         shell: bash
@@ -159,11 +161,11 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           TAG_MESSAGE: ${{ inputs.tag-message }}
-          GH_TOKEN: ${{ secrets.gh-token || github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "three-cubes-agent[bot]"
+          git config user.email "295831460+three-cubes-agent[bot]@users.noreply.github.com"
           # Expand $VERSION inside the message template the caller supplied.
           message=$(VERSION="$VERSION" envsubst <<< "$TAG_MESSAGE")
           git tag -a "$VERSION" -m "$message"
@@ -172,7 +174,7 @@ jobs:
       - name: Create GitHub Release
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.gh-token || github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           VERSION: ${{ inputs.version }}
           RELEASE_TITLE: ${{ inputs.release-title }}
           DRAFT: ${{ inputs.draft }}
@@ -197,7 +199,7 @@ jobs:
         if: inputs.fan-out-command != ''
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.gh-token || github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           VERSION: ${{ inputs.version }}
           REF: ${{ inputs.ref }}
           FAN_OUT_COMMAND: ${{ inputs.fan-out-command }}
