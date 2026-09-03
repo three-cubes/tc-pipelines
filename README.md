@@ -75,7 +75,7 @@ jobs:
 |---|---|
 | [`python-quality-gate.yml`](.github/workflows/python-quality-gate.yml) | The shared Python check → `uv run tc-fitness run`. Sets up a pinned, cached uv venv, then runs the tool against the repo's `[tool.tc_fitness]` config. |
 | [`meta-quality-gate.yml`](.github/workflows/meta-quality-gate.yml) | Self-CI for **non-Python** repos (this repo, docs/action collections). Repo-agnostic hygiene checks — actionlint, yamllint, license-present, branch-naming — each one you can turn on or off; all caller inputs are bound to env vars before any shell runs (injection-safe). |
-| [`release.yml`](.github/workflows/release.yml) | Thin shared release flow (needs a human): validate CalVer tag, extract CHANGELOG section, create + push tag, `gh release create`. Repo-specific checks stay in the caller. **Secret:** `gh-token`. |
+| [`release.yml`](.github/workflows/release.yml) | Thin shared release flow (needs a human): validate CalVer tag, extract CHANGELOG section, create + push tag, and publish the GitHub Release as `three-cubes-agent[bot]`. Repo-specific checks stay in the caller. The caller provides WIF and `AZURE_*` repository variables. |
 | [`mutation-gate.yml`](.github/workflows/mutation-gate.yml) | Mutation/parity check scoped to the diff; keeps a survivors baseline that can only improve, never get worse. |
 | [`docker-build-publish.yml`](.github/workflows/docker-build-publish.yml) | Build and optionally push a container image. |
 | [`fresh-install-smoke.yml`](.github/workflows/fresh-install-smoke.yml) | Clean-image install smoke test via compose. |
