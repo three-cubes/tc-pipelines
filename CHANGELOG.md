@@ -14,6 +14,14 @@ for the consumer-facing `@vN` workflow/action references.
   workflows now use a version that supports hash-locked CI tool installation
   without reapplying project configuration.
 
+## [1.19.12] — 2026-09-03
+
+### Fixed
+
+- **Protected Azure VM applies retain an actionable diagnostic receipt.** The
+  reusable deployment workflow records a caller-declared, bounded diagnostic
+  code and the remote exit proof, then exposes that receipt to the caller.
+
 ## [1.19.11] — 2026-08-26
 
 ### Fixed

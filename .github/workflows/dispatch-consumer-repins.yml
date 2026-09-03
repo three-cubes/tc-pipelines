@@ -22,8 +22,9 @@ jobs:
     name: Dispatch tc-agent-zone repin
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
+      pull-requests: write
     steps:
       - name: Validate immutable release tag
         id: release
@@ -74,3 +75,49 @@ jobs:
             echo "- Release: \`${VERSION}\`"
             echo "- Commit: \`${sha}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mint three-cubes-agent token for tc-pipelines
+        id: self-app
+        uses: ./.github/actions/github-app-token
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          owner: three-cubes
+          repositories: tc-pipelines
+
+      - name: Open self-pin repin pull request
+        env:
+          GH_TOKEN: ${{ steps.self-app.outputs.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse "${VERSION}^{commit}")"
+          branch_version="${VERSION#v}"
+          branch_version="${branch_version//./-}"
+          BRANCH="three-cubes-agent/release-self-pins-v${branch_version}"
+          existing_pr="$(gh pr list --state open --head "$BRANCH" --json url --jq '.[0].url // empty')"
+          if [[ -n "$existing_pr" ]]; then
+            echo "Self-pin repin PR already open: $existing_pr" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git fetch origin main
+          git switch --create "$BRANCH" origin/main
+          governance/scripts/repin_self_references.py --sha "$SHA" --version "$VERSION"
+          governance/scripts/repin_self_references.py --check --sha "$SHA" --version "$VERSION"
+          if git diff --quiet; then
+            echo "tc-pipelines already pins $VERSION ($SHA)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git config user.name 'three-cubes-agent[bot]'
+          git config user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com'
+          git add .github/workflows .github/actions actions
+          git commit -m "chore: repin tc-pipelines self references ${VERSION}"
+          git push origin "HEAD:${BRANCH}"
+          pr_url="$(gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: repin tc-pipelines self references ${VERSION}" \
+            --body "Automated immutable self-pin adoption for ${VERSION} (${SHA}).")"
+          gh pr merge --auto --merge "$pr_url"
+          echo "- Self-pin PR: ${pr_url}" >> "$GITHUB_STEP_SUMMARY"
