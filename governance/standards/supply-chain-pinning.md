@@ -25,9 +25,11 @@ release. The single authoritative representation is the release; each pin is a
 local claim about it.
 
 **What keeps them consistent is a checker, not a variable.**
-`test_self_pin_freshness` parametrises over every self-pin and fails any that
-does not name the newest release, so the set cannot drift apart silently. Treat
-that test as the deduplication mechanism.
+`test_self_pin_freshness` resolves every self-pin from git history and compares
+the complete executed target graph with the current graph. It normalises each
+pin coordinate only for that file's content comparison, then follows the pinned
+coordinate and checks the nested target recursively. It fails when a pin is not
+an ancestor of HEAD or any target in its executed graph contains stale content.
 
 The genuinely DRY alternative — a floating `@v1` — is what this exists to
 prevent. One moving reference, no repetition, and it froze while a composite
@@ -35,32 +37,22 @@ beneath it changed: a destructive deploy advertised a rollback handle that was
 the empty string on every run, because the workflow read an output the pinned
 revision no longer emitted. `test_uses_ref_pinning` rejects floating refs.
 
-## Self-pins lag by exactly one release
+## Self-pins execute reviewed current content
 
-A commit cannot pin itself — writing the pin changes the hash. So the rule
-targets the newest release **before** HEAD, and a change to a composite reaches
-a consumer only at the release **after** the one carrying it.
+A commit cannot pin itself because writing the pin changes the hash. Commit the
+target first, then update its callers to that immutable commit. An unchanged
+target may retain an older immutable ancestor only when its complete recursive
+target graph is content-equivalent to the current graph. A changed target uses
+the reviewed commit that first contains that target and its current dependencies.
 
-Cutting a release is therefore two tags:
+This removes the former two-tag bootstrap. The release commit contains callers
+that already execute the reviewed target content, and consumers pin that single
+release.
 
-1. Tag `vX.Y.Z` from `main`.
-2. **Bump every self-pin to `vX.Y.Z` and merge that immediately.**
-3. Tag `vX.Y.Z+1`. This is the release consumers should take — the first whose
-   workflows load composites containing the change.
-
-Tell consumers which tag carries a composite-level fix. A release note that
-describes a change in `actions/**` without saying which tag executes it will be
-read as shipped when it is not.
-
-### Bump the pins in the same window as the tag
-
-`test_self_pin_freshness` skips a tag at HEAD, because no commit could satisfy a
-rule that targets itself. So immediately after a tag, `main` stands on it and
-stale pins still read as current — the suite is green and nothing is wrong yet.
-
-The next commit to land, from anyone, makes that tag the newest release before
-HEAD and turns **every** self-pin assertion red, with a message telling that
-author to repin someone else's pins. Closing the window is the tagger's job.
+This topology requires merge commits. Configure each repository with
+`allow_merge_commit=true`, `allow_squash_merge=false`, and
+`allow_rebase_merge=false`; run `governance/scripts/check-repository-merge-settings.sh`
+to verify those settings before releasing.
 
 ## Consumer repins
 

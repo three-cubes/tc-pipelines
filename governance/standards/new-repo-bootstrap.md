@@ -19,7 +19,7 @@ restating it.
 Run the script against the target repo:
 
 ```bash
-governance/scripts/bootstrap-repo-governance.sh --repo three-cubes/<name>
+governance/scripts/bootstrap-repo-governance.sh --repo three-cubes/<name> --pipelines-sha <v2-release-commit-sha>
 ```
 
 This renders the queue-less validation profile: PR feedback, `merge_group`
@@ -51,6 +51,21 @@ It runs seven sections in order, each independently toggleable via a flag:
    ruleset requires (see *What it renders*).
 7. **Verify** — the internal-consistency self-check (see *`--verify` self-check*).
 
+Repository merge methods are an administrator-owned setting outside a branch
+ruleset. After bootstrap, enforce merge commits and disable squash/rebase, then
+verify the read-back before releasing:
+
+```bash
+gh api --method PATCH repos/three-cubes/<name> \
+  -F allow_merge_commit=true \
+  -F allow_squash_merge=false \
+  -F allow_rebase_merge=false
+governance/scripts/check-repository-merge-settings.sh three-cubes/<name>
+```
+
+Merge ancestry is part of the immutable self-pin contract: a reviewed target
+commit remains reachable after its caller merges.
+
 The script performs no live git: it renders and verifies locally and prints the
 `run (in a clone …)` fetch+commit sequence for anything that lands in the repo —
 it never pushes (per [subagent-orchestration](subagent-orchestration.md): no live
@@ -69,7 +84,7 @@ tc-pipelines checkout it sources [`../skeletons/`](../skeletons/) locally.
 | `--repo three-cubes/<name>` | required | The target repo. |
 | `--kv-name <name>` | `kv-tc-agents` | Azure Key Vault the standard secrets are read from. |
 | `--fitness-tag vX.Y.Z` | the pinned tc-fitness engine tag baked into the script | The immutable tc-fitness tag the rendered `pyproject` pins and the CI no-attribution leg uses. |
-| `--pipelines-tag vN` | the pinned tc-pipelines reusables tag | The tc-pipelines reusable-workflow ref the rendered `ci.yml` / `auto-merge.yml` / `release.yml` call. |
+| `--pipelines-sha <sha>` | required | The immutable tc-pipelines v2 release commit used by rendered workflow calls. |
 | `--sonar` / `--no-sonar` | `--sonar` | Emit the SonarCloud jobs, or trim them from `ci.yml`. |
 | `--with-release` | off | Also render a `release.yml` caller. |
 | `--sonar-project-key <key>` | `three-cubes_<slug>` | The SonarCloud `projectKey` rendered into `sonar-project.properties`. |
@@ -228,7 +243,8 @@ the gate is proven green and deterministic — see
 
 For a new repo, in order:
 
-- [ ] Run `bootstrap-repo-governance.sh --repo three-cubes/<name>` (add `--verify`; add `--merge-queue` only after its required-context proof).
+- [ ] Resolve the current immutable v2 release commit and run `bootstrap-repo-governance.sh --repo three-cubes/<name> --pipelines-sha <sha>` (add `--verify`; add `--merge-queue` only after its required-context proof).
+- [ ] Run `check-repository-merge-settings.sh three-cubes/<name>` and confirm merge commits are enabled while squash/rebase are disabled.
 - [ ] On a branch, follow each printed `run (in a clone …)` sequence: the
       governance files, the affordance + harness payload, and the quality-gate
       wiring (merge the `pyproject` fragments into `pyproject.toml`).

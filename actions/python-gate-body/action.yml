@@ -14,8 +14,6 @@ inputs:
     required: true
   sync-args:
     required: true
-  ci-requirements-path:
-    required: true
   fetch-depth:
     required: true
   tc-fitness-args:
@@ -101,12 +99,11 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       # install` has run that includes every `node_modules` tree. Measured on
       # a consumer: 79s here, against 1.1s in a job that installs uv first.
     - name: Locked uv install
-      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@8eac47d7519032e61b1d4fe00f3e4ac1ef67579e # v1.19.12
+      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@8e1b82a3b8ba496d767e5aa5dd40981665d9313b # v2 candidate
       with:
         uv-version: ${{ inputs.uv-version }}
         python-version: ${{ inputs.python-version }}
         sync-args: ${{ inputs.sync-args }}
-        ci-requirements: ${{ inputs.ci-requirements-path }}
 
     # ── Node / pnpm half (opt-in) ───────────────────────────────────────
     - name: Set up pnpm
@@ -143,14 +140,6 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       if: inputs.pre-evaluation-normalize != ''
       shell: bash
       run: uv sync ${{ inputs.sync-args }}
-
-    # `uv sync` can remove CI-only tools installed by setup-uv-cached. Restore
-    # that hash-locked surface before the evaluator runs.
-    - name: Restore CI tools after normalization sync
-      if: inputs.pre-evaluation-normalize != '' && inputs.ci-requirements-path != ''
-      shell: bash
-      run: |
-        uv pip install --no-config --require-hashes --only-binary :all: -r "${{ inputs.ci-requirements-path }}"
 
     # ── Diff-scoped smoke support (opt-in) ─────────────────────────────
     - name: Write changed-file list

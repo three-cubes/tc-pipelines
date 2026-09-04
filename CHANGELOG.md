@@ -8,11 +8,18 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
-### Fixed
+### Changed
 
-- **The default `uv` installer is updated to 0.12.5.** Reusable actions and
-  workflows now use a version that supports hash-locked CI tool installation
-  without reapplying project configuration.
+- **The Python quality workflow has a clean v2 install contract.** The removed
+  `ci-requirements` inputs are not accepted by v2. CI tools are declared in the
+  locked `dev` dependency group and installed through the repository's single
+  `uv.lock`; production uses `uv sync --frozen --no-dev`.
+- **New repository wiring requires an immutable tc-pipelines commit SHA.** The
+  bootstrap command fails closed when `--pipelines-sha` is absent, so generated
+  workflows cannot silently consume a floating or incompatible major.
+- **Internal self-pins validate their complete transitive target graph.** An
+  unchanged older target remains valid when its recursive executed content is
+  identical; any changed nested action must be committed and repinned first.
 
 ## [1.19.12] — 2026-09-03
 

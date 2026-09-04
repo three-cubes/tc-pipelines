@@ -76,7 +76,7 @@ After a fresh clone (or after pulling a change that touched any `pyproject.toml`
 make bootstrap        # alias: make dev-env
 ```
 
-This runs `uv lock --check` → `uv sync --locked --all-packages` → hashed `requirements-ci.txt` → pinned `pnpm install`, mirroring CI exactly.
+This runs `uv lock --check` → `uv sync --locked --all-packages --group dev` → pinned `pnpm install`, mirroring CI exactly. Declare runtime dependencies in `[project].dependencies` and CI tools in `[dependency-groups].dev`; the single root `uv.lock` resolves both groups into one environment.
 
 ### Cache and venv resolution
 
@@ -103,7 +103,6 @@ A **per-repo** cache (`/tmp/<repo>-uv-cache`) stores the same wheels once per re
 **Do not redirect `UV_PROJECT_ENVIRONMENT` at a venv outside the checkout.** Pointing a worktree at the primary checkout's venv looks like the tidy answer and is not safe:
 
 - `uv sync` removes extraneous packages by default, so two worktrees running gates concurrently rewrite one environment mid-test — and worktree isolation is exactly how parallel agents are run;
-- `uv pip install` discovers a venv from the cwd and ignores the variable, so a bootstrap in a worktree fails with `No virtual environment found`;
 - a sandboxed worktree may hold a write grant covering only itself, leaving the primary checkout readable but not writable;
 - a worktree of a **bare** repository reports the bare repo as its common dir, so deriving a path from its parent hands every bare repo beside it the same venv.
 
@@ -118,7 +117,7 @@ Manual equivalent (Python only):
 uv lock --check
 
 # Install the workspace into a local .venv (idempotent)
-uv sync --frozen
+uv sync --frozen --group dev
 ```
 
 `--frozen` refuses to mutate `uv.lock` — if the lockfile and any workspace `pyproject.toml` disagree, install fails fast. This is the correct CI behaviour and the right default locally.
@@ -295,19 +294,20 @@ The CI check step runs `uv lock --check` **before** the existing ruff / bandit /
 
 ## 10. Production install (VM / containers)
 
-Production paths use `uv sync --frozen` — never plain `uv sync`, never `uv pip install --system` against an unfrozen environment. The pattern:
+Production paths use `uv sync --frozen --no-dev` — never plain `uv sync`, never `uv pip install --system` against an unfrozen environment. The pattern:
 
 ```bash
 # On the VM, in the repo root
-uv sync --frozen           # installs the workspace into .venv/ from uv.lock
+uv sync --frozen --no-dev  # installs runtime dependencies only from uv.lock
 .venv/bin/python -m <member-entry-point>
 ```
 
-If a VM-bootstrap script currently calls `pip install` against any of the workspace members, migrate it to `uv sync --frozen`. Tracked under ADR-016 Open Questions §4.
+If a VM-bootstrap script currently calls `pip install` against any of the workspace members, migrate it to `uv sync --frozen --no-dev`. Tracked under ADR-016 Open Questions §4.
 
 ## Stay inside the lockfile contract
 
-- Install against the workspace with `uv sync --frozen`; `pip install` bypasses the lockfile and produces a non-reproducible env.
+- Install production from the workspace with `uv sync --frozen --no-dev`; `pip install` bypasses the lockfile and produces a non-reproducible env.
+- Declare CI tools in a `pyproject.toml` dependency group and resolve them in the root `uv.lock`. A second requirements lock can replace already-synced runtime distributions with a different resolver result.
 - Express dep changes through `uv add` / edit `pyproject.toml` + `uv lock`; remove any `poetry add` / `pip-compile` / `pdm add` invocation from scripts and CI.
 - Lock with hashes — run plain `uv lock` (ADR-016 D3); strip any `--no-hashes` flag from scripts.
 - Use the single root `uv.lock` for every workspace member; remove per-package lockfiles when you find them.

@@ -2,7 +2,7 @@
 # Two fragments below. Merge each into the matching table of your pyproject.toml
 # (a fresh repo can paste them verbatim). The single gate both CI and local run
 # is `uv run tc-fitness run`, which reads the `[tool.tc_fitness]` block here, so
-# local == CI by construction. The reusable `python-quality-gate.yml@{{PIPELINES_TAG}}`
+# local == CI by construction. The reusable `python-quality-gate.yml@{{PIPELINES_SHA}}`
 # caller (see .github/workflows/ci.yml) runs the SAME command.
 
 # 1. The engine pin. tc-fitness is a dev-group dependency, pinned to an immutable

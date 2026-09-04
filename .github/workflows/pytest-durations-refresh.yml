@@ -31,11 +31,7 @@ on:
         type: string
         required: true
       sync-args:
-        description: "Arguments for `uv sync` (e.g. `--locked --all-packages`)."
-        type: string
-        required: true
-      ci-requirements-path:
-        description: "Path to the CI requirements file."
+        description: "Arguments for `uv sync` (e.g. `--locked --all-packages --group dev`)."
         type: string
         required: true
       tc-fitness-args:
@@ -166,12 +162,11 @@ jobs:
           exit 1
 
       - name: Run the suite and store durations
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@8eac47d7519032e61b1d4fe00f3e4ac1ef67579e # v1.19.12 # SHA pin (SGO-266)
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@1140b7148cb4a7486009c61ebf08e19907d4c5c7 # v2 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
           sync-args: ${{ inputs.sync-args }}
-          ci-requirements-path: ${{ inputs.ci-requirements-path }}
           fetch-depth: ${{ inputs.fetch-depth }}
           tc-fitness-args: ${{ inputs.tc-fitness-args }}
           write-changed-files: false

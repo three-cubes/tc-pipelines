@@ -3,7 +3,7 @@ name: "Quality gate"
 
 # {{REPO}}'s single quality lane. The whole gate is the repo-local
 # `[tool.tc_fitness]` block in pyproject.toml; the org-shared reusable
-# `python-quality-gate.yml@{{PIPELINES_TAG}}` provisions a pinned/cached uv venv and
+# `python-quality-gate.yml@{{PIPELINES_SHA}}` provisions a pinned/cached uv venv and
 # runs the SAME `uv run tc-fitness run` that `make check` runs locally — local ==
 # CI by construction.
 #
@@ -41,11 +41,10 @@ jobs:
   # `no-attribution` job below owns that scan as its own required context.
   gate:
     name: Python gate (reusable)
-    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@{{PIPELINES_TAG}}
+    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@{{PIPELINES_SHA}}
     with:
       python-version: "3.12"
-      sync-args: "--all-extras --all-groups"
-      ci-requirements-path: ""
+      sync-args: "--locked --all-extras --group dev"
       run-no-attribution: false
       upload-coverage-artifact: true
     secrets:

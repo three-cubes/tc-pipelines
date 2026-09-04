@@ -1,4 +1,4 @@
-"""Every self-pinned `uses:` must name this repo's newest release.
+"""Every self-pinned `uses:` must execute the current target content.
 
 Every internal reference is pinned to a commit SHA, so a step runs whatever that
 commit held — not what sits beside it in the tree. When the two diverge, the
@@ -12,16 +12,11 @@ run. Then a cache fix landed in `setup-uv-cached` and did nothing, because
 `python-gate-body` still pinned the pre-fix revision two levels down — the
 consumer repinned, took the new workflow, and got the old action.
 
-The rule: every self-pin names the newest release reachable from HEAD. A commit
-cannot pin itself — writing the pin changes the hash — so a tag AT HEAD is
-skipped and the target is the newest release BEFORE it. That bounds the lag at
-one release rather than letting it grow: a change to a composite reaches a
-consumer at the release AFTER the one carrying it, and never later.
-
-So bump the pins immediately after cutting a tag. While `main` stands on that tag
-the stale pins still read as current, because the tag at HEAD is skipped and
-nothing is wrong yet. The next commit to land makes it the target and turns every
-assertion here red — on an author who changed none of them.
+The rule: a self-pin is an immutable ancestor of HEAD and its complete recursive
+target graph has the same content as the working tree. Pin SHA differences in a
+target file are normalised for that file's comparison, then every nested target
+is resolved at the pinned coordinate and checked recursively. This permits an
+unchanged older target while rejecting a stale transitive dependency.
 
 There is no way to name the SHA once and reuse it: `uses:` accepts no context of
 any kind, in a reusable call or an action step. So this test, rather than a
@@ -40,6 +35,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.contract
 
@@ -47,13 +43,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SEARCH_DIRS = (".github/workflows", "actions", ".github/actions")
 
 SELF_PIN = re.compile(
-    r"uses:\s*three-cubes/tc-pipelines/(?P<path>[^@\s]+)@(?P<sha>[0-9a-f]{40})"
+    r"three-cubes/tc-pipelines/(?P<path>[^@\s]+)@(?P<sha>[0-9a-f]{40})"
 )
-
-# A referenced path whose divergence is deliberate, with the reason. An entry
-# here is a promise that the older revision is what the caller wants.
-PINNED_BEHIND_BY_DESIGN: dict[str, str] = {}
-
 
 def _source_files() -> list[Path]:
     found: list[Path] = []
@@ -65,25 +56,38 @@ def _source_files() -> list[Path]:
     return found
 
 
+def _self_pin_nodes(text: str) -> list[tuple[int, str, str]]:
+    """Return structural self-pin uses with their source line."""
+    root = yaml.compose(text, Loader=yaml.SafeLoader)
+    found: list[tuple[int, str, str]] = []
+
+    def walk(node: yaml.Node) -> None:
+        if isinstance(node, yaml.SequenceNode):
+            for item in node.value:
+                walk(item)
+            return
+        if not isinstance(node, yaml.MappingNode):
+            return
+        for key, value in node.value:
+            if getattr(key, "value", None) == "uses" and isinstance(value, yaml.ScalarNode):
+                match = SELF_PIN.fullmatch(value.value)
+                if match:
+                    found.append(
+                        (key.start_mark.line + 1, match.group("path"), match.group("sha"))
+                    )
+            walk(value)
+
+    if root is not None:
+        walk(root)
+    return found
+
+
 def _self_pins() -> list[tuple[str, int, str, str]]:
     """(source file, line, referenced repo path, pinned sha)."""
     pins = []
     for path in _source_files():
-        for number, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), start=1
-        ):
-            if line.lstrip().startswith("#"):
-                continue
-            match = SELF_PIN.search(line)
-            if match:
-                pins.append(
-                    (
-                        str(path.relative_to(REPO_ROOT)),
-                        number,
-                        match.group("path"),
-                        match.group("sha"),
-                    )
-                )
+        for number, repo_path, sha in _self_pin_nodes(path.read_text(encoding="utf-8")):
+            pins.append((str(path.relative_to(REPO_ROOT)), number, repo_path, sha))
     return pins
 
 
@@ -100,7 +104,7 @@ def _without_pin_shas(text: str) -> str:
     changed step, input or command still fails, a pure repin does not.
     """
     return re.sub(
-        r"(three-cubes/tc-pipelines/[^@\s]+@)[0-9a-f]{40}( # v[0-9][^\s]*)?",
+        r"(three-cubes/tc-pipelines/[^@\s]+@)[0-9a-f]{40}(?:\s*#.*)?",
         r"\1<PIN>",
         text,
     )
@@ -142,54 +146,51 @@ def _rev(ref: str) -> str:
     ).stdout.strip()
 
 
-def _newest_release_commit() -> str | None:
-    """Newest release BEFORE HEAD.
+def _is_ancestor(older: str, newer: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", older, newer],
+            cwd=REPO_ROOT,
+            check=False,
+        ).returncode
+        == 0
+    )
 
-    A tag cut at HEAD is skipped. No commit can pin to its own SHA — writing the
-    pin changes the hash — so treating the tag being cut as the target would
-    fail on the release commit itself and on every commit after it until a
-    separate repin landed, which is the flow this rule is meant to support.
-    """
-    head = _rev("HEAD")
-    tags = subprocess.run(
-        ["git", "tag", "--sort=-v:refname", "--merged", "HEAD", "v*"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.split()
-    for tag in tags:
-        sha = _rev(tag)
-        if sha and sha != head:
-            return sha
-    return None
+
+def _assert_target_graph_matches_current(
+    repo_path: str, sha: str, *, seen: set[tuple[str, str]]
+) -> None:
+    coordinate = (repo_path, sha)
+    if coordinate in seen:
+        return
+    seen.add(coordinate)
+
+    target = _resolve(repo_path)
+    pinned = _blob_at(sha, target)
+    assert pinned is not None, f"{target} does not exist at self-pin {sha[:12]}"
+    current = (REPO_ROOT / target).read_text(encoding="utf-8")
+    assert _without_pin_shas(pinned) == _without_pin_shas(current), (
+        f"{target} at {sha[:12]} differs from its reviewed current content"
+    )
+    for _, nested_path, nested_sha in _self_pin_nodes(pinned):
+        _assert_target_graph_matches_current(nested_path, nested_sha, seen=seen)
 
 
 @pytest.mark.parametrize(("source", "line", "repo_path", "sha"), PINS, ids=PIN_IDS)
-def test_self_pin_names_the_newest_release(
+def test_self_pin_is_current_and_immutable(
     source: str, line: int, repo_path: str, sha: str
 ) -> None:
-    """Every self-pin resolves to the most recent release, never further back.
-
-    A pin loads whatever its commit held, so a pin left behind runs an old file
-    while everything read locally is current. One froze at a release 91 commits
-    back and a deploy advertised an always-empty rollback handle; another kept a
-    cache fix from executing across three releases and two consumer repins.
-
-    Pinning is per level, so a change reaches a caller only once the release
-    carrying it is pinned. Requiring the NEWEST release bounds that lag at one
-    release instead of letting it grow without limit. Bump these as the last
-    step before cutting a tag.
-    """
-    newest = _newest_release_commit()
-    if newest is None:
-        pytest.skip("no release tag reachable from HEAD — nothing to compare against")
-
-    assert sha == newest, (
-        f"{source}:{line} pins `{repo_path}` at {sha[:12]}, not the newest "
-        f"release {newest[:12]}. That step loads an older revision of a file "
-        f"sitting current beside it, so a change there reaches nobody until the "
-        f"pin moves — and the gap grows silently with every release. "
-        f"fix: repin to {newest[:12]} as the last step before cutting a tag. "
-        f"next: re-run pytest."
+    """The pin is reachable and recursively equivalent to its local target."""
+    head = _rev("HEAD")
+    assert _is_ancestor(sha, head), (
+        f"{source}:{line} pins `{repo_path}` at {sha[:12]}, which is not an "
+        "ancestor of HEAD. Self-pins must name reviewed repository history."
     )
+
+    try:
+        _assert_target_graph_matches_current(repo_path, sha, seen=set())
+    except AssertionError as error:
+        raise AssertionError(
+            f"{source}:{line} executes a stale target graph from {sha[:12]}: {error}. "
+            "Commit each dependency before pinning its caller."
+        ) from error

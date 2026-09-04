@@ -26,8 +26,6 @@ Only `using: composite` actions are in scope. A node or docker action receives
 its inputs as `INPUT_*` environment variables read by the program it runs, so
 its header cannot be reconciled against its body from the YAML alone.
 
-Exceptions are declared below with their reason, so intent stays
-distinguishable from drift.
 """
 
 from __future__ import annotations
@@ -43,10 +41,6 @@ pytestmark = pytest.mark.contract
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ACTION_ROOTS = (REPO_ROOT / "actions", REPO_ROOT / ".github" / "actions")
 GATE_BODY = "actions/python-gate-body"
-
-# An input referenced nowhere in the body is a no-op for the caller. Reserve one
-# deliberately only by naming it here, keyed "<action>:<input>", with the reason.
-UNREFERENCED_OK: dict[str, str] = {}
 
 # An output whose key reaches $GITHUB_OUTPUT from somewhere other than a literal
 # write in the step body — a helper script the step invokes, for instance. The
@@ -222,22 +216,11 @@ def test_every_declared_input_is_referenced_by_the_body(
 ) -> None:
     referenced = _referenced_inputs(_runs_text(REPO_ROOT / action_id / "action.yml"))
 
-    if f"{action_id}:{name}" in UNREFERENCED_OK:
-        assert name not in referenced, (
-            f"{action_id}: `{name}` is listed in UNREFERENCED_OK but the body "
-            f"now reads it. "
-            f"fix: drop it from UNREFERENCED_OK so the reference assertion "
-            f"covers it."
-        )
-        return
-
     assert name in referenced, (
         f"{action_id}: input `{name}` is declared but never read by `runs:`. A "
         f"caller passing it gets no effect — the step runs with the old "
         f"behaviour and reports success. "
-        f"fix: reference `inputs.{name}` in the body, drop the declaration, or "
-        f"add '{action_id}:{name}' to UNREFERENCED_OK with the reason it is "
-        f"reserved."
+        f"fix: reference `inputs.{name}` in the body or drop the declaration."
     )
 
 
@@ -348,18 +331,12 @@ def test_gate_body_input_stays_required_unless_deliberately_optional(name: str) 
 
 def test_every_declared_exception_names_a_real_target() -> None:
     """A stale exemption would silently exempt a target it no longer explains."""
-    inputs = {
-        f"{action_id}:{name}"
-        for action_id, path in COMPOSITE
-        for name in (_load(path).get("inputs") or {})
-    }
     outputs = {
         f"{action_id}:{name}"
         for action_id, path in COMPOSITE
         for name in (_load(path).get("outputs") or {})
     }
-    stale = sorted(set(UNREFERENCED_OK) - inputs)
-    stale += sorted(set(OUTPUT_WRITE_OK) - outputs)
+    stale = sorted(set(OUTPUT_WRITE_OK) - outputs)
     stale += sorted(
         f"{GATE_BODY}:{name}"
         for name in set(DELIBERATELY_OPTIONAL) - set(GATE_BODY_INPUTS)

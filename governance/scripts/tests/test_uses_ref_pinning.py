@@ -4,20 +4,14 @@ A git tag is writable. Moving one redefines the code inside every workflow
 already released against it, with no commit here and no line in any consumer's
 diff. The canon splits the rule by who owns the target
 (`governance/standards/improving-fitness-gates.md`, `governance/security-scan.md`,
-`README.md`): a third-party `uses:` is SHA-pinned to a full commit with a
-`# vX.Y.Z` comment, this repo self-pins its own composites to the floating major
-`@v1`, and nothing may sit on `@main` or a branch.
+`README.md`): every external `uses:` is SHA-pinned to a full commit, including
+this repo's references to its own actions and workflows. Nothing may sit on a
+tag, `@main`, or a branch.
 
-Both halves are relationships between files, so no single-file linter can hold
-them. actionlint and yamllint accept any well-formed ref. A self-reference on a
-POINT tag is the sharpest case: it freezes one internal call at an old release
-while the composite it names keeps changing in the same tree, and
-`test_internal_call_contracts.py` cannot see the divergence because it validates
-every internal call against the LOCAL action file rather than the ref that runs.
-
-Whether a SHA is CURRENT is out of scope. Proving that needs `git show
-<ref>:<path>`, and CI checks out at depth 1 with no tags, so the check would be
-unreliable exactly where it must run. This pins the shape.
+actionlint and yamllint accept any well-formed ref, so this test pins the shape.
+`test_self_pin_freshness.py` separately reads full git history and proves that a
+self-pin executes the current target content. CI checks out full history for
+that contract.
 """
 
 from __future__ import annotations
@@ -49,10 +43,6 @@ LOCAL_PATH_PREFIX = "./"
 SELF_REPO_PREFIX = "three-cubes/tc-pipelines/"
 
 FULL_COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
-
-# The floating major the canon names, and only that: a self-reference on a point
-# tag pins one internal call to an old release of the tree it lives in.
-FLOATING_MAJOR = re.compile(r"v[1-9][0-9]*")
 
 # A container image is content-addressed by its digest, so a digest is as
 # immutable as a commit. An image tag is not.
@@ -254,8 +244,7 @@ def test_the_classifier_separates_a_moving_ref_from_a_pinned_one(
         f"abbreviated SHA lets the whole suite below pass while every ref still "
         f"floats. "
         f"fix: keep FULL_COMMIT_SHA a 40-character lowercase match under "
-        f"fullmatch, keep FLOATING_MAJOR reachable only for "
-        f"`{SELF_REPO_PREFIX}` refs, and keep `./` the only ref-free form."
+        f"fullmatch and keep `./` the only ref-free form."
     )
 
 

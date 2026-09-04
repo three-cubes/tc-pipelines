@@ -21,14 +21,8 @@ inputs:
       single package — `--all-extras --all-groups` is the superset that
       makes tc_fitness + the optional extras importable for the
       arch-fitness-catalogue hook. Workspace repos would pass
-      `--locked --all-packages`.
+      `--locked --all-packages --group dev`.
     default: "--all-extras --all-groups"
-  ci-requirements:
-    description: >-
-      Optional `--require-hashes` requirements file for CI-only tools to
-      install into the same .venv (forwarded to setup-uv-cached; empty
-      string skips that step).
-    default: ""
   pre-commit-config:
     description: Path to the pre-commit config file (`pre-commit/action`'s extra_args target).
     default: ".pre-commit-config.yaml"
@@ -47,12 +41,11 @@ runs:
     # not re-inlined, so the install seam stays single-sourced. Self-pinned to
     # the repo's own released tag.
     - name: Locked uv install
-      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@8eac47d7519032e61b1d4fe00f3e4ac1ef67579e # v1.19.12
+      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@8e1b82a3b8ba496d767e5aa5dd40981665d9313b # v2 candidate
       with:
         uv-version: ${{ inputs.uv-version }}
         python-version: ${{ inputs.python-version }}
         sync-args: ${{ inputs.sync-args }}
-        ci-requirements: ${{ inputs.ci-requirements }}
     - name: pre-commit run
       uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
       with:

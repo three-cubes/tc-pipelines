@@ -18,6 +18,16 @@ LEGACY_CARRIER_CALLERS = (
     REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml",
 )
 LEGACY_DEFAULTS = {"uv-version": "0.12.5", "python-version": "3.12"}
+PYTHON_INSTALL_SURFACES = (
+    ACTION,
+    REPO_ROOT / "actions" / "pre-commit-cached" / "action.yml",
+    REPO_ROOT / ".github" / "workflows" / "test-shard-routing.yml",
+    REPO_ROOT / ".github" / "workflows" / "example-pytest-durations-refresh.yml",
+    REPO_ROOT / "governance" / "skeletons" / "workflows" / "ci.yml.tmpl",
+    REPO_ROOT / "governance" / "standards" / "python-dependency-locking.md",
+    REPO_ROOT / "governance" / "standards" / "js-ts-tooling-baseline.md",
+    REPO_ROOT / "README.md",
+)
 
 
 def _yaml(path: Path) -> dict:
@@ -123,9 +133,32 @@ def test_toolchain_resolver_preserves_supported_explicit_python_selectors(
     assert _resolve(tmp_path, python_version=selector)["python_version"] == selector
 
 
-def test_hash_locked_ci_tools_do_not_reapply_project_configuration() -> None:
-    """Project overrides are resolved by ``uv sync``, not the hash-only install."""
+def test_org_action_installs_only_the_uv_locked_project_environment() -> None:
+    """The install action must not overlay a second resolver graph."""
     action = ACTION.read_text(encoding="utf-8")
 
     assert "uv sync ${{ inputs.sync-args }}" in action
-    assert "uv pip install --no-config --require-hashes --only-binary :all:" in action
+    assert "uv pip install" not in action
+
+
+def test_default_ci_sync_installs_the_explicit_dev_dependency_group() -> None:
+    """The published default installs CI tools declared in the locked dev group."""
+    action = _yaml(ACTION)
+    assert action["inputs"]["sync-args"]["default"] == (
+        "--locked --all-packages --group dev"
+    )
+    workflow = _yaml(REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml")
+    triggers = workflow.get(True) or workflow["on"]
+    assert triggers["workflow_call"]["inputs"]["sync-args"]["default"] == (
+        "--locked --all-packages --group dev"
+    )
+
+
+@pytest.mark.parametrize(
+    "path", PYTHON_INSTALL_SURFACES, ids=lambda path: str(path.relative_to(REPO_ROOT))
+)
+def test_python_install_surfaces_have_no_ci_requirements_overlay(path: Path) -> None:
+    """Every published install surface must derive Python tools from uv.lock."""
+    text = path.read_text(encoding="utf-8")
+    assert "ci-requirements" not in text
+    assert "requirements-ci.txt" not in text

@@ -234,8 +234,7 @@ Verify CI passes with `--frozen-lockfile` after the regeneration.
 For local runs to match the Quality gate workflow, use the same bootstrap sequence CI uses:
 
 ```bash
-uv sync --locked --all-packages
-uv pip install --no-config --require-hashes --only-binary :all: -r .github/requirements-ci.txt
+uv sync --locked --all-packages --group dev
 pnpm install --frozen-lockfile --ignore-scripts
 make setup
 make check
@@ -243,8 +242,7 @@ make check
 
 What this aligns:
 
-- `uv sync --locked --all-packages` puts workspace Python packages into the same `.venv` CI uses.
-- `uv pip install --no-config ...requirements-ci.txt` installs the separately hash-locked CI toolchain (`pytest`, `ruff`, `bandit`, `detect-secrets`, coverage helpers) into that same venv without re-applying project resolver overrides.
+- `uv sync --locked --all-packages --group dev` puts workspace Python packages and CI tools declared in the locked `dev` group into the same `.venv` CI uses.
 - `pnpm install --frozen-lockfile --ignore-scripts` matches the CI workspace install posture.
 - `make setup` installs the pre-commit hooks so staged-file checks fire before push.
 - `make check` mirrors the local/CI gate chain.

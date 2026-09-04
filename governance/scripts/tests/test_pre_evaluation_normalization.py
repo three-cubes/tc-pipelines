@@ -61,7 +61,7 @@ def test_gate_body_runs_normalization_before_any_evaluation() -> None:
         "Re-sync normalized project"
     )
     assert names.index("Re-sync normalized project") < names.index(
-        "Restore CI tools after normalization sync"
+        "Write changed-file list"
     )
 
 

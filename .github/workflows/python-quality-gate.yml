@@ -34,9 +34,8 @@ name: python-quality-gate
 # Each `uses:` below names a full commit SHA of THIS repo, so a step runs that
 # revision rather than the file beside it. The SHA cannot be factored into a
 # variable — `uses:` accepts no context — so `test_self_pin_freshness` is what
-# keeps the set consistent, and every pin moves together to the newest release.
-# A pin here lags the tree by one release by construction, so a change to a
-# composite ships at the release AFTER the one carrying it:
+# verifies that each immutable pin executes the current reviewed target content.
+# Commit a changed target first, then pin its callers to that immutable commit:
 # governance/standards/supply-chain-pinning.md.
 #
 # Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
@@ -60,17 +59,11 @@ on:
       # ── Install surface (forwarded to setup-uv-cached) ──────────────────
       sync-args:
         description: >-
-          Arguments to `uv sync`. Workspace repos use `--locked --all-packages`;
-          single-package repos use e.g. `--all-extras --all-groups`. Must agree
-          with the dep-install the engine config declares for local runs.
+          Arguments to `uv sync`. The default installs every workspace package
+          and the locked `dev` group that owns CI tools. Must agree with the
+          dep-install the engine config declares for local runs.
         type: string
-        default: "--locked --all-packages"
-      ci-requirements-path:
-        description: >-
-          `--require-hashes` requirements file for CI-only tools installed into
-          the same .venv before the gate runs. Empty string skips the step.
-        type: string
-        default: ".github/requirements-ci.txt"
+        default: "--locked --all-packages --group dev"
       # ── The gate ────────────────────────────────────────────────────────
       tc-fitness-args:
         description: >-
@@ -318,12 +311,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run the gate (unsharded)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@8eac47d7519032e61b1d4fe00f3e4ac1ef67579e # v1.19.12
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@1140b7148cb4a7486009c61ebf08e19907d4c5c7 # v2 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
           sync-args: ${{ inputs.sync-args }}
-          ci-requirements-path: ${{ inputs.ci-requirements-path }}
           fetch-depth: ${{ inputs.fetch-depth }}
           tc-fitness-args: ${{ inputs.tc-fitness-args }}
           write-changed-files: ${{ inputs.write-changed-files }}
@@ -381,12 +373,11 @@ jobs:
         shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Run the gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@8eac47d7519032e61b1d4fe00f3e4ac1ef67579e # v1.19.12
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@1140b7148cb4a7486009c61ebf08e19907d4c5c7 # v2 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
           sync-args: ${{ inputs.sync-args }}
-          ci-requirements-path: ${{ inputs.ci-requirements-path }}
           fetch-depth: ${{ inputs.fetch-depth }}
           tc-fitness-args: ${{ inputs.tc-fitness-args }}
           write-changed-files: ${{ inputs.write-changed-files }}
@@ -458,12 +449,11 @@ jobs:
           git fetch --no-tags origin "+refs/heads/${base}:refs/remotes/origin/${base}" || \
             echo "::warning::could not fetch ${BASE_REF}; the new-code floor may soft-pass."
       - name: Locked uv install
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@8eac47d7519032e61b1d4fe00f3e4ac1ef67579e # v1.19.12
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@8e1b82a3b8ba496d767e5aa5dd40981665d9313b # v2 candidate
         with:
           uv-version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}
           sync-args: ${{ inputs.sync-args }}
-          ci-requirements: ${{ inputs.ci-requirements-path }}
       # The coverage data was produced against the normalised source tree in
       # each quality lane. Recreate that exact tree here before coverage xml
       # maps executed lines back to source and before the new-code floor reads
@@ -491,11 +481,6 @@ jobs:
         if: ${{ inputs.pre-evaluation-normalize != '' }}
         shell: bash
         run: uv sync ${{ inputs.sync-args }}
-      - name: Restore CI tools after normalization sync
-        if: ${{ inputs.pre-evaluation-normalize != '' && inputs.ci-requirements-path != '' }}
-        shell: bash
-        run: |
-          uv pip install --no-config --require-hashes --only-binary :all: -r "${{ inputs.ci-requirements-path }}"
       - name: Download shard coverage
         if: ${{ inputs.pytest-shards > 1 }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -630,12 +615,11 @@ jobs:
           echo "::error::shard-tier is set but non-shard-tier is empty — every step outside the shard tier would drop out of the gate while it still reported green. fix: set non-shard-tier to the tier holding those steps. next: re-run."
           exit 1
       - name: Run the gate (non-shard tier)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@8eac47d7519032e61b1d4fe00f3e4ac1ef67579e # v1.19.12
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@1140b7148cb4a7486009c61ebf08e19907d4c5c7 # v2 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
           sync-args: ${{ inputs.sync-args }}
-          ci-requirements-path: ${{ inputs.ci-requirements-path }}
           fetch-depth: ${{ inputs.fetch-depth }}
           tc-fitness-args: ${{ inputs.tc-fitness-args }}
           write-changed-files: ${{ inputs.write-changed-files }}
