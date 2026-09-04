@@ -151,7 +151,9 @@ Once `develop` is validated on the VM:
    - Update `CHANGELOG.md` — add release section, move "Unreleased" items under it
    - CI must pass on the PR
 
-2. **Merge the PR** (squash or merge commit — prefer merge commit to preserve history)
+2. **Merge the PR with a merge commit.** This preserves the reviewed commit
+   ancestry required by immutable internal pins; repository settings disable
+   squash and rebase merges.
 
 3. **Tag on main:**
    ```bash

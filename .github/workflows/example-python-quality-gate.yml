@@ -62,7 +62,7 @@ jobs:
     with:
       # taz-shaped: locked workspace install, the Node/TS half on (taz ships MCP
       # packages alongside the Python gate), its own coverage artifact name.
-      sync-args: --locked --all-packages
+      sync-args: --locked --all-packages --group dev
       # Exercise the D1 no-attribution message-scan leg's input shape statically.
       run-no-attribution: true
       # Exercise the diff-scoped PR smoke input shape statically.
@@ -85,7 +85,7 @@ jobs:
     if: ${{ inputs.run-for-real }}
     uses: ./.github/workflows/python-quality-gate.yml
     with:
-      sync-args: --locked --all-packages
+      sync-args: --locked --all-packages --group dev
       pytest-shards: 4
       code-change-filter: '\.py$|^src/|^tests/|^pyproject\.toml$|^uv\.lock$'
       write-changed-files: true

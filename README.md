@@ -63,7 +63,7 @@ jobs:
     uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@<sha> # vX.Y.Z
     with:
       python-version: "3.12"
-      sync-args: "--locked --all-packages"   # workspace repo
+      sync-args: "--locked --all-packages --group dev"   # workspace repo + CI tools
       run-node: true                          # taz's TS half
     secrets:
       gh-token: ${{ secrets.GITHUB_TOKEN }}
@@ -90,7 +90,7 @@ Each workflow's inputs, secrets, and defaults are documented in the header of th
 | `python-version` | `"3.12"` | Python uv resolves against |
 | `uv-version` | `"0.12.5"` | pinned uv version |
 | `fetch-depth` | `2` | checkout depth (`0` for full-history scans) |
-| `sync-args` | `"--locked --all-packages"` | `uv sync` args (single-package repos: `--all-extras --all-groups`) |
+| `sync-args` | `"--locked --all-packages --group dev"` | `uv sync` args; CI tools are declared in the locked `dev` group |
 | `tc-fitness-args` | `"run"` | args to the tool's CLI (e.g. `run --changed-files-from .tc-fitness-changed-files`) |
 | `write-changed-files` | `false` | write a newline-delimited PR/push diff file before the gate |
 | `changed-files-path` | `".tc-fitness-changed-files"` | path written when `write-changed-files` is true |

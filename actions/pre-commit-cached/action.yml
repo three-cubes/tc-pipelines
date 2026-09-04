@@ -21,7 +21,7 @@ inputs:
       single package — `--all-extras --all-groups` is the superset that
       makes tc_fitness + the optional extras importable for the
       arch-fitness-catalogue hook. Workspace repos would pass
-      `--locked --all-packages`.
+      `--locked --all-packages --group dev`.
     default: "--all-extras --all-groups"
   pre-commit-config:
     description: Path to the pre-commit config file (`pre-commit/action`'s extra_args target).

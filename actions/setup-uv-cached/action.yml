@@ -14,9 +14,9 @@ inputs:
     default: ""
   sync-args:
     description: >-
-      Arguments to `uv sync`. Workspace repos use `--locked --all-packages`;
-      single-package repos use e.g. `--all-extras --all-groups`. Per-repo input.
-    default: "--locked --all-packages"
+      Arguments to `uv sync`. CI tools belong to the locked `dev` group;
+      workspace repos install every package plus that explicit group.
+    default: "--locked --all-packages --group dev"
 runs:
   using: composite
   steps:

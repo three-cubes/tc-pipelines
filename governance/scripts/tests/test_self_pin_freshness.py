@@ -12,11 +12,11 @@ run. Then a cache fix landed in `setup-uv-cached` and did nothing, because
 `python-gate-body` still pinned the pre-fix revision two levels down — the
 consumer repinned, took the new workflow, and got the old action.
 
-The rule: a self-pin is an immutable ancestor of HEAD, is not older than the
-newest release, and contains the same target content as the working tree. Pin
-SHA differences inside that target are normalised because updating a pin changes
-the commit hash. This permits a reviewed post-release commit to carry an action
-fix immediately, without mutable refs or a two-release bootstrap cycle.
+The rule: a self-pin is an immutable ancestor of HEAD and its complete recursive
+target graph has the same content as the working tree. Pin SHA differences in a
+target file are normalised for that file's comparison, then every nested target
+is resolved at the pinned coordinate and checked recursively. This permits an
+unchanged older target while rejecting a stale transitive dependency.
 
 There is no way to name the SHA once and reuse it: `uses:` accepts no context of
 any kind, in a reusable call or an action step. So this test, rather than a
@@ -180,7 +180,7 @@ def _assert_target_graph_matches_current(
 def test_self_pin_is_current_and_immutable(
     source: str, line: int, repo_path: str, sha: str
 ) -> None:
-    """The pin is recent, reachable, and byte-equivalent to its local target."""
+    """The pin is reachable and recursively equivalent to its local target."""
     head = _rev("HEAD")
     assert _is_ancestor(sha, head), (
         f"{source}:{line} pins `{repo_path}` at {sha[:12]}, which is not an "

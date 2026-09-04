@@ -54,6 +54,6 @@ jobs:
       candidate-ref: 1a2b3c4d5e6f7081920a1b2c3d4e5f6071829304
       consumer-repo: three-cubes/tc-agent-zone
       consumer-ref: main
-      gate-command: "uv lock --upgrade-package three-cubes-fitness && uv sync --locked --all-packages && uv run tc-fitness run"
+      gate-command: "uv lock --upgrade-package three-cubes-fitness && uv sync --locked --all-packages --group dev && uv run tc-fitness run"
       driver-ref: v1
       python-version: "3.12"

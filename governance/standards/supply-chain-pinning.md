@@ -26,9 +26,10 @@ local claim about it.
 
 **What keeps them consistent is a checker, not a variable.**
 `test_self_pin_freshness` resolves every self-pin from git history and compares
-the executed target with the current target after normalising nested pin SHAs.
-It fails when the pin is older than the newest release, is not an ancestor of
-HEAD, or executes stale content.
+the complete executed target graph with the current graph. It normalises each
+pin coordinate only for that file's content comparison, then follows the pinned
+coordinate and checks the nested target recursively. It fails when a pin is not
+an ancestor of HEAD or any target in its executed graph contains stale content.
 
 The genuinely DRY alternative — a floating `@v1` — is what this exists to
 prevent. One moving reference, no repetition, and it froze while a composite
@@ -39,14 +40,19 @@ revision no longer emitted. `test_uses_ref_pinning` rejects floating refs.
 ## Self-pins execute reviewed current content
 
 A commit cannot pin itself because writing the pin changes the hash. Commit the
-target first, then update its callers to that immutable commit. A caller may pin
-the newest release when the target is unchanged or a newer reviewed commit when
-the target changed after that release. The target-content check holds both paths
-to the same runtime result.
+target first, then update its callers to that immutable commit. An unchanged
+target may retain an older immutable ancestor only when its complete recursive
+target graph is content-equivalent to the current graph. A changed target uses
+the reviewed commit that first contains that target and its current dependencies.
 
 This removes the former two-tag bootstrap. The release commit contains callers
 that already execute the reviewed target content, and consumers pin that single
 release.
+
+This topology requires merge commits. Configure each repository with
+`allow_merge_commit=true`, `allow_squash_merge=false`, and
+`allow_rebase_merge=false`; run `governance/scripts/check-repository-merge-settings.sh`
+to verify those settings before releasing.
 
 ## Consumer repins
 

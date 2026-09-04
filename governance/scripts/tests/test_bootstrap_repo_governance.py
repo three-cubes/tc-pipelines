@@ -29,6 +29,7 @@ SCRIPT = "governance/scripts/bootstrap-repo-governance.sh"
 # distinct from a GitHub Actions ${{ expression }}, so a resolved wiring file must
 # carry no match of THIS pattern while keeping its GHA expressions intact.
 TEMPLATE_TOKEN_RE = re.compile(r"\{\{[A-Z_]+\}\}")
+PIPELINES_SHA = "9" * 40
 # External contexts posted by an app (not a ci.yml job) — verify allows these.
 EXTERNAL_CONTEXTS = {"SonarCloud Code Analysis"}
 
@@ -58,6 +59,8 @@ def _render(out_dir: Path, *extra: str) -> subprocess.CompletedProcess[str]:
         "--no-affordance",
         "--out-dir",
         str(out_dir),
+        "--pipelines-sha",
+        PIPELINES_SHA,
         *extra,
     )
 
@@ -120,6 +123,7 @@ def test_dry_run_covers_the_affordance_payload() -> None:
     result = _run(
         "--repo", "three-cubes/sample", "--dry-run",
         "--no-secrets", "--no-ruleset", "--no-files",
+        "--no-wiring",
     )
     assert result.returncode == 0, result.stderr
     out = result.stdout
@@ -149,6 +153,7 @@ def test_no_affordance_toggle_suppresses_the_payload() -> None:
     result = _run(
         "--repo", "three-cubes/sample", "--dry-run", "--no-affordance",
         "--no-secrets", "--no-ruleset", "--no-files",
+        "--no-wiring",
     )
     assert result.returncode == 0, result.stderr
     assert "affordance + harness payload" not in result.stdout
@@ -158,6 +163,7 @@ def test_dry_run_governance_files_install_gitignore_template() -> None:
     result = _run(
         "--repo", "three-cubes/sample", "--dry-run",
         "--no-secrets", "--no-ruleset", "--no-affordance",
+        "--no-wiring",
     )
     assert result.returncode == 0, result.stderr
     out = result.stdout
@@ -176,7 +182,7 @@ def test_help_lists_the_quality_gate_wiring_flags() -> None:
     out = result.stdout
     for flag in (
         "--fitness-tag",
-        "--pipelines-tag",
+        "--pipelines-sha",
         "--with-release",
         "--merge-queue",
         "--out-dir",
@@ -185,6 +191,22 @@ def test_help_lists_the_quality_gate_wiring_flags() -> None:
         "--no-wiring",
     ):
         assert flag in out, f"help text omits {flag}"
+
+
+def test_wiring_requires_an_immutable_pipelines_sha() -> None:
+    result = _run(
+        "--repo",
+        "three-cubes/sample",
+        "--dry-run",
+        "--no-secrets",
+        "--no-ruleset",
+        "--no-files",
+        "--no-affordance",
+    )
+
+    assert result.returncode == 2
+    assert "--pipelines-sha" in result.stderr
+    assert "40-character" in result.stderr
 
 
 def test_wiring_render_resolves_every_token(tmp_path: Path) -> None:

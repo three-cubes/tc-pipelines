@@ -24,7 +24,7 @@
 #   scripts/bootstrap-repo-governance.sh \
 #     --repo three-cubes/<name> \
 #     [--kv-name kv-tc-agents] \
-#     [--fitness-tag vX.Y.Z] [--pipelines-tag vN] \
+#     [--fitness-tag vX.Y.Z] --pipelines-sha <40-char-sha> \
 #     [--merge-queue] \
 #     [--sonar | --no-sonar] [--with-release] \
 #     [--sonar-project-key three-cubes_<name>] \
@@ -58,7 +58,7 @@ DRY_RUN=0
 
 # Quality-gate wiring knobs.
 FITNESS_TAG="v0.12.0"        # pinned tc-fitness engine (ships ci_consumes_shared_gate)
-PIPELINES_TAG="v1"           # pinned tc-pipelines reusables (floating major)
+PIPELINES_SHA=""             # required immutable tc-pipelines release commit
 DO_RELEASE=0                 # also render a release.yml caller
 MERGE_QUEUE=0                # exact-main push validation by default; queue profile opts out
 OUT_DIR=""                   # where wiring renders (default: a temp dir, reported)
@@ -93,7 +93,7 @@ while [[ $# -gt 0 ]]; do
     --no-affordance) DO_AFFORDANCE=0; shift ;;
     --no-wiring) DO_WIRING=0; shift ;;
     --fitness-tag) FITNESS_TAG="$2"; shift 2 ;;
-    --pipelines-tag) PIPELINES_TAG="$2"; shift 2 ;;
+    --pipelines-sha) PIPELINES_SHA="$2"; shift 2 ;;
     --merge-queue) MERGE_QUEUE=1; shift ;;
     --with-release) DO_RELEASE=1; shift ;;
     --out-dir) OUT_DIR="$2"; shift 2 ;;
@@ -113,6 +113,11 @@ done
 if [[ -z "$REPO" ]]; then
   echo "fix: --repo three-cubes/<name> is required" >&2
   echo "next: scripts/bootstrap-repo-governance.sh --repo three-cubes/<name>" >&2
+  exit 2
+fi
+if [[ "$DO_WIRING" == "1" && "$VERIFY_ONLY" == "0" && ! "$PIPELINES_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "fix: --pipelines-sha must be a 40-character lowercase tc-pipelines release commit" >&2
+  echo "next: resolve an immutable v2 release tag with git rev-parse '<tag>^{commit}' and pass that SHA" >&2
   exit 2
 fi
 
@@ -149,7 +154,7 @@ subst_tokens() {
     -e "s|{{CANONICAL_HOMES}}|${CANONICAL_HOMES}|g" \
     -e "s|{{FITNESS_TAG}}|${FITNESS_TAG}|g" \
     -e "s|{{FITNESS_FLOOR}}|${FITNESS_FLOOR}|g" \
-    -e "s|{{PIPELINES_TAG}}|${PIPELINES_TAG}|g"
+    -e "s|{{PIPELINES_SHA}}|${PIPELINES_SHA}|g"
 }
 
 # Render one skeleton to stdout: inline the banner INCLUDE, then resolve tokens.
@@ -525,7 +530,7 @@ permissions:
   id-token: write
 jobs:
   release:
-    uses: three-cubes/tc-pipelines/.github/workflows/release.yml@${PIPELINES_TAG}
+    uses: three-cubes/tc-pipelines/.github/workflows/release.yml@${PIPELINES_SHA}
     with:
       version: \${{ inputs.version }}
       changelog-label: \${{ inputs.changelog-label }}
@@ -538,7 +543,7 @@ EOF
       render_skeleton "$s" > "${OUT_DIR}/${s}"
     done
 
-    echo "ok: wiring rendered to ${OUT_DIR} (fitness-tag=${FITNESS_TAG} pipelines-tag=${PIPELINES_TAG})"
+    echo "ok: wiring rendered to ${OUT_DIR} (fitness-tag=${FITNESS_TAG} pipelines-sha=${PIPELINES_SHA})"
     cat <<EOF
   run (in a clone of ${REPO}, on a branch):
     # copy the rendered wiring in, MERGE the pyproject fragment into pyproject.toml,

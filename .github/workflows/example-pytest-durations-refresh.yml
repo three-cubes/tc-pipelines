@@ -35,7 +35,7 @@ jobs:
     with:
       python-version: "3.12"
       uv-version: "0.12.5"
-      sync-args: --locked --all-packages
+      sync-args: --locked --all-packages --group dev
       tc-fitness-args: run --only platform-pytest
       run-node: true
       ts-coverage-command: "echo 'TS coverage runs in the consumer js-ts job.'"

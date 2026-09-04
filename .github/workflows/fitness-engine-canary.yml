@@ -45,7 +45,7 @@ on:
           The consumer gate command run in the consumer dir AFTER the repin. The
           default relocks + syncs so the repinned CANDIDATE engine is actually
           installed, then runs the gate. Override for a workspace consumer (e.g.
-          `uv lock --upgrade-package three-cubes-fitness && uv sync --locked --all-packages && uv run tc-fitness run`).
+          `uv lock --upgrade-package three-cubes-fitness && uv sync --locked --all-packages --group dev && uv run tc-fitness run`).
         type: string
         default: "uv lock --upgrade-package three-cubes-fitness && uv sync --all-extras --all-groups && uv run tc-fitness run"
       driver-ref:

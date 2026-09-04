@@ -141,6 +141,19 @@ def test_org_action_installs_only_the_uv_locked_project_environment() -> None:
     assert "uv pip install" not in action
 
 
+def test_default_ci_sync_installs_the_explicit_dev_dependency_group() -> None:
+    """The published default installs CI tools declared in the locked dev group."""
+    action = _yaml(ACTION)
+    assert action["inputs"]["sync-args"]["default"] == (
+        "--locked --all-packages --group dev"
+    )
+    workflow = _yaml(REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml")
+    triggers = workflow.get(True) or workflow["on"]
+    assert triggers["workflow_call"]["inputs"]["sync-args"]["default"] == (
+        "--locked --all-packages --group dev"
+    )
+
+
 @pytest.mark.parametrize(
     "path", PYTHON_INSTALL_SURFACES, ids=lambda path: str(path.relative_to(REPO_ROOT))
 )
