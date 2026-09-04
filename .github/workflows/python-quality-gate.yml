@@ -34,7 +34,7 @@ name: python-quality-gate
 # Each `uses:` below names a full commit SHA of THIS repo, so a step runs that
 # revision rather than the file beside it. The SHA cannot be factored into a
 # variable — `uses:` accepts no context — so `test_self_pin_freshness` is what
-# keeps the set consistent, and every pin moves together to the newest release.
+# verifies that each immutable pin executes the current reviewed target content.
 # A pin here lags the tree by one release by construction, so a change to a
 # composite ships at the release AFTER the one carrying it:
 # governance/standards/supply-chain-pinning.md.
