@@ -163,7 +163,6 @@ CONSUMER_FORWARDED = (
     "python-version",
     "uv-version",
     "sync-args",
-    "ci-requirements-path",
     "run-node",
     "pnpm-version",
     "pnpm-install-args",

@@ -34,10 +34,6 @@ on:
         description: "Arguments for `uv sync` (e.g. `--locked --all-packages`)."
         type: string
         required: true
-      ci-requirements-path:
-        description: "Path to the CI requirements file."
-        type: string
-        required: true
       tc-fitness-args:
         description: >-
           Arguments to the engine CLI, including the subcommand — e.g.
@@ -171,7 +167,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
           sync-args: ${{ inputs.sync-args }}
-          ci-requirements-path: ${{ inputs.ci-requirements-path }}
+          ci-requirements-path: ""
           fetch-depth: ${{ inputs.fetch-depth }}
           tc-fitness-args: ${{ inputs.tc-fitness-args }}
           write-changed-files: false

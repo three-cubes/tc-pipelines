@@ -91,7 +91,6 @@ Each workflow's inputs, secrets, and defaults are documented in the header of th
 | `uv-version` | `"0.12.5"` | pinned uv version |
 | `fetch-depth` | `2` | checkout depth (`0` for full-history scans) |
 | `sync-args` | `"--locked --all-packages"` | `uv sync` args (single-package repos: `--all-extras --all-groups`) |
-| `ci-requirements-path` | `".github/requirements-ci.txt"` | `--require-hashes` CI-tools file; `""` skips |
 | `tc-fitness-args` | `"run"` | args to the tool's CLI (e.g. `run --changed-files-from .tc-fitness-changed-files`) |
 | `write-changed-files` | `false` | write a newline-delimited PR/push diff file before the gate |
 | `changed-files-path` | `".tc-fitness-changed-files"` | path written when `write-changed-files` is true |
@@ -126,7 +125,7 @@ jobs:
 
 | Action | Purpose |
 |---|---|
-| [`actions/setup-uv-cached`](actions/setup-uv-cached/action.yml) | The org-standard install step: pinned `astral-sh/setup-uv` (cache on) + `uv sync <sync-args>` + optional `uv pip install --no-config --require-hashes` CI tools. |
+| [`actions/setup-uv-cached`](actions/setup-uv-cached/action.yml) | The org-standard install step: pinned `astral-sh/setup-uv` (cache on) + `uv sync <sync-args>` from the repository's `pyproject.toml` and `uv.lock`. |
 | [`actions/pre-commit-cached`](actions/pre-commit-cached/action.yml) | `setup-uv-cached` + `pre-commit/action`, from one source. Self-pins `setup-uv-cached` at a release SHA. |
 | [`actions/license-present`](actions/license-present/action.yml) | Asserts a top-level LICENSE declaring the expected SPDX id — the whole-repo provenance check. Used by `meta-quality-gate.yml`'s license check. |
 

@@ -46,7 +46,11 @@ GATE_BODY = "actions/python-gate-body"
 
 # An input referenced nowhere in the body is a no-op for the caller. Reserve one
 # deliberately only by naming it here, keyed "<action>:<input>", with the reason.
-UNREFERENCED_OK: dict[str, str] = {}
+UNREFERENCED_OK: dict[str, str] = {
+    "actions/python-gate-body:ci-requirements-path": (
+        "one-commit bridge for workflows pinned to the prior action contract"
+    ),
+}
 
 # An output whose key reaches $GITHUB_OUTPUT from somewhere other than a literal
 # write in the step body — a helper script the step invokes, for instance. The

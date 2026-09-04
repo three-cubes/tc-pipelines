@@ -23,12 +23,6 @@ inputs:
       arch-fitness-catalogue hook. Workspace repos would pass
       `--locked --all-packages`.
     default: "--all-extras --all-groups"
-  ci-requirements:
-    description: >-
-      Optional `--require-hashes` requirements file for CI-only tools to
-      install into the same .venv (forwarded to setup-uv-cached; empty
-      string skips that step).
-    default: ""
   pre-commit-config:
     description: Path to the pre-commit config file (`pre-commit/action`'s extra_args target).
     default: ".pre-commit-config.yaml"
@@ -52,7 +46,6 @@ runs:
         uv-version: ${{ inputs.uv-version }}
         python-version: ${{ inputs.python-version }}
         sync-args: ${{ inputs.sync-args }}
-        ci-requirements: ${{ inputs.ci-requirements }}
     - name: pre-commit run
       uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
       with:

@@ -15,6 +15,7 @@ inputs:
   sync-args:
     required: true
   ci-requirements-path:
+    description: "Deprecated compatibility input; ignored."
     required: true
   fetch-depth:
     required: true
@@ -106,7 +107,6 @@ runs:  # ${{ inputs.probe-undeclared-input }}
         uv-version: ${{ inputs.uv-version }}
         python-version: ${{ inputs.python-version }}
         sync-args: ${{ inputs.sync-args }}
-        ci-requirements: ${{ inputs.ci-requirements-path }}
 
     # ── Node / pnpm half (opt-in) ───────────────────────────────────────
     - name: Set up pnpm
@@ -143,14 +143,6 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       if: inputs.pre-evaluation-normalize != ''
       shell: bash
       run: uv sync ${{ inputs.sync-args }}
-
-    # `uv sync` can remove CI-only tools installed by setup-uv-cached. Restore
-    # that hash-locked surface before the evaluator runs.
-    - name: Restore CI tools after normalization sync
-      if: inputs.pre-evaluation-normalize != '' && inputs.ci-requirements-path != ''
-      shell: bash
-      run: |
-        uv pip install --no-config --require-hashes --only-binary :all: -r "${{ inputs.ci-requirements-path }}"
 
     # ── Diff-scoped smoke support (opt-in) ─────────────────────────────
     - name: Write changed-file list
