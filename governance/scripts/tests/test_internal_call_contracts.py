@@ -17,6 +17,7 @@ lanes ran against a prepared one.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,10 @@ WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
 ACTION_DIR = REPO_ROOT / "actions"
 
 LOCAL_REUSABLE = re.compile(r"^\./\.github/workflows/(.+\.yml)$")
-LOCAL_ACTION = re.compile(r"^(?:\./actions/|three-cubes/tc-pipelines/actions/)([^@/]+)")
+LOCAL_ACTION = re.compile(
+    r"^(?:\./actions/(?P<local>[^@/]+)|"
+    r"three-cubes/tc-pipelines/actions/(?P<pinned>[^@/]+)@(?P<sha>[0-9a-f]{40}))$"
+)
 
 
 def _load(path: Path) -> dict:
@@ -57,6 +61,22 @@ def _action_contracts() -> dict[str, dict]:
     }
 
 
+def _pinned_action_contract(action: str, sha: str) -> dict:
+    """Load the contract GitHub executes, rather than the beside-it revision."""
+    result = subprocess.run(
+        ["git", "show", f"{sha}:actions/{action}/action.yml"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"cannot read actions/{action}/action.yml at self-pin {sha}: "
+        f"{result.stderr.strip()}"
+    )
+    return (yaml.safe_load(result.stdout) or {}).get("inputs") or {}
+
+
 def _calls() -> list[tuple[str, str, dict, dict]]:
     """(source workflow, label, declared inputs of the target, inputs passed)."""
     reusables, actions = _reusable_contracts(), _action_contracts()
@@ -79,12 +99,18 @@ def _calls() -> list[tuple[str, str, dict, dict]]:
                 if not isinstance(step, dict):
                     continue
                 match = LOCAL_ACTION.match(str(step.get("uses", "")))
-                if match and match.group(1) in actions:
+                action = (match.group("local") or match.group("pinned")) if match else None
+                if match and action in actions:
+                    declared = (
+                        _pinned_action_contract(action, match.group("sha"))
+                        if match.group("sha")
+                        else actions[action]
+                    )
                     found.append(
                         (
                             path.name,
-                            f"{job_name} -> actions/{match.group(1)}",
-                            actions[match.group(1)],
+                            f"{job_name} -> actions/{action}",
+                            declared,
                             step.get("with") or {},
                         )
                     )

@@ -14,9 +14,6 @@ inputs:
     required: true
   sync-args:
     required: true
-  ci-requirements-path:
-    description: "Deprecated compatibility input; ignored."
-    required: true
   fetch-depth:
     required: true
   tc-fitness-args:
