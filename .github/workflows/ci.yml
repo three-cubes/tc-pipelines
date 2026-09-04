@@ -55,7 +55,7 @@ jobs:
           # clone has none of those objects, so they would skip rather than check.
           fetch-depth: 0
       - name: Set up uv + Python
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@8eac47d7519032e61b1d4fe00f3e4ac1ef67579e # v1.19.12
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@f2bf7cf95aef009e8f216e0c14418617ccce6fb1 # v1.19.12
       - name: Install the harness dependencies
         run: uv sync --locked
       - name: Run the contract tests

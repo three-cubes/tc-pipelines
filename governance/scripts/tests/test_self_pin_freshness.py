@@ -1,4 +1,4 @@
-"""Every self-pinned `uses:` must name this repo's newest release.
+"""Every self-pinned `uses:` must execute the current target content.
 
 Every internal reference is pinned to a commit SHA, so a step runs whatever that
 commit held — not what sits beside it in the tree. When the two diverge, the
@@ -12,16 +12,11 @@ run. Then a cache fix landed in `setup-uv-cached` and did nothing, because
 `python-gate-body` still pinned the pre-fix revision two levels down — the
 consumer repinned, took the new workflow, and got the old action.
 
-The rule: every self-pin names the newest release reachable from HEAD. A commit
-cannot pin itself — writing the pin changes the hash — so a tag AT HEAD is
-skipped and the target is the newest release BEFORE it. That bounds the lag at
-one release rather than letting it grow: a change to a composite reaches a
-consumer at the release AFTER the one carrying it, and never later.
-
-So bump the pins immediately after cutting a tag. While `main` stands on that tag
-the stale pins still read as current, because the tag at HEAD is skipped and
-nothing is wrong yet. The next commit to land makes it the target and turns every
-assertion here red — on an author who changed none of them.
+The rule: a self-pin is an immutable ancestor of HEAD, is not older than the
+newest release, and contains the same target content as the working tree. Pin
+SHA differences inside that target are normalised because updating a pin changes
+the commit hash. This permits a reviewed post-release commit to carry an action
+fix immediately, without mutable refs or a two-release bootstrap cycle.
 
 There is no way to name the SHA once and reuse it: `uses:` accepts no context of
 any kind, in a reusable call or an action step. So this test, rather than a
@@ -49,11 +44,6 @@ SEARCH_DIRS = (".github/workflows", "actions", ".github/actions")
 SELF_PIN = re.compile(
     r"uses:\s*three-cubes/tc-pipelines/(?P<path>[^@\s]+)@(?P<sha>[0-9a-f]{40})"
 )
-
-# A referenced path whose divergence is deliberate, with the reason. An entry
-# here is a promise that the older revision is what the caller wants.
-PINNED_BEHIND_BY_DESIGN: dict[str, str] = {}
-
 
 def _source_files() -> list[Path]:
     found: list[Path] = []
@@ -165,31 +155,45 @@ def _newest_release_commit() -> str | None:
     return None
 
 
+def _is_ancestor(older: str, newer: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", older, newer],
+            cwd=REPO_ROOT,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
 @pytest.mark.parametrize(("source", "line", "repo_path", "sha"), PINS, ids=PIN_IDS)
-def test_self_pin_names_the_newest_release(
+def test_self_pin_is_current_and_immutable(
     source: str, line: int, repo_path: str, sha: str
 ) -> None:
-    """Every self-pin resolves to the most recent release, never further back.
-
-    A pin loads whatever its commit held, so a pin left behind runs an old file
-    while everything read locally is current. One froze at a release 91 commits
-    back and a deploy advertised an always-empty rollback handle; another kept a
-    cache fix from executing across three releases and two consumer repins.
-
-    Pinning is per level, so a change reaches a caller only once the release
-    carrying it is pinned. Requiring the NEWEST release bounds that lag at one
-    release instead of letting it grow without limit. Bump these as the last
-    step before cutting a tag.
-    """
+    """The pin is recent, reachable, and byte-equivalent to its local target."""
     newest = _newest_release_commit()
     if newest is None:
         pytest.skip("no release tag reachable from HEAD — nothing to compare against")
 
-    assert sha == newest, (
-        f"{source}:{line} pins `{repo_path}` at {sha[:12]}, not the newest "
-        f"release {newest[:12]}. That step loads an older revision of a file "
-        f"sitting current beside it, so a change there reaches nobody until the "
-        f"pin moves — and the gap grows silently with every release. "
-        f"fix: repin to {newest[:12]} as the last step before cutting a tag. "
-        f"next: re-run pytest."
+    head = _rev("HEAD")
+    assert _is_ancestor(newest, sha), (
+        f"{source}:{line} pins `{repo_path}` at {sha[:12]}, older than newest "
+        f"release {newest[:12]}. Repin it to the reviewed commit containing "
+        "the current target."
+    )
+    assert _is_ancestor(sha, head), (
+        f"{source}:{line} pins `{repo_path}` at {sha[:12]}, which is not an "
+        "ancestor of HEAD. Self-pins must name reviewed repository history."
+    )
+
+    target = _resolve(repo_path)
+    pinned = _blob_at(sha, target)
+    assert pinned is not None, (
+        f"{source}:{line} pins `{target}` at {sha[:12]}, but that target does "
+        "not exist in the pinned commit."
+    )
+    current = (REPO_ROOT / target).read_text(encoding="utf-8")
+    assert _without_pin_shas(pinned) == _without_pin_shas(current), (
+        f"{source}:{line} executes stale `{target}` content from {sha[:12]}. "
+        "Commit the target, then repin this caller to that immutable commit."
     )
