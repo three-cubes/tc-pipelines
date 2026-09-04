@@ -167,7 +167,7 @@ When a new pattern is needed (e.g. ACR push before deploy, Bicep apply before VM
 - `vX.Y.Z` releases are immutable. A major bump means a breaking change to the inputs, outputs or secrets of a composite or reusable workflow.
 - **Consumers pin the release COMMIT, not the tag** — `@<sha> # vX.Y.Z` — and repin deliberately. Nothing reaches a consumer until it moves its pin, which is what makes a breaking change safe to publish.
 - No floating ref of any kind: not `latest`, not `@main`, not a major like `@v1`. A floating major is only correct while something advances that tag on every release; nothing does, so it silently freezes while the tree beside it moves.
-- A self-pin inside this repo lags the tree by exactly one release, because no commit can pin the tag being cut. So a change to a composite reaches a consumer at the release AFTER the one carrying it — [`supply-chain-pinning.md`](../governance/standards/supply-chain-pinning.md) has the release order that follows from that.
+- Self-pins name an immutable reviewed commit whose target content matches the current tree. Commit a changed target first, then pin its callers to that commit so one release contains the working path. [`supply-chain-pinning.md`](../governance/standards/supply-chain-pinning.md) defines the check.
 
 ## Security model
 

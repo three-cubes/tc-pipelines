@@ -35,8 +35,7 @@ name: python-quality-gate
 # revision rather than the file beside it. The SHA cannot be factored into a
 # variable — `uses:` accepts no context — so `test_self_pin_freshness` is what
 # verifies that each immutable pin executes the current reviewed target content.
-# A pin here lags the tree by one release by construction, so a change to a
-# composite ships at the release AFTER the one carrying it:
+# Commit a changed target first, then pin its callers to that immutable commit:
 # governance/standards/supply-chain-pinning.md.
 #
 # Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
