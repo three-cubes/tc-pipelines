@@ -311,7 +311,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run the gate (unsharded)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@762f6791d839bea71c959e6a8cf40c733f2f41a0 # post-v1.19.12 immutable
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@1140b7148cb4a7486009c61ebf08e19907d4c5c7 # v2 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -373,7 +373,7 @@ jobs:
         shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Run the gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@762f6791d839bea71c959e6a8cf40c733f2f41a0 # post-v1.19.12 immutable
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@1140b7148cb4a7486009c61ebf08e19907d4c5c7 # v2 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -615,7 +615,7 @@ jobs:
           echo "::error::shard-tier is set but non-shard-tier is empty — every step outside the shard tier would drop out of the gate while it still reported green. fix: set non-shard-tier to the tier holding those steps. next: re-run."
           exit 1
       - name: Run the gate (non-shard tier)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@762f6791d839bea71c959e6a8cf40c733f2f41a0 # post-v1.19.12 immutable
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@1140b7148cb4a7486009c61ebf08e19907d4c5c7 # v2 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}

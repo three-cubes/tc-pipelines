@@ -162,7 +162,7 @@ jobs:
           exit 1
 
       - name: Run the suite and store durations
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@762f6791d839bea71c959e6a8cf40c733f2f41a0 # post-v1.19.12 immutable
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@1140b7148cb4a7486009c61ebf08e19907d4c5c7 # v2 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
