@@ -449,7 +449,7 @@ jobs:
           git fetch --no-tags origin "+refs/heads/${base}:refs/remotes/origin/${base}" || \
             echo "::warning::could not fetch ${BASE_REF}; the new-code floor may soft-pass."
       - name: Locked uv install
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@f2bf7cf95aef009e8f216e0c14418617ccce6fb1 # v1.19.12
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@954df29c0ddadd72c3b83702fb58acb943ef5b14 # post-v1.19.12 immutable
         with:
           uv-version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}

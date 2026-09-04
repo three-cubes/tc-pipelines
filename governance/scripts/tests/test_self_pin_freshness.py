@@ -35,6 +35,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.contract
 
@@ -42,7 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SEARCH_DIRS = (".github/workflows", "actions", ".github/actions")
 
 SELF_PIN = re.compile(
-    r"uses:\s*three-cubes/tc-pipelines/(?P<path>[^@\s]+)@(?P<sha>[0-9a-f]{40})"
+    r"three-cubes/tc-pipelines/(?P<path>[^@\s]+)@(?P<sha>[0-9a-f]{40})"
 )
 
 def _source_files() -> list[Path]:
@@ -55,25 +56,38 @@ def _source_files() -> list[Path]:
     return found
 
 
+def _self_pin_nodes(text: str) -> list[tuple[int, str, str]]:
+    """Return structural self-pin uses with their source line."""
+    root = yaml.compose(text, Loader=yaml.SafeLoader)
+    found: list[tuple[int, str, str]] = []
+
+    def walk(node: yaml.Node) -> None:
+        if isinstance(node, yaml.SequenceNode):
+            for item in node.value:
+                walk(item)
+            return
+        if not isinstance(node, yaml.MappingNode):
+            return
+        for key, value in node.value:
+            if getattr(key, "value", None) == "uses" and isinstance(value, yaml.ScalarNode):
+                match = SELF_PIN.fullmatch(value.value)
+                if match:
+                    found.append(
+                        (key.start_mark.line + 1, match.group("path"), match.group("sha"))
+                    )
+            walk(value)
+
+    if root is not None:
+        walk(root)
+    return found
+
+
 def _self_pins() -> list[tuple[str, int, str, str]]:
     """(source file, line, referenced repo path, pinned sha)."""
     pins = []
     for path in _source_files():
-        for number, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), start=1
-        ):
-            if line.lstrip().startswith("#"):
-                continue
-            match = SELF_PIN.search(line)
-            if match:
-                pins.append(
-                    (
-                        str(path.relative_to(REPO_ROOT)),
-                        number,
-                        match.group("path"),
-                        match.group("sha"),
-                    )
-                )
+        for number, repo_path, sha in _self_pin_nodes(path.read_text(encoding="utf-8")):
+            pins.append((str(path.relative_to(REPO_ROOT)), number, repo_path, sha))
     return pins
 
 
@@ -90,7 +104,7 @@ def _without_pin_shas(text: str) -> str:
     changed step, input or command still fails, a pure repin does not.
     """
     return re.sub(
-        r"(three-cubes/tc-pipelines/[^@\s]+@)[0-9a-f]{40}( # v[0-9][^\s]*)?",
+        r"(three-cubes/tc-pipelines/[^@\s]+@)[0-9a-f]{40}(?:\s*#.*)?",
         r"\1<PIN>",
         text,
     )
@@ -132,29 +146,6 @@ def _rev(ref: str) -> str:
     ).stdout.strip()
 
 
-def _newest_release_commit() -> str | None:
-    """Newest release BEFORE HEAD.
-
-    A tag cut at HEAD is skipped. No commit can pin to its own SHA — writing the
-    pin changes the hash — so treating the tag being cut as the target would
-    fail on the release commit itself and on every commit after it until a
-    separate repin landed, which is the flow this rule is meant to support.
-    """
-    head = _rev("HEAD")
-    tags = subprocess.run(
-        ["git", "tag", "--sort=-v:refname", "--merged", "HEAD", "v*"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.split()
-    for tag in tags:
-        sha = _rev(tag)
-        if sha and sha != head:
-            return sha
-    return None
-
-
 def _is_ancestor(older: str, newer: str) -> bool:
     return (
         subprocess.run(
@@ -166,34 +157,40 @@ def _is_ancestor(older: str, newer: str) -> bool:
     )
 
 
+def _assert_target_graph_matches_current(
+    repo_path: str, sha: str, *, seen: set[tuple[str, str]]
+) -> None:
+    coordinate = (repo_path, sha)
+    if coordinate in seen:
+        return
+    seen.add(coordinate)
+
+    target = _resolve(repo_path)
+    pinned = _blob_at(sha, target)
+    assert pinned is not None, f"{target} does not exist at self-pin {sha[:12]}"
+    current = (REPO_ROOT / target).read_text(encoding="utf-8")
+    assert _without_pin_shas(pinned) == _without_pin_shas(current), (
+        f"{target} at {sha[:12]} differs from its reviewed current content"
+    )
+    for _, nested_path, nested_sha in _self_pin_nodes(pinned):
+        _assert_target_graph_matches_current(nested_path, nested_sha, seen=seen)
+
+
 @pytest.mark.parametrize(("source", "line", "repo_path", "sha"), PINS, ids=PIN_IDS)
 def test_self_pin_is_current_and_immutable(
     source: str, line: int, repo_path: str, sha: str
 ) -> None:
     """The pin is recent, reachable, and byte-equivalent to its local target."""
-    newest = _newest_release_commit()
-    if newest is None:
-        pytest.skip("no release tag reachable from HEAD — nothing to compare against")
-
     head = _rev("HEAD")
-    assert _is_ancestor(newest, sha), (
-        f"{source}:{line} pins `{repo_path}` at {sha[:12]}, older than newest "
-        f"release {newest[:12]}. Repin it to the reviewed commit containing "
-        "the current target."
-    )
     assert _is_ancestor(sha, head), (
         f"{source}:{line} pins `{repo_path}` at {sha[:12]}, which is not an "
         "ancestor of HEAD. Self-pins must name reviewed repository history."
     )
 
-    target = _resolve(repo_path)
-    pinned = _blob_at(sha, target)
-    assert pinned is not None, (
-        f"{source}:{line} pins `{target}` at {sha[:12]}, but that target does "
-        "not exist in the pinned commit."
-    )
-    current = (REPO_ROOT / target).read_text(encoding="utf-8")
-    assert _without_pin_shas(pinned) == _without_pin_shas(current), (
-        f"{source}:{line} executes stale `{target}` content from {sha[:12]}. "
-        "Commit the target, then repin this caller to that immutable commit."
-    )
+    try:
+        _assert_target_graph_matches_current(repo_path, sha, seen=set())
+    except AssertionError as error:
+        raise AssertionError(
+            f"{source}:{line} executes a stale target graph from {sha[:12]}: {error}. "
+            "Commit each dependency before pinning its caller."
+        ) from error
