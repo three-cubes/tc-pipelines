@@ -1,0 +1,43 @@
+name: Post-merge PR evidence
+description: Capture the tested PR merge tree for fail-closed promotion after main receives the merge.
+inputs:
+  repository:
+    description: Repository owner/name.
+    required: true
+  pull-request-number:
+    description: Pull request number whose synthetic merge tree was tested.
+    required: true
+  base-sha:
+    description: Exact PR base SHA.
+    required: true
+  head-sha:
+    description: Exact PR head SHA.
+    required: true
+  workflow-run-id:
+    description: PR Quality-gate workflow run ID.
+    required: true
+  workflow-run-attempt:
+    description: PR Quality-gate workflow run attempt.
+    required: true
+  output:
+    description: Evidence JSON path to upload from the trusted PR workflow.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Capture tested merge tree
+      shell: bash
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+        PULL_REQUEST_NUMBER: ${{ inputs.pull-request-number }}
+        BASE_SHA: ${{ inputs.base-sha }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        WORKFLOW_RUN_ID: ${{ inputs.workflow-run-id }}
+        WORKFLOW_RUN_ATTEMPT: ${{ inputs.workflow-run-attempt }}
+        OUTPUT: ${{ inputs.output }}
+      run: >-
+        python3 "$GITHUB_ACTION_PATH/postmerge_pr_evidence.py" capture
+        --repository "$REPOSITORY" --pull-request-number "$PULL_REQUEST_NUMBER"
+        --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA"
+        --workflow-run-id "$WORKFLOW_RUN_ID" --workflow-run-attempt "$WORKFLOW_RUN_ATTEMPT"
+        --output "$OUTPUT"

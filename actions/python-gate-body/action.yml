@@ -31,9 +31,13 @@ inputs:
       any evaluation, changed-file capture, or `tc-fitness run`. The gate
       re-syncs the project afterwards so non-editable installs execute the
       normalised tree. Empty skips the phase. Use this for mechanical fixes
-      such as `ruff check --fix` and `ruff format`; do not use it for network,
-      credential, deploy, or remote write operations. The consumer's local
-      `make check` must invoke the same command before its fitness gate.
+      such as `ruff check --fix` and `ruff format`; the command must leave the
+      checkout clean, proving that the committed tree was already normalized.
+      A changed tracked or untracked path fails before evaluation and tells the
+      contributor to run, review and commit the same normalizer locally. Do not
+      use it for network, credential, deploy, or remote write operations. The
+      consumer's local `make check` must invoke the same command before its
+      fitness gate.
     required: true
   pre-steps:
     required: true
@@ -123,14 +127,23 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       run: pnpm install ${{ inputs.pnpm-install-args }}
 
     # ── Deterministic source normalization (opt-in) ─────────────────────
-    # This is deliberately distinct from pre-steps: its contract is to make
-    # safe, mechanical repairs before *any* evaluator observes the tree. It is
-    # forwarded through every quality lane and the duration-refresh reusable
-    # so an unsharded, sharded, or timing run cannot see a different source.
+    # This is deliberately distinct from pre-steps: its contract is to run the
+    # same safe, mechanical normalizer as the local gate before *any* evaluator
+    # observes the tree. The following clean-tree assertion requires all repairs
+    # to be committed. It is forwarded through every quality lane and the
+    # duration-refresh reusable so every run evaluates the same source.
     - name: Pre-evaluation normalization
       if: inputs.pre-evaluation-normalize != ''
       shell: bash
       run: ${{ inputs.pre-evaluation-normalize }}
+
+    # Post-merge evidence can promote only the committed tree. A normalizer may
+    # repair source locally, but CI must not evaluate that unpublished state and
+    # then attest that the unmodified merge commit passed.
+    - name: Bind evaluation to the committed tree
+      if: inputs.pre-evaluation-normalize != ''
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/assert-clean-evaluated-tree.sh"
 
     # `--no-editable` installs the project into site-packages. Re-sync after a
     # normalizer changes source so pytest and source-based evaluators cannot
