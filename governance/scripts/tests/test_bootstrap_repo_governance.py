@@ -121,8 +121,12 @@ def test_dry_run_covers_the_affordance_payload() -> None:
     # idempotent settings.json jq-merge + safe-commit/preflight — all named in
     # the --dry-run output. Live sections are toggled off so this stays hermetic.
     result = _run(
-        "--repo", "three-cubes/sample", "--dry-run",
-        "--no-secrets", "--no-ruleset", "--no-files",
+        "--repo",
+        "three-cubes/sample",
+        "--dry-run",
+        "--no-secrets",
+        "--no-ruleset",
+        "--no-files",
         "--no-wiring",
     )
     assert result.returncode == 0, result.stderr
@@ -132,12 +136,21 @@ def test_dry_run_covers_the_affordance_payload() -> None:
     assert "affordance + harness payload" in out
 
     # All six rendered skeletons named.
-    for skel in ("CLAUDE.md", "AGENTS.md", "CONTRIBUTING.md", "ETHOS.md", "RESOLVER.md", "SCORECARD.md"):
+    for skel in (
+        "CLAUDE.md",
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "ETHOS.md",
+        "RESOLVER.md",
+        "SCORECARD.md",
+    ):
         assert skel in out, f"affordance payload omits {skel}"
 
     # The hook + the idempotent settings.json merge.
     assert "PostToolUse" in out
-    assert "unique" in out, "settings.json merge must be idempotent (jq unique), not an append"
+    assert "unique" in out, (
+        "settings.json merge must be idempotent (jq unique), not an append"
+    )
 
     # The harness scripts.
     assert "scripts/safe-commit.sh" in out
@@ -145,14 +158,21 @@ def test_dry_run_covers_the_affordance_payload() -> None:
 
     # Placeholders resolved from --repo at render time (no unrendered token, and
     # the repo slug appears in the rendered instructions).
-    assert "{{REPO}}" not in out, "an affordance skeleton rendered with an unresolved {{REPO}} token"
+    assert "{{REPO}}" not in out, (
+        "an affordance skeleton rendered with an unresolved {{REPO}} token"
+    )
     assert "three-cubes/sample" in out
 
 
 def test_no_affordance_toggle_suppresses_the_payload() -> None:
     result = _run(
-        "--repo", "three-cubes/sample", "--dry-run", "--no-affordance",
-        "--no-secrets", "--no-ruleset", "--no-files",
+        "--repo",
+        "three-cubes/sample",
+        "--dry-run",
+        "--no-affordance",
+        "--no-secrets",
+        "--no-ruleset",
+        "--no-files",
         "--no-wiring",
     )
     assert result.returncode == 0, result.stderr
@@ -161,8 +181,12 @@ def test_no_affordance_toggle_suppresses_the_payload() -> None:
 
 def test_dry_run_governance_files_install_gitignore_template() -> None:
     result = _run(
-        "--repo", "three-cubes/sample", "--dry-run",
-        "--no-secrets", "--no-ruleset", "--no-affordance",
+        "--repo",
+        "three-cubes/sample",
+        "--dry-run",
+        "--no-secrets",
+        "--no-ruleset",
+        "--no-affordance",
         "--no-wiring",
     )
     assert result.returncode == 0, result.stderr
@@ -170,7 +194,9 @@ def test_dry_run_governance_files_install_gitignore_template() -> None:
 
     assert "contents/governance/gitignore" in out
     assert "> .gitignore" in out
-    assert ".DS_Store" in (REPO_ROOT / "governance/gitignore").read_text(encoding="utf-8")
+    assert ".DS_Store" in (REPO_ROOT / "governance/gitignore").read_text(
+        encoding="utf-8"
+    )
 
 
 # ── quality-gate wiring (the FULL-baseline extension) ────────────────────────
@@ -256,10 +282,14 @@ def test_wiring_render_resolves_every_token(tmp_path: Path) -> None:
         "harness_canon_reference",
         "ci_consumes_shared_gate",
     ):
-        assert f"core_checks.{binding}" in pyproject, f"pyproject omits CORE binding {binding}"
+        assert f"core_checks.{binding}" in pyproject, (
+            f"pyproject omits CORE binding {binding}"
+        )
 
 
-def test_wiring_makefile_has_a_fix_target_running_the_autofixers(tmp_path: Path) -> None:
+def test_wiring_makefile_has_a_fix_target_running_the_autofixers(
+    tmp_path: Path,
+) -> None:
     # `make fix` shift-left (SGO-280): the rendered Makefile must CORRECT
     # lint/format/lockfile deterministically so the local loop auto-fixes rather
     # than only reporting it. `make check` stays the VERIFIER (unchanged).
@@ -269,7 +299,9 @@ def test_wiring_makefile_has_a_fix_target_running_the_autofixers(tmp_path: Path)
 
     # A real `fix:` target exists and is declared .PHONY.
     assert re.search(r"^fix:", makefile, re.MULTILINE), "Makefile has no `fix:` target"
-    assert re.search(r"^\.PHONY:.*\bfix\b", makefile, re.MULTILINE), "`fix` is not .PHONY"
+    assert re.search(r"^\.PHONY:.*\bfix\b", makefile, re.MULTILINE), (
+        "`fix` is not .PHONY"
+    )
 
     # It runs the deterministic auto-fixers: ruff --fix + ruff format + uv lock.
     assert "ruff check --fix" in makefile, "fix target does not run `ruff check --fix`"
@@ -277,7 +309,9 @@ def test_wiring_makefile_has_a_fix_target_running_the_autofixers(tmp_path: Path)
     assert "uv lock" in makefile, "fix target does not run `uv lock`"
 
     # `make check` stays the VERIFIER — fix and check are distinct targets.
-    assert re.search(r"^check:", makefile, re.MULTILINE), "Makefile lost its `check:` verifier"
+    assert re.search(r"^check:", makefile, re.MULTILINE), (
+        "Makefile lost its `check:` verifier"
+    )
 
 
 def test_wiring_ci_emits_every_required_ruleset_context(tmp_path: Path) -> None:
@@ -296,7 +330,9 @@ def test_wiring_ci_emits_every_required_ruleset_context(tmp_path: Path) -> None:
         )
 
 
-def test_wiring_renders_the_validation_trigger_for_each_merge_profile(tmp_path: Path) -> None:
+def test_wiring_renders_the_validation_trigger_for_each_merge_profile(
+    tmp_path: Path,
+) -> None:
     """Queue-less repos validate main; queue repos validate the synthetic merge."""
 
     queue_less = tmp_path / "queue-less"
@@ -312,12 +348,35 @@ def test_wiring_renders_the_validation_trigger_for_each_merge_profile(tmp_path: 
     assert "push" not in queue_triggers
 
 
-def test_wiring_auto_merge_listens_to_the_rendered_quality_workflow(tmp_path: Path) -> None:
+def test_queue_less_wiring_promotes_pr_evidence_instead_of_rerunning_the_gate(
+    tmp_path: Path,
+) -> None:
+    out_dir = tmp_path / "queue-less"
+    assert _render(out_dir).returncode == 0
+    workflow_text = (out_dir / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    workflow = yaml.safe_load(workflow_text)
+
+    gate = workflow["jobs"]["gate"]
+    assert gate["if"] == "github.event_name != 'push'"
+    assert f"postmerge-pr-evidence@{PIPELINES_SHA}" in workflow_text
+    assert f"verify-postmerge-pr-evidence@{PIPELINES_SHA}" in workflow_text
+    assert "actions/upload-artifact@" in workflow_text
+    assert "actions/artifacts/" in workflow_text
+    assert {"actions", "checks", "contents", "pull-requests"} <= set(
+        workflow["permissions"]
+    )
+
+
+def test_wiring_auto_merge_listens_to_the_rendered_quality_workflow(
+    tmp_path: Path,
+) -> None:
     """A workflow_run listener must track the workflow name, not its old label."""
     out_dir = tmp_path / "wire"
     assert _render(out_dir).returncode == 0
 
-    ci = yaml.safe_load((out_dir / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    ci = yaml.safe_load(
+        (out_dir / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
     auto_merge = yaml.safe_load(
         (out_dir / ".github/workflows/auto-merge.yml").read_text(encoding="utf-8")
     )
@@ -344,8 +403,12 @@ def test_verify_catches_a_context_mismatch(tmp_path: Path) -> None:
             rule["parameters"]["required_status_checks"] = [{"context": "CI gate"}]
     ruleset.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-    result = _run("--repo", "three-cubes/sample", "--verify-only", "--out-dir", str(out_dir))
-    assert result.returncode != 0, "verify must fail when a required context has no emitting job"
+    result = _run(
+        "--repo", "three-cubes/sample", "--verify-only", "--out-dir", str(out_dir)
+    )
+    assert result.returncode != 0, (
+        "verify must fail when a required context has no emitting job"
+    )
     assert "CI gate" in result.stderr
     assert "FAIL" in result.stderr
 
@@ -369,8 +432,14 @@ def test_the_bootstrap_emits_no_sonar_surface(tmp_path: Path) -> None:
 
 def test_no_wiring_toggle_suppresses_the_wiring_section() -> None:
     result = _run(
-        "--repo", "three-cubes/sample", "--dry-run", "--no-wiring",
-        "--no-secrets", "--no-ruleset", "--no-files", "--no-affordance",
+        "--repo",
+        "three-cubes/sample",
+        "--dry-run",
+        "--no-wiring",
+        "--no-secrets",
+        "--no-ruleset",
+        "--no-files",
+        "--no-affordance",
     )
     assert result.returncode == 0, result.stderr
     assert "quality-gate wiring" not in result.stdout

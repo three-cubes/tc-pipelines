@@ -49,7 +49,10 @@ landed merge has the same parents and tree, and the saved evidence binds the
 same PR, PR-head SHA, workflow run, and attempt. Direct pushes, stale attempts,
 non-merge commits, ambiguous PRs, and changed trees fail closed. A verified
 promotion may reuse the trusted PR matrix while still publishing exact-main-SHA
-release evidence. After the merge queue is enabled in the GitHub UI and a queue
+release evidence. The shared Python gate also requires
+`pre-evaluation-normalize` to leave the checkout clean before evaluation. This
+binds the PR evidence to committed content; contributors run and commit any
+mechanical repair locally. After the merge queue is enabled in the GitHub UI and a queue
 run has emitted every required context, render with `--merge-queue`; that
 profile keeps PR and `merge_group` triggers and removes post-merge promotion.
 
