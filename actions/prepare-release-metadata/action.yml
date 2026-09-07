@@ -1,0 +1,44 @@
+name: prepare-release-metadata
+description: >-
+  Mechanically promote CHANGELOG Unreleased notes, update the release version
+  source, and write the receipt required before tc-pipelines cuts a tag.
+inputs:
+  version:
+    description: Immutable tag to prepare (for example v2026.9.7).
+    required: true
+  release-date:
+    description: ISO-8601 release date. Empty uses the current UTC date.
+    default: ""
+  changelog-file:
+    description: Repository-relative CHANGELOG path.
+    default: CHANGELOG.md
+  version-file:
+    description: Repository-relative version source to update. Empty skips it.
+    default: VERSION
+  preparation-file:
+    description: Repository-relative receipt path consumed by release.yml.
+    default: .release-prepared.json
+runs:
+  using: composite
+  steps:
+    - name: Prepare release ledger
+      shell: bash
+      env:
+        RELEASE_VERSION: ${{ inputs.version }}
+        RELEASE_DATE: ${{ inputs.release-date }}
+        CHANGELOG_FILE: ${{ inputs.changelog-file }}
+        VERSION_FILE: ${{ inputs.version-file }}
+        PREPARATION_FILE: ${{ inputs.preparation-file }}
+      run: |
+        set -euo pipefail
+        command=(python3 "$GITHUB_ACTION_PATH/prepare_release.py"
+          --version "$RELEASE_VERSION"
+          --changelog "$CHANGELOG_FILE"
+          --preparation-file "$PREPARATION_FILE")
+        if [ -n "$RELEASE_DATE" ]; then
+          command+=(--date "$RELEASE_DATE")
+        fi
+        if [ -n "$VERSION_FILE" ]; then
+          command+=(--version-file "$VERSION_FILE")
+        fi
+        "${command[@]}"

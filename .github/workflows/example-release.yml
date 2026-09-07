@@ -42,10 +42,9 @@ jobs:
     if: ${{ inputs.run-for-real }}
     uses: ./.github/workflows/release.yml
     with:
-      # kairix-shaped: CalVer vYYYY.M.D[.N], python changelog extractor, draft
-      # for human review, default fan-out to docker-publish + publish-pypi.
+      # kairix-shaped: CalVer vYYYY.M.D[.N], canonical heading derivation,
+      # draft for human review, default fan-out to docker-publish + publish-pypi.
       version: v2026.5.10.6
-      changelog-label: "2026.5.10"
       release-title: kairix $VERSION
       tag-message: kairix $VERSION
       draft: true
@@ -54,12 +53,10 @@ jobs:
     if: ${{ inputs.run-for-real }}
     uses: ./.github/workflows/release.yml
     with:
-      # taz-shaped: its own calver pattern (no leading v), an awk extractor, a
-      # taz release title, and NO fan-out (empty string skips that step).
+      # taz-shaped: its own calver pattern (no leading v), a taz release title,
+      # and NO fan-out (empty string skips that step).
       version: "2026.6.1"
       calver-pattern: '^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}$'
-      changelog-label: Unreleased
-      changelog-extract-command: awk '/^## /{p=0} p; $0 ~ "## \\[" ENVIRON["CHANGELOG_LABEL"] "\\]"{p=1}' CHANGELOG.md
       release-title: taz $VERSION
       tag-message: taz $VERSION
       draft: true

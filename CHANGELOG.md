@@ -8,6 +8,8 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-09-04
+
 ### Changed
 
 - **The Python quality workflow has a clean v2 install contract.** The removed
