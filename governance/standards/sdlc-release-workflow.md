@@ -147,8 +147,13 @@ Once `develop` is validated on the VM:
 
 1. **Open a PR: `develop → main`**
    - Title: `release: v2026.4.18`
-   - Update `pyproject.toml` version from `2026.4.18a2` → `2026.4.18`
-   - Update `CHANGELOG.md` — add release section, move "Unreleased" items under it
+   - Run the canonical `prepare-release-metadata` action once with
+     `version: v2026.4.18`. It updates the repository's version source, moves
+     populated `Unreleased` notes into `## [2026.4.18] — <date>`, and writes the
+     preparation receipt. Do not hand-edit those coordinated fields.
+   - Commit the action's outputs in this reviewed PR. The release workflow
+     rejects a tag when that receipt, the version source, or the CHANGELOG digest
+     is absent or differs.
    - CI must pass on the PR
 
 2. **Merge the PR with a merge commit.** This preserves the reviewed commit

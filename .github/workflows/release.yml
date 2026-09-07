@@ -36,10 +36,10 @@ on:
         required: true
       changelog-label:
         description: >-
-          CHANGELOG heading whose body becomes the release notes
-          (e.g. 'Unreleased' or '2026.5.10'). Passed to changelog-extract-command.
+          Deprecated compatibility input. When set, must equal `version` with
+          a conventional leading `v` removed; it cannot select another section.
         type: string
-        default: "Unreleased"
+        default: ""
       # ── Per-repo shape ──────────────────────────────────────────────────
       calver-pattern:
         description: >-
@@ -49,11 +49,26 @@ on:
         default: '^v[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}(\.[0-9]+)?$'
       changelog-extract-command:
         description: >-
-          Command that prints the release-notes body to stdout. The label is
-          exported as CHANGELOG_LABEL in the environment for the command to read.
-          Default is kairix's extractor; a repo using awk passes its own.
+          Optional deprecated compatibility extractor. Its output must exactly
+          equal the canonical version-derived CHANGELOG section.
         type: string
-        default: 'python scripts/extract_changelog_section.py --version "$CHANGELOG_LABEL"'
+        default: ""
+      changelog-file:
+        description: Repository-relative CHANGELOG path prepared for the release.
+        type: string
+        default: CHANGELOG.md
+      version-file:
+        description: >-
+          Repository-relative version source written by prepare-release-metadata.
+          Empty skips the version-file binding for repos without one.
+        type: string
+        default: VERSION
+      release-preparation-file:
+        description: >-
+          Repository-relative receipt created by prepare-release-metadata before
+          the release PR is merged.
+        type: string
+        default: .release-prepared.json
       release-title:
         description: >-
           Title for the GitHub Release. The literal string $VERSION is expanded
@@ -132,24 +147,102 @@ jobs:
             exit 1
           fi
 
+      - name: Validate prepared release metadata
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANGELOG_FILE: ${{ inputs.changelog-file }}
+          VERSION_FILE: ${{ inputs.version-file }}
+          PREPARATION_FILE: ${{ inputs.release-preparation-file }}
+        run: |
+          set -euo pipefail
+          PREPARATION_FILE="${PREPARATION_FILE:-.release-prepared.json}"
+          CHANGELOG_FILE="${CHANGELOG_FILE:-CHANGELOG.md}"
+          VERSION_FILE="${VERSION_FILE:-VERSION}"
+          if [ ! -f "$PREPARATION_FILE" ]; then
+            echo "::error::release preparation receipt is absent: $PREPARATION_FILE" >&2
+            echo "fix: run three-cubes/tc-pipelines/actions/prepare-release-metadata in the release PR and commit its outputs before cutting $VERSION." >&2
+            exit 1
+          fi
+          python3 - "$VERSION" "$CHANGELOG_FILE" "$VERSION_FILE" "$PREPARATION_FILE" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          version, changelog_name, version_name, receipt_name = sys.argv[1:]
+          label = version.removeprefix("v")
+          changelog = Path(changelog_name)
+          version_file = Path(version_name) if version_name else None
+          receipt = Path(receipt_name)
+
+          def digest(path: Path) -> str:
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          try:
+              record = json.loads(receipt.read_text(encoding="utf-8"))
+          except (OSError, json.JSONDecodeError) as error:
+              raise SystemExit(f"::error::release preparation receipt is unreadable: {error}")
+          expected = {
+              "schema": "three-cubes/release-preparation/v1",
+              "version": version,
+              "changelog": changelog_name,
+              "changelog_sha256": digest(changelog),
+              "version_file": version_name if version_file else "",
+              "version_file_sha256": digest(version_file) if version_file else "",
+          }
+          if record != expected:
+              raise SystemExit(
+                  "::error::release preparation receipt does not bind this "
+                  "version, changelog, and version source exactly"
+              )
+          if version_file and version_file.read_text(encoding="utf-8").strip() != label:
+              raise SystemExit("::error::release version source does not match tag")
+          print("release preparation receipt matches the candidate release")
+          PY
+
       - name: Extract release notes from CHANGELOG
         shell: bash
         env:
-          CHANGELOG_LABEL: ${{ inputs.changelog-label }}
+          VERSION: ${{ inputs.version }}
+          LEGACY_CHANGELOG_LABEL: ${{ inputs.changelog-label }}
           EXTRACT_COMMAND: ${{ inputs.changelog-extract-command }}
+          CHANGELOG_FILE: ${{ inputs.changelog-file }}
         run: |
           set -euo pipefail
-          # EXTRACT_COMMAND reads CHANGELOG_LABEL from the environment and prints
-          # the section body to stdout. eval is needed so the caller can supply a
-          # multi-token command (python … / awk …); the command source is a
-          # workflow input controlled by the caller, not untrusted run data.
-          eval "$EXTRACT_COMMAND" > /tmp/release-notes.md
+          # A release has one coordinate. The changelog heading is its tag with
+          # only the conventional leading `v` removed, so callers cannot tag one
+          # version while publishing notes from another section.
+          CHANGELOG_LABEL="${VERSION#v}"
+          CHANGELOG_FILE="${CHANGELOG_FILE:-CHANGELOG.md}"
+          if [ -n "${LEGACY_CHANGELOG_LABEL:-}" ] && [ "$LEGACY_CHANGELOG_LABEL" != "$CHANGELOG_LABEL" ]; then
+            echo "::error::changelog-label must equal the version-derived [$CHANGELOG_LABEL] section" >&2
+            echo "fix: remove the deprecated changelog-label input, or set it to $CHANGELOG_LABEL." >&2
+            exit 1
+          fi
+          awk -v label="$CHANGELOG_LABEL" '
+            index($0, "## [" label "]") == 1 { in_section = 1; next }
+            in_section && index($0, "## ") == 1 { exit }
+            in_section { print }
+          ' "$CHANGELOG_FILE" > /tmp/canonical-release-notes.md
+          if [ -n "${EXTRACT_COMMAND:-}" ]; then
+            # Existing callers may retain their extractor while migrating. It
+            # is a verifier only: a different body is rejected rather than
+            # letting an independently selected section reach the Release.
+            eval "$EXTRACT_COMMAND" > /tmp/caller-release-notes.md
+            if ! cmp -s /tmp/canonical-release-notes.md /tmp/caller-release-notes.md; then
+              echo "::error::deprecated changelog-extract-command disagrees with the version-derived CHANGELOG section" >&2
+              echo "fix: remove the deprecated command, or make it emit exactly [$CHANGELOG_LABEL]." >&2
+              exit 1
+            fi
+          fi
+          cp /tmp/canonical-release-notes.md /tmp/release-notes.md
           # Non-whitespace, not size: a heading with no body under it extracts
           # to a single newline, which `[ -s ]` counts as content. The Release
           # then publishes blank while this job reports success.
           if ! grep -q '[^[:space:]]' /tmp/release-notes.md; then
             echo "::error::no release notes extracted for [$CHANGELOG_LABEL]"
-            echo "fix: add a '## [$CHANGELOG_LABEL]' section to CHANGELOG.md, or pass the right changelog-label."
+            echo "fix: add a populated '## [$CHANGELOG_LABEL]' section to CHANGELOG.md before cutting $VERSION."
             exit 1
           fi
           echo "::group::Release notes preview"

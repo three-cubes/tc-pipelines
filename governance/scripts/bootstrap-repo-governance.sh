@@ -517,6 +517,48 @@ if [[ "$DO_WIRING" == "1" ]]; then
 
 
     if [[ "$DO_RELEASE" == "1" ]]; then
+      cat > "${OUT_DIR}/.github/workflows/prepare-release.yml" <<EOF
+---
+name: "Prepare release"
+on:
+  workflow_dispatch:
+    inputs:
+      version: { description: "CalVer tag (e.g. v2026.7.10)", required: true, type: string }
+      release-date: { description: "Optional ISO-8601 date (defaults to UTC today)", required: false, type: string }
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse main; preparation belongs in a reviewed release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "\$GITHUB_REF_NAME" = "main" ]; then
+            echo "::error::dispatch Prepare release from a release branch, not main" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Mechanically prepare the release ledger
+        uses: three-cubes/tc-pipelines/actions/prepare-release-metadata@${PIPELINES_SHA}
+        with:
+          version: \${{ inputs.version }}
+          release-date: \${{ inputs.release-date }}
+      - name: Commit preparation for review
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "three-cubes-agent[bot]"
+          git config user.email "295831460+three-cubes-agent[bot]@users.noreply.github.com"
+          git add CHANGELOG.md VERSION .release-prepared.json
+          git diff --cached --quiet && {
+            echo "::error::preparation made no release-ledger change" >&2
+            exit 1
+          }
+          git commit -m "chore(release): prepare \${{ inputs.version }}"
+          git push origin "HEAD:\$GITHUB_REF_NAME"
+EOF
       cat > "${OUT_DIR}/.github/workflows/release.yml" <<EOF
 ---
 name: "Release"
@@ -524,7 +566,6 @@ on:
   workflow_dispatch:
     inputs:
       version: { description: "CalVer tag (e.g. v2026.7.10)", required: true, type: string }
-      changelog-label: { description: "CHANGELOG section label", required: true, type: string }
 permissions:
   contents: write
   id-token: write
@@ -533,9 +574,8 @@ jobs:
     uses: three-cubes/tc-pipelines/.github/workflows/release.yml@${PIPELINES_SHA}
     with:
       version: \${{ inputs.version }}
-      changelog-label: \${{ inputs.changelog-label }}
 EOF
-      echo "ok: rendered .github/workflows/release.yml"
+      echo "ok: rendered prepare-release.yml + release.yml"
     fi
 
     # The affordance skeletons rendered to OUT_DIR too, so it is a complete drop-in.

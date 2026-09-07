@@ -209,6 +209,25 @@ def test_wiring_requires_an_immutable_pipelines_sha() -> None:
     assert "40-character" in result.stderr
 
 
+def test_release_wiring_prepares_a_review_branch_before_cutting_a_tag(
+    tmp_path: Path,
+) -> None:
+    """The generated release caller cannot skip the prepared-release receipt."""
+    out_dir = tmp_path / "wire"
+    result = _render(out_dir, "--with-release")
+    assert result.returncode == 0, result.stderr
+
+    prepare = (out_dir / ".github/workflows/prepare-release.yml").read_text(
+        encoding="utf-8"
+    )
+    cut = (out_dir / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert "prepare-release-metadata" in prepare
+    assert f"@{PIPELINES_SHA}" in prepare
+    assert '"$GITHUB_REF_NAME" = "main"' in prepare
+    assert 'git push origin "HEAD:$GITHUB_REF_NAME"' in prepare
+    assert "version: ${{ inputs.version }}" in cut
+
+
 def test_wiring_render_resolves_every_token(tmp_path: Path) -> None:
     out_dir = tmp_path / "wire"
     result = _render(out_dir)
