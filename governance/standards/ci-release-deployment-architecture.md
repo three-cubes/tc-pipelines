@@ -36,15 +36,22 @@ provenance for that commit in the candidate record.
 Repositories with merge queue enable it on the protected default branch, require
 the queue contexts, and subscribe CI to `merge_group`. Queue-less private
 repositories use the strict `main-core.json` or `main-product.json` ruleset and
-exact-main validation. During migration, keep exact-main validation until a
-queue run emits the required synthetic-merge contexts.
+the canonical post-merge evidence promotion action. During migration, keep
+exact-main validation until a queue run emits the required synthetic-merge
+contexts.
 
 The governance bootstrap renders the queue-less profile by default: PR,
-`merge_group`, and exact-main `push` triggers. After the merge queue is enabled
-in the GitHub UI and a queue run has emitted every required context, render with
-`--merge-queue`; that profile keeps PR and `merge_group` triggers and removes
-the post-merge full gate. This prevents duplicate full CI without losing the
-release evidence for the final integrated commit.
+`merge_group`, and exact-main `push` triggers. A successful PR fan-in captures
+the synthetic two-parent merge SHA and tree in the reusable
+`postmerge-pr-evidence` composite. On the subsequent `main` push, the paired
+`verify-postmerge-pr-evidence` composite accepts the result only when the
+landed merge has the same parents and tree, and the saved evidence binds the
+same PR, PR-head SHA, workflow run, and attempt. Direct pushes, stale attempts,
+non-merge commits, ambiguous PRs, and changed trees fail closed. A verified
+promotion may reuse the trusted PR matrix while still publishing exact-main-SHA
+release evidence. After the merge queue is enabled in the GitHub UI and a queue
+run has emitted every required context, render with `--merge-queue`; that
+profile keeps PR and `merge_group` triggers and removes post-merge promotion.
 
 Release repositories apply `release-tags.json`. It protects release tags from
 updates and deletion, records bypasses, and lets the publish job verify the

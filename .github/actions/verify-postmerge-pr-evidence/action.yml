@@ -1,0 +1,37 @@
+name: Verify post-merge PR evidence
+description: Fail closed unless the landed two-parent merge has the exact PR tree accepted by Quality gate.
+inputs:
+  repository: {description: Repository owner/name., required: true}
+  before-sha: {description: Main push before SHA., required: true}
+  merge-sha: {description: Main push SHA., required: true}
+  pull-request-number: {description: Associated merged PR number., required: true}
+  head-sha: {description: Associated PR head SHA., required: true}
+  workflow-run-id: {description: Successful PR Quality-gate run ID., required: true}
+  workflow-run-attempt: {description: Successful PR Quality-gate run attempt., required: true}
+  document: {description: Downloaded immutable PR evidence JSON path., required: true}
+outputs:
+  verified:
+    description: True only after exact-tree verification.
+    value: ${{ steps.verify.outputs.verified }}
+runs:
+  using: composite
+  steps:
+    - id: verify
+      name: Verify exact tested tree
+      shell: bash
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+        BEFORE_SHA: ${{ inputs.before-sha }}
+        MERGE_SHA: ${{ inputs.merge-sha }}
+        PULL_REQUEST_NUMBER: ${{ inputs.pull-request-number }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        WORKFLOW_RUN_ID: ${{ inputs.workflow-run-id }}
+        WORKFLOW_RUN_ATTEMPT: ${{ inputs.workflow-run-attempt }}
+        DOCUMENT: ${{ inputs.document }}
+      run: |
+        python3 "$GITHUB_ACTION_PATH/../postmerge-pr-evidence/postmerge_pr_evidence.py" verify \
+          --repository "$REPOSITORY" --before-sha "$BEFORE_SHA" --merge-sha "$MERGE_SHA" \
+          --pull-request-number "$PULL_REQUEST_NUMBER" --head-sha "$HEAD_SHA" \
+          --workflow-run-id "$WORKFLOW_RUN_ID" --workflow-run-attempt "$WORKFLOW_RUN_ATTEMPT" \
+          --document "$DOCUMENT"
+        echo "verified=true" >> "$GITHUB_OUTPUT"
