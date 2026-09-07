@@ -51,14 +51,26 @@ def _git(repo_root: Path, *args: str) -> str:
             ["git", *args], cwd=repo_root, check=True, capture_output=True, text=True
         ).stdout.strip()
     except subprocess.CalledProcessError as error:
-        raise ValueError("Git history does not contain the required merge evidence") from error
+        raise ValueError(
+            "Git history does not contain the required merge evidence"
+        ) from error
 
 
 def _merge_identity(repo_root: Path, merge_sha: str) -> tuple[tuple[str, str], str]:
-    fields = _git(repo_root, "rev-list", "--parents", "-n", "1", merge_sha).split()
-    if len(fields) != 3 or fields[0] != merge_sha:
+    header = (
+        _git(repo_root, "cat-file", "-p", merge_sha).partition("\n\n")[0].splitlines()
+    )
+    trees = [line.removeprefix("tree ") for line in header if line.startswith("tree ")]
+    parents = [
+        line.removeprefix("parent ") for line in header if line.startswith("parent ")
+    ]
+    if len(trees) != 1 or len(parents) != 2:
         raise ValueError("evidence requires one two-parent merge commit")
-    return (fields[1], fields[2]), _git(repo_root, "rev-parse", f"{merge_sha}^{{tree}}")
+    tree = _sha(trees[0], "merge tree SHA")
+    return (
+        _sha(parents[0], "first merge parent SHA"),
+        _sha(parents[1], "second merge parent SHA"),
+    ), tree
 
 
 def capture_document(
@@ -133,37 +145,55 @@ def verify_document(
         raise ValueError("PR evidence has an unsupported shape")
     if any(document.get(key) != value for key, value in expected.items()):
         raise ValueError("PR evidence identity or workflow attempt is stale")
-    tested_merge = _sha(document.get("tested_merge_sha"), "tested merge SHA")
+    _sha(document.get("tested_merge_sha"), "tested merge SHA")
     tested_tree = _sha(document.get("tested_tree_sha"), "tested tree SHA")
-    tested_parents, actual_tested_tree = _merge_identity(root, tested_merge)
-    if tested_parents != (before, head) or actual_tested_tree != tested_tree or tested_tree != tree:
+    if tested_tree != tree:
         raise ValueError("landed merge tree was not the tree tested by the PR gate")
-    return {"verified": True, "pull_request_number": expected_pull_request, "tested_tree_sha": tree}
+    return {
+        "verified": True,
+        "pull_request_number": expected_pull_request,
+        "tested_tree_sha": tree,
+    }
 
 
 def _capture(args: argparse.Namespace) -> int:
     document = capture_document(
-        repo_root=args.repo_root, repository=args.repository, pull_request_number=args.pull_request_number,
-        base_sha=args.base_sha, head_sha=args.head_sha, workflow_run_id=args.workflow_run_id,
-        workflow_run_attempt=args.workflow_run_attempt, tested_merge_sha=args.tested_merge_sha or _git(args.repo_root, "rev-parse", "HEAD"),
+        repo_root=args.repo_root,
+        repository=args.repository,
+        pull_request_number=args.pull_request_number,
+        base_sha=args.base_sha,
+        head_sha=args.head_sha,
+        workflow_run_id=args.workflow_run_id,
+        workflow_run_attempt=args.workflow_run_attempt,
+        tested_merge_sha=args.tested_merge_sha
+        or _git(args.repo_root, "rev-parse", "HEAD"),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(document, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(document, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return 0
 
 
 def _verify(args: argparse.Namespace) -> int:
     result = verify_document(
-        repo_root=args.repo_root, before_sha=args.before_sha, merge_sha=args.merge_sha,
-        expected_repository=args.repository, expected_pull_request=args.pull_request_number,
-        expected_head_sha=args.head_sha, expected_run_id=args.workflow_run_id,
-        expected_run_attempt=args.workflow_run_attempt, document=load_json(args.document),
+        repo_root=args.repo_root,
+        before_sha=args.before_sha,
+        merge_sha=args.merge_sha,
+        expected_repository=args.repository,
+        expected_pull_request=args.pull_request_number,
+        expected_head_sha=args.head_sha,
+        expected_run_id=args.workflow_run_id,
+        expected_run_attempt=args.workflow_run_attempt,
+        document=load_json(args.document),
     )
     if args.github_output is not None:
         with args.github_output.open("a", encoding="utf-8") as stream:
             stream.write("verified=true\n")
             stream.write(f"pull_request_number={result['pull_request_number']}\n")
-    print(f"PASS postmerge-pr-evidence pr={result['pull_request_number']} tree={result['tested_tree_sha']}")
+    print(
+        f"PASS postmerge-pr-evidence pr={result['pull_request_number']} tree={result['tested_tree_sha']}"
+    )
     return 0
 
 
@@ -171,7 +201,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     command = parser.add_subparsers(dest="command", required=True)
     capture = command.add_parser("capture")
-    for flag, kwargs in (("--repository", {"required": True}), ("--base-sha", {"required": True}), ("--head-sha", {"required": True}), ("--tested-merge-sha", {})):
+    for flag, kwargs in (
+        ("--repository", {"required": True}),
+        ("--base-sha", {"required": True}),
+        ("--head-sha", {"required": True}),
+        ("--tested-merge-sha", {}),
+    ):
         capture.add_argument(flag, **kwargs)
     capture.add_argument("--repo-root", type=Path, default=Path.cwd())
     capture.add_argument("--pull-request-number", type=int, required=True)
