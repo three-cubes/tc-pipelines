@@ -129,6 +129,28 @@ jobs:
 | [`actions/setup-uv-cached`](actions/setup-uv-cached/action.yml) | The org-standard install step: pinned `astral-sh/setup-uv` (cache on) + `uv sync <sync-args>` from the repository's `pyproject.toml` and `uv.lock`. |
 | [`actions/pre-commit-cached`](actions/pre-commit-cached/action.yml) | `setup-uv-cached` + `pre-commit/action`, from one source. Self-pins `setup-uv-cached` at a release SHA. |
 | [`actions/license-present`](actions/license-present/action.yml) | Asserts a top-level LICENSE declaring the expected SPDX id — the whole-repo provenance check. Used by `meta-quality-gate.yml`'s license check. |
+| [`actions/setup-cloudflared`](actions/setup-cloudflared/action.yml) | Installs cloudflared 2026.8.3 from the reviewed release catalogue, verifies the official asset digest, executable digest and reported version, then exposes those identities and the executable path. `update_catalogue.py` checks the latest stable release separately for a dependency PR. |
+| [`actions/cloudflare-access-ssh`](actions/cloudflare-access-ssh/action.yml) | Streams one typed deployment request through Cloudflare Access to a forced-command SSH account. It verifies the executable again before credentials are read, pins the SSH host key, bounds time and output, and terminates the process group on failure. |
+
+`cloudflare-access-ssh` sends no remote command. Its stdin is an exact-key
+`tc.deploy.request.v1` JSON object containing the repository, immutable release
+and workflow SHAs, Actions run identity, environment and an allowlisted
+operation. The target account's forced command validates those fields again,
+maps the operation to a root-owned handler, serialises the deployment, and
+emits the deployment receipt. A zero exit without a matching final receipt
+fails. The action outputs the receipt identity, verified cloudflared version
+and executable digest, and the path to the canonical response JSON so downstream
+promotion consumes validated data instead of parsing logs. Store the SSH
+private key and Cloudflare service token in the consumer's secret store and
+hydrate them for one job only.
+
+Cloudflared 2026.8.3 is the current reviewed release. Its headless Access SSH
+service-token journey remains live-unverified because upstream issue
+[#1674](https://github.com/cloudflare/cloudflared/issues/1674) reports that the
+Access SSH/TCP client can start an interactive login before applying service
+token headers. Each mutating operation performs a non-mutating `status` journey
+first and fails closed unless the target returns a matching receipt. A live
+status receipt permits the mutation; local process tests do not make that claim.
 
 ---
 

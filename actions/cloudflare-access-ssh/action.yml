@@ -1,0 +1,82 @@
+---
+name: cloudflare-access-ssh
+description: Stream one validated deployment request to a forced-command SSH account through Cloudflare Access.
+inputs:
+  cloudflared-path:
+    description: Absolute path emitted by setup-cloudflared after official digest verification.
+    required: true
+  cloudflared-version:
+    description: Stable version emitted by setup-cloudflared.
+    required: true
+  cloudflared-sha256:
+    description: Verified executable SHA-256 identity emitted by setup-cloudflared.
+    required: true
+  hostname:
+    description: Cloudflare Access SSH hostname.
+    required: true
+  username:
+    description: Dedicated forced-command deployment account.
+    required: false
+    default: tc-deploy
+  private-key:
+    description: Unencrypted OpenSSH private key hydrated from the consumer's secret store.
+    required: true
+  known-host:
+    description: One literal hostname, ssh-ed25519 key type and Base64 public key for strict host verification.
+    required: true
+  request-envelope:
+    description: Bounded tc.deploy.request.v1 JSON; command, script, argv and free-form parameter fields are rejected.
+    required: true
+  service-token-id:
+    description: Cloudflare Access service-token client ID hydrated from the consumer's secret store.
+    required: true
+  service-token-secret:
+    description: Cloudflare Access service-token client secret hydrated from the consumer's secret store.
+    required: true
+outputs:
+  receipt-id:
+    description: SHA-256 identity from the validated deployment response.
+    value: ${{ steps.transport.outputs.receipt-id }}
+  cloudflared-version:
+    description: Stable cloudflared version used for this request.
+    value: ${{ steps.transport.outputs.cloudflared-version }}
+  cloudflared-sha256:
+    description: Reverified cloudflared executable digest used for this request.
+    value: ${{ steps.transport.outputs.cloudflared-sha256 }}
+  response-path:
+    description: Runner path containing the canonical validated deployment response JSON.
+    value: ${{ steps.transport.outputs.response-path }}
+runs:
+  using: composite
+  steps:
+    - name: Stream bounded request through Cloudflare Access SSH
+      id: transport
+      shell: bash
+      env:
+        CLOUDFLARED_PATH: ${{ inputs.cloudflared-path }}
+        CLOUDFLARED_VERSION: ${{ inputs.cloudflared-version }}
+        CLOUDFLARED_SHA256: ${{ inputs.cloudflared-sha256 }}
+        SSH_HOST: ${{ inputs.hostname }}
+        SSH_USER: ${{ inputs.username }}
+        SSH_PRIVATE_KEY: ${{ inputs.private-key }}
+        SSH_KNOWN_HOST: ${{ inputs.known-host }}
+        REQUEST_ENVELOPE: ${{ inputs.request-envelope }}
+        TUNNEL_SERVICE_TOKEN_ID: ${{ inputs.service-token-id }}
+        TUNNEL_SERVICE_TOKEN_SECRET: ${{ inputs.service-token-secret }}
+      run: |
+        set -euo pipefail
+        output_root="$(mktemp -d)"
+        trap 'rm -rf "$output_root"' EXIT
+        export TRANSPORT_OUTPUT_FILE="$output_root/transport-output"
+        python3 "$GITHUB_ACTION_PATH/transport.py"
+        receipt_id="$(sed -n 's/^receipt-id=//p' "$TRANSPORT_OUTPUT_FILE")"
+        cloudflared_version="$(sed -n 's/^cloudflared-version=//p' "$TRANSPORT_OUTPUT_FILE")"
+        cloudflared_sha256="$(sed -n 's/^cloudflared-sha256=//p' "$TRANSPORT_OUTPUT_FILE")"
+        response_path="$(sed -n 's/^response-path=//p' "$TRANSPORT_OUTPUT_FILE")"
+        [[ -n "$receipt_id" && -n "$cloudflared_version" && -n "$cloudflared_sha256" && -s "$response_path" ]]
+        {
+          printf 'receipt-id=%s\n' "$receipt_id"
+          printf 'cloudflared-version=%s\n' "$cloudflared_version"
+          printf 'cloudflared-sha256=%s\n' "$cloudflared_sha256"
+          printf 'response-path=%s\n' "$response_path"
+        } >>"$GITHUB_OUTPUT"
