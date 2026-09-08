@@ -1,0 +1,31 @@
+{
+  "schema_version": "tc.cloudflared.release.v1",
+  "version": "2026.8.3",
+  "source": "https://github.com/cloudflare/cloudflared/releases/tag/2026.8.3",
+  "assets": {
+    "linux-amd64": {
+      "name": "cloudflared-linux-amd64",
+      "archived": false,
+      "asset_sha256": "sha256:f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e",
+      "executable_sha256": "sha256:f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e"
+    },
+    "linux-arm64": {
+      "name": "cloudflared-linux-arm64",
+      "archived": false,
+      "asset_sha256": "sha256:4bcfd35521a7cbc545ebfd5d57334a71ee180e2a64874981f374c81472118391",
+      "executable_sha256": "sha256:4bcfd35521a7cbc545ebfd5d57334a71ee180e2a64874981f374c81472118391"
+    },
+    "darwin-amd64": {
+      "name": "cloudflared-darwin-amd64.tgz",
+      "archived": true,
+      "asset_sha256": "sha256:61e1316266a00fd70ce40da011d612badc805367fb65293dd1925f938f704c99",
+      "executable_sha256": "sha256:936aa4ed783b0e191fac48e7140c34605b25d8d5c0495c3599c90e350ae6e4c4"
+    },
+    "darwin-arm64": {
+      "name": "cloudflared-darwin-arm64.tgz",
+      "archived": true,
+      "asset_sha256": "sha256:40c9144d86df8937c5b43293a1f7d2d2107029aa74725023dd46b1b27154352f",
+      "executable_sha256": "sha256:50a04624531e7a98ddb65f1223905e32f84e7488ed3ee8dadcd3260aa8932603"
+    }
+  }
+}

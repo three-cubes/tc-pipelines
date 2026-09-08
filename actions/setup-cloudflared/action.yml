@@ -1,0 +1,42 @@
+---
+name: setup-cloudflared
+description: Install the reviewed cloudflared release after verifying its official asset and executable digests.
+outputs:
+  version:
+    description: Reviewed cloudflared release version.
+    value: ${{ steps.install.outputs.version }}
+  asset-digest:
+    description: Published SHA-256 digest verified against the downloaded release asset.
+    value: ${{ steps.install.outputs.asset-digest }}
+  executable-digest:
+    description: Reviewed SHA-256 digest verified against the extracted executable.
+    value: ${{ steps.install.outputs.executable-digest }}
+  path:
+    description: Absolute path to the verified cloudflared executable.
+    value: ${{ steps.install.outputs.path }}
+runs:
+  using: composite
+  steps:
+    - name: Verify and install reviewed cloudflared
+      id: install
+      shell: bash
+      run: |
+        set -euo pipefail
+        install_dir="${RUNNER_TEMP:?}/tc-pipelines-cloudflared"
+        installer_output="$(mktemp)"
+        trap 'rm -f "$installer_output"' EXIT
+        python3 "$GITHUB_ACTION_PATH/install.py" \
+          --install-dir "$install_dir" \
+          --github-output "$installer_output"
+        version="$(sed -n 's/^version=//p' "$installer_output")"
+        asset_digest="$(sed -n 's/^asset-digest=//p' "$installer_output")"
+        executable_digest="$(sed -n 's/^executable-digest=//p' "$installer_output")"
+        binary="$(sed -n 's/^path=//p' "$installer_output")"
+        [[ -n "$version" && -n "$asset_digest" && -n "$executable_digest" && -n "$binary" ]]
+        {
+          printf 'version=%s\n' "$version"
+          printf 'asset-digest=%s\n' "$asset_digest"
+          printf 'executable-digest=%s\n' "$executable_digest"
+          printf 'path=%s\n' "$binary"
+        } >>"$GITHUB_OUTPUT"
+        printf '%s\n' "$install_dir" >>"$GITHUB_PATH"
