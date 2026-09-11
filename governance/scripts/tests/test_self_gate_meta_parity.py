@@ -169,6 +169,13 @@ def test_ci_meta_lint_bodies_execute_the_configured_local_argv() -> None:
     assert caller_inputs["yamllint-paths"].split() == LOCAL_META_STEPS["yamllint"]["run"][3:]
 
 
+def test_branch_ci_body_uses_the_exact_canonical_automation_exemptions() -> None:
+    """Automation exemptions require the slash; prefix matching would admit topics."""
+    meta, _, _ = _meta_and_caller()
+    branch_body = _run_body(meta["jobs"]["branch-naming"])
+    assert "worktree-agent-*|renovate/*|dependabot/*)" in branch_body
+
+
 @pytest.mark.parametrize("step_id", sorted(LOCAL_META_STEPS))
 def test_each_local_meta_equivalent_rejects_a_bad_input(tmp_path: Path, step_id: str) -> None:
     """Each meta validator must reject the same class of broken input locally."""
@@ -254,6 +261,8 @@ def test_license_ci_body_matches_the_local_canonical_command(
         ("dependabot/pip/pytest-9", 0),
         ("", 0),
         ("not-a-permitted-branch", 1),
+        ("renovatebad", 1),
+        ("dependabotbad", 1),
         ("Dan/not-lowercase", 1),
     ],
 )
