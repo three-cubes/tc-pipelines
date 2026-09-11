@@ -8,6 +8,7 @@ while the configured gate local contributors run is absent or broken.
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 import tomllib
@@ -15,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from conftest import pytest_xdist_auto_num_workers
 
 pytestmark = pytest.mark.contract
 
@@ -32,13 +34,17 @@ def _ci_workflow() -> dict:
     return yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8")) or {}
 
 
-def _make_check_commands() -> list[str]:
+def _make_check_commands(*, outer_make: bool = False) -> list[str]:
+    env = os.environ.copy()
+    if outer_make:
+        env["MAKELEVEL"] = "1"
     result = subprocess.run(
-        ["make", "--dry-run", "check"],
+        ["make", "--no-print-directory", "--dry-run", "check"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     assert result.returncode == 0, (
         f"{MAKEFILE.name}: cannot dry-run the local check target: "
@@ -75,6 +81,14 @@ def test_make_check_runs_the_declared_fitness_gate() -> None:
     )
 
 
+def test_make_check_dry_run_is_stable_inside_an_outer_make() -> None:
+    """GNU make directory notices must not become part of the command contract."""
+    assert _make_check_commands(outer_make=True) == [
+        "uv sync --locked",
+        "uv run --no-sync tc-fitness run",
+    ]
+
+
 def test_ci_contract_tests_run_make_check() -> None:
     """A direct CI pytest invocation would bypass the configured local gate."""
     jobs = _ci_workflow().get("jobs") or {}
@@ -102,4 +116,9 @@ def test_contract_suite_configures_supported_parallel_pytest_execution() -> None
         f"{PYPROJECT.name}: pytest addopts is {options.get('addopts')!r}, so the "
         "complete contract suite runs sequentially. fix: set `addopts = '-n auto'` "
         "while retaining the fitness step argv as `pytest -q`."
+    )
+    workers = pytest_xdist_auto_num_workers(None)
+    assert 1 <= workers <= 6, (
+        f"pytest auto-selected {workers} workers. fix: cap automatic workers at six "
+        "so subprocess-heavy contracts do not oversubscribe contributor machines."
     )
