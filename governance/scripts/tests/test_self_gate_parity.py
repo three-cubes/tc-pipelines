@@ -8,6 +8,7 @@ while the configured gate local contributors run is absent or broken.
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import tomllib
 from pathlib import Path
@@ -83,4 +84,22 @@ def test_ci_contract_tests_run_make_check() -> None:
         f"{CI_WORKFLOW.name}: the `tests` job runs {run_commands!r}. fix: invoke "
         "`make check` so CI executes the same configured tc-fitness gate as local "
         "contributors."
+    )
+
+
+def test_contract_suite_configures_supported_parallel_pytest_execution() -> None:
+    """Removing xdist or ``-n auto`` would make the full required local gate miss its budget."""
+    project = _project_config()
+    dev_dependencies = project.get("dependency-groups", {}).get("dev", [])
+    assert any(dependency.startswith("pytest-xdist") for dependency in dev_dependencies), (
+        f"{PYPROJECT.name}: the contract suite has no pytest-xdist dependency, so "
+        "the supported `-n auto` acceleration cannot be installed. fix: declare "
+        "pytest-xdist in the dev dependency group."
+    )
+    options = project.get("tool", {}).get("pytest", {}).get("ini_options", {})
+    addopts = shlex.split(options.get("addopts", ""))
+    assert any(addopts[index : index + 2] == ["-n", "auto"] for index in range(len(addopts))), (
+        f"{PYPROJECT.name}: pytest addopts is {options.get('addopts')!r}, so the "
+        "complete contract suite runs sequentially. fix: set `addopts = '-n auto'` "
+        "while retaining the fitness step argv as `pytest -q`."
     )

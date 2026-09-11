@@ -14,6 +14,7 @@ dependencies = [
 # installs default groups, so the CI lane gets these without extra flags.
 dev = [
     "pytest>=8.0",
+    "pytest-xdist>=3.8.0",
     # tools/ is a separate package with its own pyproject; its tests import
     # tc_agent_tools.agent_token, which signs RS256 App JWTs.
     "pyjwt[crypto]>=2,<3",
@@ -36,6 +37,7 @@ run = ["pytest", "-q"]
 [tool.pytest.ini_options]
 # `tools/` is its own package with its own pyproject, so its tests cannot import
 # `tc_agent_tools` from the repo root without this.
+addopts = "-n auto"
 pythonpath = ["tools"]
 testpaths = ["governance", "tools/tests"]
 markers = [
