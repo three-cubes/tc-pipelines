@@ -68,8 +68,11 @@ declared namespace. Container paths are resolved inside the container namespace.
 - secret paths with authorised and denied identities.
 
 The operation set is `traverse`, `read`, `write`, `create`, `delete` and `rename`. Create, delete
-and rename checks include the parent directory. The target collector performs each declared
-operation as the declared identity and records the resulting owner, group, mode and access result.
+and rename checks include the parent directory. Declaration mode validates the matrix, identities,
+path references and inheritance expectations without requiring a live target. Observation mode is
+activated by an explicit evidence input; the target collector then performs each declared operation
+as the declared identity and records the resulting owner, group, mode and access result. A configured
+observation input is mandatory evidence: missing or incomplete observations fail.
 
 ### Deployment transaction
 
@@ -93,9 +96,9 @@ validate contract and candidate
 → retain evidence and run bounded cleanup
 ```
 
-An apply or probe failure records diagnostics, executes rollback, verifies the restored runtime,
-retains the failed candidate verdict and runs bounded cleanup. A successful rollback proves
-recovery; it does not accept the failed candidate.
+Any failure after mutation begins, including apply, probe or cutover failure, records diagnostics,
+executes rollback, verifies the restored runtime, retains the failed candidate verdict and runs
+bounded cleanup. A successful rollback proves recovery; it does not accept the failed candidate.
 
 ### Evidence
 
@@ -138,8 +141,15 @@ finding states the source, JSON pointer, violated invariant, `fix:`, `next:` and
 The Azure VM reusable keeps its existing WIF, Run Command, protected-parameter transport, locking,
 snapshot and cancellation cleanup. A deployment-contract action invokes the consumer's pinned
 `tc-fitness-runtime-contract` executable before authentication and after target execution. The same
-engine code validates local fixtures and live receipts. The action publishes the complete
-secret-safe receipt as an immutable workflow artifact.
+engine code validates local fixtures and live receipts.
+
+The target packages the receipt and each allowlisted diagnostic into a bounded archive, uploads it
+to the contract's private content-addressed evidence store with its managed identity, and returns a
+versioned locator through the protected output marker. The runner downloads that exact version with
+WIF, verifies locator identity, length and archive digest, rejects unsafe archive members, then
+recomputes every referenced diagnostic digest from the downloaded bytes. It publishes the verified
+secret-safe archive as the immutable workflow artifact. A target-reported hash without transferred
+bytes is not evidence.
 
 The reusable exposes compact status, receipt digest and artifact identity outputs. The consumer
 owns product probe commands and rollback commands. The shared layer verifies their declared
@@ -166,8 +176,9 @@ The minimum fixture catalogue includes:
 - mutation before a recovery point;
 - a probe executed as the wrong user or against the wrong root;
 - cutover before a successful behavioural probe;
+- cutover failure without diagnostics, rollback and restored-runtime verification;
 - rollback success represented as candidate success;
-- truncated output without a retained diagnostic artifact;
+- truncated output or a self-reported diagnostic hash without a retained, runner-verified artifact;
 - cleanup omitted on failure or cancellation;
 - a recovery point removed before its configured retention expires;
 - evidence bound to another commit, image, host or runtime user; and
