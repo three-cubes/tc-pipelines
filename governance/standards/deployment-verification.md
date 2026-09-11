@@ -35,8 +35,9 @@ Before the first state mutation, capture a revert target:
   (or equivalent) is for a throwaway target only and MUST log the override. A production apply omits
   the override.
 - **Retention is bounded, not inline.** A succeeded apply may still need rollback hours later (a
-  slow-burn leak), so scripts do not delete recovery points inline; a dedicated prune cron enforces
-  a bounded retention (the org default is **14 days** — `COST-D1`) so they don't accumulate cost.
+  slow-burn leak), so scripts retain recovery points for the configured recovery window and a
+  dedicated prune process removes them after expiry. The paved Azure VM workflow defaults to
+  **48 hours**, matching `snapshot-before-apply.md` and its snapshot action.
 
 ## After — verify against the real surface
 
@@ -63,7 +64,7 @@ the substrate.
 1. Identify the substrate; choose the matching recovery-point mechanism and the matching rollback.
 2. Take the recovery point from the pipeline identity before the first mutation; keep a best-effort
    in-script fallback for operator runs; make `--dry-run` / `--no-snapshot` explicit and logged.
-3. Wire a bounded-retention prune cron (14-day default) so recovery points don't accumulate.
+3. Wire a bounded-retention prune process; the paved Azure VM workflow uses a 48-hour default.
 4. After apply, run a probe that drives the real surface with the real identity and asserts on
    behaviour; on failure, surface `fix:`/`next:` and auto-revert where available.
 5. Never call a deploy done on exit code alone; name the verification evidence in the handoff/PR.
