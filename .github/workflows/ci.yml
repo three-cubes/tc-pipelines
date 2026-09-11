@@ -26,6 +26,11 @@ jobs:
   meta:
     uses: ./.github/workflows/meta-quality-gate.yml
     with:
+      # Keep the consumer-visible reusable inputs pinned to the same releases
+      # as the locked local tc-fitness gate.
+      actionlint-version: "1.7.12"
+      yamllint-version: "1.38.0"
+      yamllint-config: "{extends: relaxed, rules: {line-length: disable, document-start: disable}}"
       yamllint-paths: ".github/workflows actions .github/actions"
       spdx-id: "Apache-2.0"
       # no-attribution is emitted as the standalone `no-attribution` job below so

@@ -44,6 +44,18 @@ on:
           never rewrites history.
         type: boolean
         default: true
+      actionlint-version:
+        description: >-
+          Exact actionlint release to install. Defaults to the org-qualified
+          local gate version; callers may override only to a specific release.
+        type: string
+        default: "1.7.12"
+      yamllint-version:
+        description: >-
+          Exact yamllint release to install. Defaults to the locked local gate
+          version; callers may override only to a specific release.
+        type: string
+        default: "1.38.0"
       yamllint-paths:
         description: >-
           Space-separated paths yamllint scans. Default covers the workflow +
@@ -96,9 +108,14 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Install + run actionlint
         shell: bash
+        env:
+          ACTIONLINT_VERSION: ${{ inputs.actionlint-version }}
         run: |
           set -euo pipefail
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          # The actionlint installer accepts [[VERSION] DIR]. Pin both the
+          # installer source and its explicit release argument so this reusable
+          # never follows main or the installer's default release.
+          bash <(curl -fsSL "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash") "$ACTIONLINT_VERSION" .
           ./actionlint -color
 
   yamllint:
@@ -112,11 +129,12 @@ jobs:
         shell: bash
         # Config + scan paths are env-bound, never interpolated into the body.
         env:
+          YAMLLINT_VERSION: ${{ inputs.yamllint-version }}
           YAMLLINT_CONFIG: ${{ inputs.yamllint-config }}
           YAMLLINT_PATHS: ${{ inputs.yamllint-paths }}
         run: |
           set -euo pipefail
-          pipx install yamllint
+          pipx install "yamllint==${YAMLLINT_VERSION}"
           # shellcheck disable=SC2086
           # rationale: YAMLLINT_PATHS is a deliberate space-separated path list
           # (a caller input), so word-splitting it into argv is intended.
