@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "Minimal uv project so python-quality-gate.yml can be self-tested against this repo's fixture gate (.github/workflows/test-shard-routing.yml). Not published; the reusable workflows + composite actions are the repo's real product."
 requires-python = ">=3.12"
 dependencies = [
-    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.10.0",
+    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.14.1",
     "coverage>=7.0",
     "PyYAML>=6.0",
 ]
@@ -24,6 +24,14 @@ dev = [
 # build this root as a package (there is nothing to build — the repo's product
 # is its workflows + composite actions).
 package = false
+
+[tool.tc_fitness]
+name = "tc-pipelines self gate"
+
+[[tool.tc_fitness.steps]]
+id = "contract-tests"
+summary = "workflow and action contract tests"
+run = ["pytest", "-q"]
 
 [tool.pytest.ini_options]
 # `tools/` is its own package with its own pyproject, so its tests cannot import

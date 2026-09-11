@@ -12,9 +12,7 @@
 2. **Pin it to a release commit.** Every `uses:` names a full commit SHA with the tag in a trailing comment — `@<sha> # vX.Y.Z`. Never `@main`, and never a floating major: `@v1` only stays correct while something advances that tag on every release, and nothing does. You repin deliberately, so no change reaches you unasked. See [`governance/standards/supply-chain-pinning.md`](governance/standards/supply-chain-pinning.md).
 3. **Run the same check locally before you push.** Install the full dev env and run the check the same way CI does:
    ```bash
-   uv sync --all-extras --all-groups
-   uv run pre-commit run --all-files
-   uv run tc-fitness run
+   make check
    ```
    Get it green locally first. The check you run locally is the exact same one CI runs.
 
