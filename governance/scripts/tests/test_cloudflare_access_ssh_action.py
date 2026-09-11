@@ -694,7 +694,7 @@ def test_supervisor_enforces_deadline_and_terminates_process_group(
     request = tmp_path / "request"
     request.write_bytes(b"{}")
     result = module._run_streamed(
-        [str(helper)], os.environ.copy(), request, timeout_seconds=1
+        [str(helper)], os.environ.copy(), request, timeout_seconds=3
     )
     assert result.reason_code == "operation_timeout"
     assert parent_marker.read_text().strip().isdigit()

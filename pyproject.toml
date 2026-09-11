@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "Minimal uv project so python-quality-gate.yml can be self-tested against this repo's fixture gate (.github/workflows/test-shard-routing.yml). Not published; the reusable workflows + composite actions are the repo's real product."
 requires-python = ">=3.12"
 dependencies = [
-    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.10.0",
+    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.14.1",
     "coverage>=7.0",
     "PyYAML>=6.0",
 ]
@@ -13,10 +13,13 @@ dependencies = [
 # The repo's tests are contract tests over its workflows/actions. `uv sync`
 # installs default groups, so the CI lane gets these without extra flags.
 dev = [
+    "actionlint-py==1.7.12.24",
     "pytest>=8.0",
+    "pytest-xdist>=3.8.0",
     # tools/ is a separate package with its own pyproject; its tests import
     # tc_agent_tools.agent_token, which signs RS256 App JWTs.
     "pyjwt[crypto]>=2,<3",
+    "yamllint==1.38.0",
 ]
 
 [tool.uv]
@@ -25,9 +28,39 @@ dev = [
 # is its workflows + composite actions).
 package = false
 
+[tool.tc_fitness]
+name = "tc-pipelines self gate"
+
+[[tool.tc_fitness.steps]]
+id = "contract-tests"
+summary = "workflow and action contract tests"
+run = ["pytest", "-q"]
+
+[[tool.tc_fitness.steps]]
+id = "actionlint"
+summary = "GitHub Actions workflow lint"
+run = ["actionlint", "-color=false"]
+
+[[tool.tc_fitness.steps]]
+id = "yamllint"
+summary = "YAML hygiene for workflows and actions"
+run = ["yamllint", "-d", "{extends: relaxed, rules: {line-length: disable, document-start: disable}}", ".github/workflows", "actions", ".github/actions"]
+
+[[tool.tc_fitness.steps]]
+id = "license"
+summary = "top-level Apache-2.0 licence"
+run = ["bash", "actions/license-present/check-license.sh"]
+env = { LICENSE_FILE = "LICENSE", SPDX_ID = "Apache-2.0" }
+
+[[tool.tc_fitness.steps]]
+id = "branch-naming"
+summary = "branch name matches the meta-gate policy"
+run = ["python", "governance/scripts/check_branch_naming.py"]
+
 [tool.pytest.ini_options]
 # `tools/` is its own package with its own pyproject, so its tests cannot import
 # `tc_agent_tools` from the repo root without this.
+addopts = "-n auto"
 pythonpath = ["tools"]
 testpaths = ["governance", "tools/tests"]
 markers = [
