@@ -134,6 +134,7 @@ level — see §3–§4 — and are not duplicated below.)
 | Bootstrap & adoption | [`roadmap-management-linear-github.md`](standards/roadmap-management-linear-github.md) | Linear-as-control-surface + GitHub linkage. |
 | Deploy & ops | [`snapshot-before-apply.md`](standards/snapshot-before-apply.md) | Recovery point before any destructive apply (concrete: VM OS-disk snapshot). |
 | Deploy & ops | [`deployment-verification.md`](standards/deployment-verification.md) | Recovery-point-before + verification-probe-after, generalised beyond one cloud. |
+| Deploy & ops | [`infrastructure-deployment-fitness.md`](standards/infrastructure-deployment-fitness.md) | Structured runtime filesystem, access, transaction and evidence contracts. |
 | Agent orchestration | [`subagent-orchestration.md`](standards/subagent-orchestration.md) | Single owner, no parallel git ops, no live ops, bounded output. |
 | Agent orchestration | [`sub-agent-orchestration-lessons-2026-05-17.md`](standards/sub-agent-orchestration-lessons-2026-05-17.md) | Field lessons that extend the orchestration standard. |
 | Agent orchestration | [`parallel-agent-discipline.md`](standards/parallel-agent-discipline.md) | Dispatching parallel streams without collision. |
