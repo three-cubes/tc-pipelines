@@ -40,7 +40,7 @@
 | 4 | `tc-fitness` | access-contract implementer | Task 2 | Access validator |
 | 5 | `tc-fitness` | transaction-contract implementer | Task 2 | Transaction validator and integrated dispatch |
 | 6 | `tc-agent-zone` + `tc-fitness` | release integrator | Tasks 2–5 | Candidate qualification and immutable engine tag |
-| 7 | `tc-pipelines` | pipeline-contract implementer | Tasks 1A and 5 | Deployment-contract action and receipt validation |
+| 7 | `tc-pipelines` | pipeline-contract implementer | Tasks 1A and 6 | Deployment-contract action and receipt validation |
 | 8 | `tc-pipelines` | pipeline integrator | Task 7 | Azure reusable integration and immutable pipeline tag |
 | 9 | `tc-agent-zone` | consumer-contract implementer | Tasks 6 and 8 | Canonical target registry and bindings |
 | 10 | `tc-agent-zone` | runtime-evidence implementer | Task 9 | Linux/container collectors and sabotage journeys |
@@ -273,7 +273,7 @@ Expected: all commands exit 0.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/tc_fitness/core_checks tests pyproject.toml
+git add src/tc_fitness/core_checks src/tc_fitness/runtime_contract.py tests pyproject.toml
 git commit -m "feat: validate runtime deployment evidence"
 ```
 
@@ -343,8 +343,10 @@ git commit -m "feat: validate runtime filesystem contracts"
 - Modify: `tc-fitness/pyproject.toml`
 
 **Interfaces:**
-- Consumes: identities, roots and observed filesystem evidence through `ContractDocuments`.
-- Produces: `RuntimeAccessMatrix` and `validate_access_matrix(documents) -> tuple[ContractFinding, ...]`.
+- Consumes: identities and roots through `ContractDocuments`, plus observed filesystem evidence only
+  when the configured mode is `observation`.
+- Produces: `RuntimeAccessMatrix` and
+  `validate_access_matrix(documents, *, require_observations: bool) -> tuple[ContractFinding, ...]`.
 
 - [ ] **Step 1: Write access sabotage cases**
 
@@ -358,9 +360,14 @@ uv run pytest -q tests/test_core_runtime_access_matrix.py
 
 Expected: failures identify the absent validator.
 
-- [ ] **Step 3: Implement matrix completeness and verdict comparison**
+- [ ] **Step 3: Implement declaration and observation modes**
 
-Require exactly one observation per declared `(identity, namespace, root, path, operation)` tuple. Compare actual allow/deny outcomes and metadata with the contract. Require real created-file and directory evidence for ACL/setgid/umask inheritance.
+Declaration mode validates identity uniqueness, referenced paths, operation completeness, allow/deny
+consistency, inheritance expectations and secret-denial coverage from the contract alone. Observation
+mode requires an explicit evidence file and exactly one observation per declared
+`(identity, namespace, root, path, operation)` tuple. Compare actual allow/deny outcomes and metadata
+with the contract. Require real created-file and directory evidence for ACL/setgid/umask inheritance.
+Never treat an absent configured evidence file as declaration mode.
 
 - [ ] **Step 4: Register and verify**
 
@@ -399,7 +406,11 @@ git commit -m "feat: validate runtime access matrices"
 
 - [ ] **Step 1: Write transaction sabotage cases**
 
-Exercise the successful event order and mutations for preflight failure followed by mutation, mutation before recovery, candidate identity change, probe before apply, wrong probe identity, cutover before probe, absent diagnostics, rollback without verification, rollback converted to candidate success, and cleanup deleting recovery before 172800 seconds.
+Exercise the successful event order and mutations for preflight failure followed by mutation,
+mutation before recovery, candidate identity change, probe before apply, wrong probe identity,
+cutover before probe, cutover failure without diagnostics and verified rollback, absent diagnostics,
+rollback without verification, rollback converted to candidate success, and cleanup deleting recovery
+before 172800 seconds.
 
 - [ ] **Step 2: Prove the failures**
 
@@ -439,7 +450,7 @@ Expected: the full engine gate passes on Python 3.12 and 3.13.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/tc_fitness/core_checks tests docs README.md CHANGELOG.md pyproject.toml
+git add src/tc_fitness/core_checks src/tc_fitness/runtime_contract.py tests docs README.md CHANGELOG.md pyproject.toml
 git commit -m "feat: validate deployment transactions"
 ```
 
@@ -485,12 +496,15 @@ Use the repository release process to derive the next patch version from the cur
 - Modify: `tc-pipelines/governance/scripts/tests/test_uses_ref_pinning.py`
 
 **Interfaces:**
-- Consumes: canonical contract JSON, independent expected identity values, target receipt JSON and the consumer's immutable pinned `tc-fitness-runtime-contract` executable.
+- Consumes: canonical contract JSON, independent expected identity values, the downloaded target
+  evidence archive and the consumer's immutable pinned `tc-fitness-runtime-contract` executable.
 - Produces: `validate`, `render-invocation` and `verify-receipt` operations plus outputs `contract-digest`, `receipt-digest`, `conformance-status` and `diagnostic-artifact-name`.
 
 - [ ] **Step 1: Write action contract failures**
 
-Test strict parsing, duplicate IDs, canonical hashing, unsafe entrypoints, contract/artifact/target mismatch, stale attempt/nonce, missing probes, failed probes and evidence size bounds.
+Test strict parsing, duplicate IDs, canonical hashing, unsafe entrypoints, contract/artifact/target
+mismatch, stale attempt/nonce, missing probes, failed probes, unsafe archive members, locator/version
+mismatch, missing referenced bytes, tampered diagnostic bytes and evidence size bounds.
 
 - [ ] **Step 2: Prove the failures**
 
@@ -502,11 +516,18 @@ Expected: failures identify the absent composite and helper.
 
 - [ ] **Step 3: Implement validation and rendering**
 
-Invoke `uv run tc-fitness-runtime-contract validate` in the consumer checkout. Represent remote commands as an executable plus argv list, constrain them to the verified consumer artifact, and pass protected parameters through file descriptors. Validate and hash contract bytes before any Azure authentication.
+Invoke `uv run --no-sync tc-fitness-runtime-contract validate` in the consumer checkout after its
+locked environment is synchronised. Represent remote commands as an executable plus argv list,
+constrain them to the verified consumer artifact, and pass protected parameters through file
+descriptors. Validate and hash contract bytes before any Azure authentication.
 
 - [ ] **Step 4: Implement receipt verification**
 
-Invoke `uv run tc-fitness-runtime-contract verify-evidence` with independent expected values. Validate intended and observed release identity, host/runtime identity, run/attempt/nonce, ordered phases, probe results, recovery digest and terminal state. Verify retrieved receipt bytes against the transported digest.
+Invoke `uv run --no-sync tc-fitness-runtime-contract verify-evidence` with independent expected
+values. Validate intended and observed release identity, host/runtime identity, run/attempt/nonce,
+ordered phases, probe results, recovery digest and terminal state. Verify the versioned evidence-store
+locator, archive digest and byte bound before traversal-safe extraction. Recompute every receipt and
+diagnostic digest from the downloaded bytes; reject references without matching bytes.
 
 - [ ] **Step 5: Verify**
 
@@ -547,7 +568,13 @@ Legacy callers remain unchanged. A contract caller supplies both contract bytes 
 
 - [ ] **Step 3: Run the complete transaction under the existing VM lock**
 
-Validate before WIF. Execute consumer preflight, recovery, apply, exact-runtime probe, cutover or rollback through the existing safe transport. Publish full secret-safe evidence as an immutable Actions artifact before returning a failed result.
+Validate before WIF. Execute consumer preflight, recovery, apply, exact-runtime probe, cutover or
+rollback through the existing safe transport. On apply, probe or cutover failure, collect diagnostics,
+roll back and verify the restored runtime while preserving the failed candidate verdict. The target
+uploads the bounded, allowlisted evidence archive to the configured private content-addressed store
+and emits only its versioned locator through the protected output marker. Download and verify the
+exact archive before publishing it as an immutable Actions artifact and before returning a failed
+result.
 
 - [ ] **Step 4: Pin internal action references and verify**
 
@@ -601,9 +628,21 @@ Declare `/hermes-home`, every `/hermes-home/profiles/{profile}` root, `/data/obs
 
 Protect the registry with `@three-cubes/maintainers`, add it to `agent-zone.manifest.yaml`, preserve `version-catalog.json` as the version authority, and reference `platform/hermes/clusters.yaml` rather than copying its cluster rows.
 
-- [ ] **Step 4: Resolve through the shared engine**
+- [ ] **Step 4: Bootstrap and resolve through the shared engine**
 
-Run `tc-fitness-runtime-contract resolve --contract deployment-targets.yaml --environment prod --target hermes --output "$RUNNER_TEMP/hermes-runtime-contract.json"`. Local checks load the YAML directly; workflow inputs consume those exact selected canonical bytes and their printed SHA-256 digest.
+Run:
+
+```bash
+make bootstrap
+uv run --no-sync tc-fitness-runtime-contract resolve \
+  --contract deployment-targets.yaml \
+  --environment prod \
+  --target hermes \
+  --output "$RUNNER_TEMP/hermes-runtime-contract.json"
+```
+
+Local checks load the YAML directly; workflow inputs consume those exact selected canonical bytes
+and their printed SHA-256 digest.
 
 - [ ] **Step 5: Register four checks and bind the declaration checks**
 
@@ -619,6 +658,7 @@ target = "hermes"
 contract_file = "deployment-targets.yaml"
 environment = "prod"
 target = "hermes"
+mode = "declaration"
 
 [tool.tc_fitness.core_checks.deployment_transaction_contract]
 contract_file = "deployment-targets.yaml"
@@ -626,12 +666,14 @@ environment = "prod"
 target = "hermes"
 ```
 
-The runtime-evidence catalogue row remains opt-in during ordinary authoring and is exercised with explicit live paths by `tc-fitness-runtime-contract verify-evidence` in deployment. Pin the immutable tc-fitness tag, regenerate `uv.lock`, and keep `make check` and CI on the same direct registry inputs.
+The runtime-evidence catalogue row remains opt-in during ordinary authoring. Deployment invokes the
+access check in observation mode and `uv run --no-sync tc-fitness-runtime-contract verify-evidence`
+with explicit live paths. Pin the immutable tc-fitness tag, regenerate `uv.lock`, and keep `make check`
+and CI on the same direct registry inputs.
 
 - [ ] **Step 6: Verify locally**
 
 ```bash
-make bootstrap
 make check
 make dry-run
 ```
@@ -667,7 +709,12 @@ Materialise users and groups in a disposable Linux container. Exercise all decla
 
 - [ ] **Step 2: Implement the collector**
 
-Run bounded argv commands as each declared identity. Record operation result and observed metadata without changing protected source paths. Capture the declared dependency inventory with a schema version and timestamp so missing or stale inventory fails the evidence contract. Use atomic creation for the final receipt and hash every referenced diagnostic artifact.
+Run bounded argv commands as each declared identity. Record operation result and observed metadata
+without changing protected source paths. Capture the declared dependency inventory with a schema
+version and timestamp so missing or stale inventory fails the evidence contract. Use atomic creation
+for the final receipt. Package it with each allowlisted diagnostic into a bounded, traversal-safe
+archive, upload the archive to the contract's private content-addressed evidence store using the VM
+identity, and return its versioned locator. The runner, not the target, recomputes every artifact hash.
 
 - [ ] **Step 3: Integrate the exact contract with deployment**
 
@@ -707,9 +754,12 @@ git commit -m "feat: verify Hermes runtime conformance"
 
 Validate candidate provenance, contract digest, recovery reference, capacity, dependencies, runtime identities, mount parents and cleanup prerequisites. Retain the preflight receipt.
 
-- [ ] **Step 2: Inject one controlled probe failure before production cutover**
+- [ ] **Step 2: Qualify rollback with a distinct sabotage candidate**
 
-Use a disposable deployment attempt to prove diagnostics, rollback, rollback verification, failed-candidate status and cleanup evidence. Confirm the active known-good deployment remains unchanged.
+Use a disposable deployment attempt with a distinct sabotage candidate ID and contract digest to prove
+diagnostics, evidence-archive transfer, rollback, rollback verification, failed-candidate status and
+cleanup evidence. Never reuse that rejected identity for production. Confirm the active known-good
+deployment remains unchanged, then qualify the unchanged exact production candidate in Step 3.
 
 - [ ] **Step 3: Deploy the exact candidate**
 
