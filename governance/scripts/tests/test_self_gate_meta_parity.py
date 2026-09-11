@@ -151,6 +151,24 @@ def test_ci_meta_tools_are_pinned_to_the_local_tool_versions() -> None:
     assert "yamllint==1.38.0" in dev_dependencies
 
 
+def test_ci_meta_lint_bodies_execute_the_configured_local_argv() -> None:
+    """Installation alone is not parity: the reusable must run both linters."""
+    meta, ci_meta, _ = _meta_and_caller()
+    caller_inputs = ci_meta.get("with") or {}
+
+    actionlint_body = _run_body(meta["jobs"]["actionlint"])
+    assert "./actionlint -color" in actionlint_body.splitlines(), (
+        f"{META_WORKFLOW.name}: actionlint must execute `./actionlint -color`, not only install it."
+    )
+
+    yamllint_body = _run_body(meta["jobs"]["yamllint"])
+    assert 'yamllint -d "$YAMLLINT_CONFIG" $YAMLLINT_PATHS' in yamllint_body.splitlines(), (
+        f"{META_WORKFLOW.name}: yamllint must execute its env-bound config and path argv."
+    )
+    assert caller_inputs["yamllint-config"] == YAMLLINT_CONFIG
+    assert caller_inputs["yamllint-paths"].split() == LOCAL_META_STEPS["yamllint"]["run"][3:]
+
+
 @pytest.mark.parametrize("step_id", sorted(LOCAL_META_STEPS))
 def test_each_local_meta_equivalent_rejects_a_bad_input(tmp_path: Path, step_id: str) -> None:
     """Each meta validator must reject the same class of broken input locally."""
@@ -188,15 +206,17 @@ def test_each_local_meta_equivalent_rejects_a_bad_input(tmp_path: Path, step_id:
         ("Apache License\nVersion 2.0\n", 0),
         ("SPDX-License-Identifier: MIT\n", 1),
         ("not a licence\n", 1),
+        (None, 1),
     ],
 )
 def test_license_ci_body_matches_the_local_canonical_command(
-    tmp_path: Path, contents: str, expected: int
+    tmp_path: Path, contents: str | None, expected: int
 ) -> None:
     """Run the reusable's exact shell body against pass and fail licence inputs."""
     meta, _, _ = _meta_and_caller()
     license_file = tmp_path / "LICENSE"
-    license_file.write_text(contents, encoding="utf-8")
+    if contents is not None:
+        license_file.write_text(contents, encoding="utf-8")
     env = os.environ | {"LICENSE_FILE": str(license_file), "SPDX_ID": "Apache-2.0"}
     ci_result = subprocess.run(
         ["bash", "-c", _run_body(meta["jobs"]["license"])],
@@ -224,9 +244,17 @@ def test_license_ci_body_matches_the_local_canonical_command(
     ("branch", "expected"),
     [
         ("dan/exe-90-gate-parity", 0),
+        ("alice/feature", 0),
         ("main", 0),
+        ("develop", 0),
+        ("HEAD", 0),
+        ("gh-pages", 0),
+        ("worktree-agent-parity", 0),
         ("renovate/actions-checkout-6", 0),
+        ("dependabot/pip/pytest-9", 0),
+        ("", 0),
         ("not-a-permitted-branch", 1),
+        ("Dan/not-lowercase", 1),
     ],
 )
 def test_branch_ci_body_matches_the_local_canonical_adapter(branch: str, expected: int) -> None:
