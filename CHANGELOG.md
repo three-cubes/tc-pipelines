@@ -8,6 +8,20 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-09-12
+
+### Added
+
+- **Queue-less repositories can promote exact-tree PR evidence after merge.**
+  The PR gate records its tested two-parent merge tree, workflow run and
+  attempt. The lightweight `main` verifier accepts that evidence only when the
+  landed merge has the same parents and tree, so repositories avoid rerunning
+  the full language and E2E matrix after merge.
+- **Release preparation is mechanical and digest-bound.** The
+  `prepare-release-metadata` action promotes populated Unreleased notes, updates
+  the version source and writes the receipt that the release workflow verifies
+  before creating an immutable tag.
+
 ## [2.0.0] — 2026-09-04
 
 ### Changed
