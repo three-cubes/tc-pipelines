@@ -8,6 +8,17 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [2.1.1] — 2026-09-12
+
+### Fixed
+
+- **The self-repin dispatcher invokes its Python helper portably.** Release
+  fan-out now runs the checked-in helper through `python3`, so the consumer
+  repin path does not depend on an executable bit in the source checkout.
+- **The self-test harness uses `three-cubes-fitness` v0.15.2.** Local
+  changed-line coverage now measures committed, staged, unstaged and untracked
+  non-ignored source files, matching the post-commit CI measurement.
+
 ## [2.1.0] — 2026-09-12
 
 ### Added

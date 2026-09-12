@@ -396,7 +396,7 @@ dev = [
 requires-dist = [
     { name = "coverage", specifier = ">=7.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "three-cubes-fitness", git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.14.1" },
+    { name = "three-cubes-fitness", git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.15.2" },
 ]
 
 [package.metadata.requires-dev]
@@ -410,8 +410,8 @@ dev = [
 
 [[package]]
 name = "three-cubes-fitness"
-version = "0.14.1"
-source = { git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.14.1#14f3c0c6b0a1f1ce38414769bc02be6f4b4a1554" }
+version = "0.15.2"
+source = { git = "https://github.com/three-cubes/tc-fitness.git?rev=v0.15.2#ac490ef70b0862985ca81714cd70ffe78762c194" }
 
 [[package]]
 name = "yamllint"

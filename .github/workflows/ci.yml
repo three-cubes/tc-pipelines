@@ -105,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           module="tc_fitness.core_checks.no_llm_attribution"
-          from="git+https://github.com/three-cubes/tc-fitness@v0.14.1"
+          from="git+https://github.com/three-cubes/tc-fitness@v0.15.2"
           workdir="$(mktemp -d)"
           trap 'rm -rf "$workdir"' EXIT
           rc=0

@@ -84,8 +84,8 @@ Requiring a context a repo doesn't yet emit deadlocks its PRs. Order:
    kata `Quality gate / Python quality gate result` → `Quality gate`). Wire the `no-attribution`
    caller in every repo. Work-item traceability moves to the native `org-branch-naming` rule —
    the runtime `require-work-item.yml` callers are retired.
-2. **Align the paved path.** Bump every repo to the org-canonical pins (engine `v0.14.1`,
-   reusable `v1.15.0`); taz sets `enforce-new-code-coverage: true`. Ensure each repo's Azure WIF
+2. **Align the paved path.** Bump every repo to the org-canonical pins (engine `v0.15.2`,
+   reusable `v2.1.1`); taz sets `enforce-new-code-coverage: true`. Ensure each repo's Azure WIF
    federated credential exists (auto-merge prerequisite). Branch naming needs no per-repo fitness
    binding — the native `org-branch-naming` rule covers all repos (the engine `branch_naming`
    check now also exempts Conventional Branch prefixes).
