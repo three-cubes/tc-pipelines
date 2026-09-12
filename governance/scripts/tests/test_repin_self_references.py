@@ -68,3 +68,12 @@ def test_published_release_opens_a_self_repin_pr_before_the_next_tag() -> None:
     )
     assert "chore: repin tc-pipelines self references" in text
     assert "gh pr merge --auto --merge" in text
+
+
+def test_dispatch_invokes_non_executable_repin_helper_through_python() -> None:
+    """The generated helper remains portable regardless of its filesystem mode."""
+
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert 'python3 governance/scripts/repin_self_references.py --sha "$SHA" --version "$VERSION"' in text
+    assert 'python3 governance/scripts/repin_self_references.py --check --sha "$SHA" --version "$VERSION"' in text

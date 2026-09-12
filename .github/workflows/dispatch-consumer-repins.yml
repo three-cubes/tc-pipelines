@@ -113,8 +113,8 @@ jobs:
           fi
           git fetch origin main
           git switch --create "$BRANCH" origin/main
-          governance/scripts/repin_self_references.py --sha "$SHA" --version "$VERSION"
-          governance/scripts/repin_self_references.py --check --sha "$SHA" --version "$VERSION"
+          python3 governance/scripts/repin_self_references.py --sha "$SHA" --version "$VERSION"
+          python3 governance/scripts/repin_self_references.py --check --sha "$SHA" --version "$VERSION"
           if git diff --quiet; then
             echo "tc-pipelines already pins $VERSION ($SHA)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
