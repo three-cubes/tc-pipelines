@@ -28,7 +28,7 @@ The convergence made **one shared quality engine** (`tc_fitness`) + **one shared
 - For the costliest tests: inject existing seams instead of real sleep/network; delete/soak high-cost-low-bug-power tests; fix any orphan-probe/full-tree-scan isolation flakes with narrowing + `tmp_path` + sweep fixtures.
 - Reference: the kairix test-cost-triage report for the pattern + the per-recommendation playbook.
 
-**4. Stay on the engine** — when the engine cuts a new version (v0.4.2+ adds factories/features), repin + adopt additively, and **diff the fitness ledger (`run_checks.py --all` + `--staged`) before/after the pin bump** to confirm verdicts are byte-identical.
+**4. Stay on the engine** — when the engine cuts a new immutable version, repin + adopt additively, and **diff the fitness ledger (`run_checks.py --all` + `--staged`) before/after the pin bump** to confirm verdicts are byte-identical.
 
 ### 🪤 Gotchas to encode in the consuming repo's CLAUDE.md
 1. **Reusable-workflow `startup_failure`** — see CI adoption above; the cause was the caller's `with:`/`secrets:` not matching the reusable's `workflow_call` contract. Symptom: "This run likely failed because of a workflow file issue." Fix: revert the job to inline, or correct the contract; always test the caller on a triggering PR.
@@ -38,8 +38,8 @@ The convergence made **one shared quality engine** (`tc_fitness`) + **one shared
 5. **Shared-repo PR merge** — the org `main` rulesets require a review the author can't self-provide; admin-merge only when the *required* checks are green (`codecov/patch` is non-required and may flag on a flag basis).
 
 ### 📍 Where things live
-- Shared engine: package `three-cubes-fitness`, import `tc_fitness`, pinned `@v0.4.1`.
-- Shared CI: the tc-pipelines repo → `@v1` reusables + composites.
+- Shared engine: package `three-cubes-fitness`, import `tc_fitness`, pinned `@v0.15.2`.
+- Shared CI: the tc-pipelines repo → `v2.1.1` reusables + composites, referenced by immutable commit SHA.
 - The reference implementation: kairix `CLAUDE.md` + `docs/architecture/{ENGINEERING.md, fitness-functions.md, test-discipline-hardening.md}` + `docs/operations/runbooks/`.
 
 ### Suggested order

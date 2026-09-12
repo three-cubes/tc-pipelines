@@ -9,6 +9,7 @@ while the configured gate local contributors run is absent or broken.
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import subprocess
 import tomllib
@@ -98,6 +99,36 @@ def test_ci_contract_tests_run_make_check() -> None:
         f"{CI_WORKFLOW.name}: the `tests` job runs {run_commands!r}. fix: invoke "
         "`make check` so CI executes the same configured tc-fitness gate as local "
         "contributors."
+    )
+
+
+def test_every_direct_ci_fitness_install_matches_the_locked_engine_tag() -> None:
+    """A standalone CI job must not retain an older fitness implementation."""
+    dependencies = _project_config()["project"]["dependencies"]
+    locked_refs = [
+        match.group("tag")
+        for dependency in dependencies
+        if (
+            match := re.fullmatch(
+                r"three-cubes-fitness @ git\+https://github\.com/three-cubes/"
+                r"tc-fitness\.git@(?P<tag>v[0-9]+\.[0-9]+\.[0-9]+)",
+                dependency,
+            )
+        )
+    ]
+    assert len(locked_refs) == 1, (
+        f"{PYPROJECT.name}: expected one immutable three-cubes-fitness dependency, "
+        f"found {locked_refs!r}."
+    )
+    direct_refs = re.findall(
+        r"git\+https://github\.com/three-cubes/tc-fitness@"
+        r"(v[0-9]+\.[0-9]+\.[0-9]+)",
+        CI_WORKFLOW.read_text(encoding="utf-8"),
+    )
+    assert direct_refs and set(direct_refs) == set(locked_refs), (
+        f"{CI_WORKFLOW.name}: direct fitness installs {direct_refs!r}, not the "
+        f"locked engine {locked_refs[0]}. fix: repin every executable fitness "
+        "reference with pyproject.toml and regenerate uv.lock."
     )
 
 
