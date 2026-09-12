@@ -1,0 +1,8 @@
+{
+  "changelog": "CHANGELOG.md",
+  "changelog_sha256": "09f5f69a3a1256a15c3e03b70a9da451e43daba8d1b2915d6df3180d2c31903b",
+  "schema": "three-cubes/release-preparation/v1",
+  "version": "v2.1.0",
+  "version_file": "VERSION",
+  "version_file_sha256": "c89b87c262e9d5ffd20e73aac74a1772adcc9f5a21682cc33adcf5086e5fef5c"
+}
