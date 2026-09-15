@@ -100,6 +100,20 @@ def test_opted_in_apply_output_crosses_the_reusable_workflow_boundary() -> None:
     assert "surface-apply-output" in output["description"]
 
 
+def test_opted_in_apply_output_is_written_before_the_step_returns_a_remote_failure() -> None:
+    """A typed protected receipt remains available when the remote phase fails."""
+
+    apply = _apply_step()["run"]
+    gate_failure = apply.index('if ! gate_run_command_output "$VM" "$REMOTE_EXIT_SENTINEL" "$MSG_FILE"; then')
+    output_write = apply.index('echo "apply-output<<${DELIM}"')
+    terminal_exit = apply.index('exit "$APPLY_EXIT"')
+
+    assert 'APPLY_EXIT=0' in apply
+    assert 'APPLY_EXIT=1' in apply[gate_failure:output_write]
+    assert 'exit 1' not in apply[gate_failure:output_write]
+    assert gate_failure < output_write < terminal_exit
+
+
 def test_protected_parameter_contract_is_fail_closed_and_bounded() -> None:
     """The fixed-name runtime bundle is optional but strictly bounded when set."""
 

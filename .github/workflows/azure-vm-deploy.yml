@@ -461,6 +461,7 @@ jobs:
           SURFACE_OUTPUT: ${{ inputs.surface-apply-output }}
         run: |
           set -euo pipefail
+          # shellcheck disable=SC2317,SC2329  # rationale: invoked through run_with_retry as a command argument
           managed_apply_create() {
             local vm="$1"
             local command_name="$2"
@@ -680,6 +681,7 @@ jobs:
           # Iterate targets, calling the per-VM script + smoke check inline.
           # We do this inline (not as a matrix) because az run-command is
           # serial-friendly + matrix would each pay the checkout cost.
+          APPLY_EXIT=0
           COUNT=$(echo "$TARGETS_YAML" | yq 'length' -)
           for i in $(seq 0 $((COUNT - 1))); do
             VM=$(echo "$TARGETS_YAML" | yq ".[${i}].vm-name" -)
@@ -809,12 +811,14 @@ jobs:
             printf '%s\n' "$MSG" >"$MSG_FILE"
             if ! gate_run_command_output "$VM" "$REMOTE_EXIT_SENTINEL" "$MSG_FILE"; then
               rm -f "$MSG_FILE"
-              exit 1
+              APPLY_EXIT=1
+              break
             fi
             rm -f "$MSG_FILE"
             if [[ -n "$MANAGED_FAILURE" ]]; then
               echo "::error::${MANAGED_FAILURE}"
-              exit 1
+              APPLY_EXIT=1
+              break
             fi
             if [[ -n "${UNITS}" && "${UNITS}" != "null" ]]; then
               echo "=== Smoke ${VM} (${UNITS}) ==="
@@ -841,11 +845,13 @@ jobs:
               # message (more specific than "missing active").
               if echo "$SMOKE_MSG" | grep -qE '\b(inactive|failed|activating|deactivating|unknown)\b'; then
                 echo "::error::Unit on ${VM} reports non-active state. Output: ${SMOKE_MSG}"
-                exit 1
+                APPLY_EXIT=1
+                break
               fi
               if [[ "$ACTIVE_COUNT" -lt "$EXPECTED_UNIT_COUNT" ]]; then
                 echo "::error::Expected ${EXPECTED_UNIT_COUNT} active units on ${VM}, found ${ACTIVE_COUNT}. Output: ${SMOKE_MSG}"
-                exit 1
+                APPLY_EXIT=1
+                break
               fi
             fi
           done
@@ -861,6 +867,7 @@ jobs:
               echo "${DELIM}"
             } >> "$GITHUB_OUTPUT"
           fi
+          exit "$APPLY_EXIT"
 
       - name: Ensure managed apply commands are deleted
         if: ${{ always() && steps.apply.outputs.managed-command-manifest != '' }}
