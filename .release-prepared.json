@@ -1,8 +1,8 @@
 {
   "changelog": "CHANGELOG.md",
-  "changelog_sha256": "3e3e21ba5d316a68fef3f05fa84304fa51fbdd5324283e47dabed757379ebb68",
+  "changelog_sha256": "38cb5bd482a84116ad8d917e6f9e9a3b35a566df9a1e2eb03ce8952d95253351",
   "schema": "three-cubes/release-preparation/v1",
-  "version": "v2.1.1",
+  "version": "v2.1.2",
   "version_file": "VERSION",
-  "version_file_sha256": "7b3ff271f1373cfb97e9e53349794e1450f3794e4c0788c54a2060c7596da821"
+  "version_file_sha256": "9f6271951edca02e0c8a669a79930626717b77f0443ad8a327b93a52e4194829"
 }
