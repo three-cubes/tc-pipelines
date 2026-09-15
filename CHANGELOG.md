@@ -8,6 +8,15 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [2.1.2] — 2026-09-15
+
+### Fixed
+
+- **Failed protected VM applies expose their bounded diagnostic receipt to callers.**
+  The reusable Azure VM deployment workflow now writes its opted-in apply output
+  before returning the remote failure code, so a consumer can recover the same
+  attempt and publish retained evidence without suppressing the failed job.
+
 ## [2.1.1] — 2026-09-12
 
 ### Fixed
