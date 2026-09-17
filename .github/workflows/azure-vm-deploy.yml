@@ -191,7 +191,8 @@ jobs:
       # read a value the apply script printed (e.g. a benchmark marker).
       apply-output: ${{ steps.apply.outputs.apply-output }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - if: ${{ inputs.snapshot-policy != 'forbidden' }}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Validate deployment policy and protected input
         shell: bash

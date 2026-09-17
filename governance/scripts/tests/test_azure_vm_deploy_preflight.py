@@ -43,6 +43,56 @@ def _step(name: str) -> dict:
     )
 
 
+def test_checkout_runs_only_when_snapshot_implementation_runs() -> None:
+    """Container-only deployments skip the unused runner checkout.
+
+    The forbidden policy still traverses the remote deployment path.  Keeping
+    those steps in the contract prevents an optimisation from accidentally
+    turning a checkout skip into an apply, cleanup, or result skip.
+    """
+
+    steps = _workflow()["jobs"]["deploy"]["steps"]
+    checkout = next(step for step in steps if "actions/checkout@" in step.get("uses", ""))
+    snapshot = _step("Snapshot all VMs")
+    snapshot_predicate = "${{ inputs.snapshot-policy != 'forbidden' }}"
+
+    assert checkout["if"] == snapshot_predicate
+    assert snapshot["if"] == snapshot_predicate
+
+    forbidden_path = {
+        "Validate deployment policy and protected input",
+        "WIF Azure login",
+        "Parse targets",
+        "Remote preflight",
+        "Verify host snapshots are forbidden",
+        "Apply on each target + smoke",
+        "Ensure managed apply commands are deleted",
+        "Failure cleanup",
+    }
+    names = {step.get("name") for step in steps}
+    assert forbidden_path <= names
+    for name in (
+        "Validate deployment policy and protected input",
+        "WIF Azure login",
+        "Parse targets",
+        "Remote preflight",
+        "Apply on each target + smoke",
+    ):
+        step = _step(name)
+        assert "if" not in step, f"{name} must still run for snapshot-policy=forbidden"
+
+    cleanup = _step("Ensure managed apply commands are deleted")
+    assert "always()" in cleanup["if"]
+    assert "steps.apply.outputs.managed-command-manifest" in cleanup["if"]
+    assert "always()" in _step("Failure cleanup")["if"]
+
+    outputs = _workflow()["jobs"]["deploy"]["outputs"]
+    assert outputs["snapshot-resource-id"] == (
+        "${{ steps.snapshot.outputs.snapshot-resource-ids }}"
+    )
+    assert outputs["apply-output"] == "${{ steps.apply.outputs.apply-output }}"
+
+
 @pytest.fixture
 def fake_remote_tools(tmp_path: Path) -> tuple[Path, Path]:
     """Execute the workflow's generated remote script behind fake Azure/yq CLIs."""
