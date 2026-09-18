@@ -159,7 +159,7 @@ jobs:
       id-token: write
     steps:
       - name: WIF Azure login
-        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@c985f7a72f3110f4a91fcc5e8a40c1246c4dea24 # v2.2.1
+        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@b6d221e50825ba8b1052b91acfae653a3ff877bd # v2.2.1
         with:
           client-id: ${{ inputs.azure-client-id }}
           tenant-id: ${{ inputs.azure-tenant-id }}
