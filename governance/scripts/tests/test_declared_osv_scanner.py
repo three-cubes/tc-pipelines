@@ -78,6 +78,33 @@ lockfiles = ["uv.lock", "pnpm-lock.yaml"]
     assert result.stdout.splitlines() == ["required=true", "version=2.2.4"]
 
 
+def test_dedicated_config_wins_over_pyproject_for_required_contract(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.tc_fitness.core_checks.osv_scanner_sca]\nrequired = false\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".tc-fitness.toml").write_text(
+        """
+[core_checks.osv_scanner_sca]
+required = true
+scanner_version = "2.2.4"
+lockfiles = ["uv.lock"]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == ["required=true", "version=2.2.4"]
+
+
+def test_contract_reader_does_not_require_python311_tomllib() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert "import tomllib" not in source
+
+
 @pytest.mark.parametrize("required", ['"true"', "1", '"false"'])
 def test_malformed_required_value_cannot_silently_disable_scanning(tmp_path: Path, required: str) -> None:
     (tmp_path / "pyproject.toml").write_text(

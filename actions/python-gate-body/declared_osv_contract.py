@@ -4,25 +4,79 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
-import tomllib
 from pathlib import Path
 from typing import Any
 
 EXACT_VERSION = re.compile(r"\d+\.\d+\.\d+")
 
 
+def _config_path(repo_root: Path) -> tuple[Path, tuple[str, ...]] | None:
+    """Mirror tc_fitness.gate_config: dedicated config wins over pyproject."""
+    dedicated = repo_root / ".tc-fitness.toml"
+    if dedicated.is_file():
+        return dedicated, ("core_checks", "osv_scanner_sca")
+    pyproject = repo_root / "pyproject.toml"
+    if pyproject.is_file():
+        return pyproject, ("tool", "tc_fitness", "core_checks", "osv_scanner_sca")
+    return None
+
+
+def _without_comment(line: str) -> str:
+    quote = ""
+    escaped = False
+    for index, character in enumerate(line):
+        if quote:
+            if character == "\\" and quote == '"' and not escaped:
+                escaped = True
+                continue
+            if character == quote and not escaped:
+                quote = ""
+            escaped = False
+            continue
+        if character in {"'", '"'}:
+            quote = character
+        elif character == "#":
+            return line[:index]
+    return line
+
+
+def _value(raw: str) -> Any:
+    value = raw.strip()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    if value.startswith('"'):
+        return json.loads(value)
+    if value.startswith("'") and value.endswith("'"):
+        return value[1:-1]
+    if value.startswith("["):
+        return [_value(item) for item in value[1:-1].split(",") if item.strip()]
+    return value
+
+
 def _config(repo_root: Path) -> dict[str, Any]:
-    path = repo_root / "pyproject.toml"
-    if not path.is_file():
+    selected = _config_path(repo_root)
+    if selected is None:
         return {}
-    document = tomllib.loads(path.read_text(encoding="utf-8"))
-    tool = document.get("tool") or {}
-    fitness = tool.get("tc_fitness") or {}
-    checks = fitness.get("core_checks") or {}
-    contract = checks.get("osv_scanner_sca") or {}
-    return contract if isinstance(contract, dict) else {}
+    path, wanted = selected
+    current: tuple[str, ...] = ()
+    contract: dict[str, Any] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = _without_comment(raw_line).strip()
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current = tuple(part.strip() for part in line[1:-1].split("."))
+            continue
+        if current != wanted or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        contract[key.strip()] = _value(raw_value)
+    return contract
 
 
 def emit(repo_root: Path) -> int:
