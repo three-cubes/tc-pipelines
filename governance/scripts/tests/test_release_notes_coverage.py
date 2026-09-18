@@ -254,6 +254,59 @@ def test_prepare_release_metadata_mechanically_binds_version_and_changelog(
     assert validated.returncode == 0, validated.stderr
 
 
+def test_release_validation_preserves_an_explicit_empty_version_file(
+    tmp_path: Path,
+) -> None:
+    """A pyproject-backed release must not silently fall back to VERSION."""
+    repository = _prepared_release_repository(tmp_path)
+    (repository / "VERSION").unlink()
+    (repository / "pyproject.toml").write_text(
+        '[project]\nname = "release-fixture"\nversion = "0.0.0"\n',
+        encoding="utf-8",
+    )
+    prepared = subprocess.run(
+        [
+            "python3",
+            str(PREPARE_RELEASE),
+            "--version",
+            "v2099.9.9",
+            "--version-file",
+            "",
+            "--date",
+            "2099-09-09",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=repository,
+        check=False,
+    )
+    assert prepared.returncode == 0, prepared.stderr
+    assert not (repository / "VERSION").exists()
+
+    step = _prepare_step_run()
+    assert step, f"release.yml has no `{PREPARE_STEP}` step."
+    validated = subprocess.run(
+        [
+            "bash",
+            "-c",
+            (
+                'export VERSION="$1"\n'
+                'export CHANGELOG_FILE="CHANGELOG.md"\n'
+                'export VERSION_FILE=""\n'
+                'export PREPARATION_FILE=".release-prepared.json"\n'
+                + step
+            ),
+            "guard",
+            "v2099.9.9",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=repository,
+        check=False,
+    )
+    assert validated.returncode == 0, validated.stderr
+
+
 def test_release_rejects_a_versioned_section_without_a_prepared_commit(
     tmp_path: Path,
 ) -> None:

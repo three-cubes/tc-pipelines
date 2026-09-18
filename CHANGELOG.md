@@ -8,6 +8,31 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-09-18
+
+### Added
+
+- **A reviewed feature PR can become its release without a second version-only
+  PR.** The preparation action accepts an exact version or semantic bump,
+  updates the project version and lock together, promotes the changelog, and
+  writes a digest-bound receipt on the original branch. A merge-triggered
+  workflow resolves that receipt from the exact merge commit and creates the
+  immutable tag and GitHub Release idempotently.
+
+### Changed
+
+- **Package release no longer consumes the production deployment approval
+  environment.** The reviewed release receipt authorises the package tag and
+  GitHub Release; production deployment retains its separate protected
+  environment approval.
+
+### Fixed
+
+- **A pyproject-backed release preserves its declared empty version-file
+  value.** Receipt validation no longer replaces that value with `VERSION`, and
+  generated workflows bind the repository's version source once instead of
+  accepting a different path on each dispatch.
+
 ## [2.1.2] — 2026-09-15
 
 ### Fixed

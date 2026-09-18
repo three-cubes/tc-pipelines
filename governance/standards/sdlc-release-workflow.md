@@ -187,13 +187,16 @@ contains the releasable change:
 
 1. Add the user-visible CHANGELOG entry under `Unreleased` while implementing
    the change.
-2. Dispatch `Prepare release` on that feature branch with an exact version or
+2. The generated workflow holds the repository's version source. Bootstrap
+   sets it once with `--release-version-source version-file|pyproject`; a
+   release dispatch cannot replace it.
+3. Dispatch `Prepare release` on that feature branch with an exact version or
    `major`, `minor`, or `patch`. The App commits the generated version, lockfile,
    dated CHANGELOG section, and receipt to the same branch.
-3. Review and run the required checks on the resulting feature PR head.
-4. Merge with a merge commit. A receipt-filtered `pull_request.closed` caller
+4. Review and run the required checks on the resulting feature PR head.
+5. Merge with a merge commit. A receipt-filtered `pull_request.closed` caller
    passes `merge_commit_sha` to the pinned `release-on-merge.yml` reusable.
-5. Consume the immutable tag created at that exact reviewed merge commit.
+6. Consume the immutable tag created at that exact reviewed merge commit.
 
 The feature PR is the release candidate. Preparation changes the same branch,
 and merge completes the release without another version-only PR or a repeated
