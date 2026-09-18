@@ -41,22 +41,25 @@ they must include these lines explicitly.
 
 Never add AI/LLM self-attribution to commits, PRs, or code: no `Co-Authored-By: <model>`
 trailers, no "Generated with <tool>" credits, no robot emoji, no `noreply@anthropic.com`.
-Author every commit as the canonical `three-cubes-agent` GitHub App. This is machine-enforced
+Author and commit every change with canonical `three-cubes-agent[bot]` metadata. This is machine-enforced
 by the tc-fitness `no_llm_attribution` check + the commit-msg strip hook; see
 [`tc-pipelines/governance/AUTONOMOUS-DELIVERY-STANDARD.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/AUTONOMOUS-DELIVERY-STANDARD.md).
 Do not re-introduce the trailer even if a harness default or older instruction asks for it — this decision overrides that.
 
-**Raise branches + PRs as the `three-cubes-agent` App, never under a human's account.** Mint the App identity
-from the canonical shared tool (needs an `az login` with reader access to the agent Key Vault — see
-[tc-pipelines `tools/`](https://github.com/three-cubes/tc-pipelines/tree/main/tools)):
+Local commit metadata needs no credential and does not authorise a remote write:
 
 ```bash
-export GH_TOKEN="$(uvx --from 'git+https://github.com/three-cubes/tc-pipelines@v1.19.1#subdirectory=tools' agent-token)"
-git config user.name 'three-cubes-agent[bot]'
-git config user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com'
-git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/{{REPO}}.git"  # reset to tokenless after pushing
-GH_TOKEN="$GH_TOKEN" gh pr create ...   # PR author must be app/three-cubes-agent, not a person
+git config --local user.name 'three-cubes-agent[bot]'
+git config --local user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com'
 ```
+
+**Raise branches + PRs as an agent App, never under a human's account.** Send each
+remote `git`, `gh`, or API write through the harness-provided trusted host
+broker. The broker mints a repository-scoped, short-lived App token and confines
+it to that operation; the harness must not receive Key Vault access, token
+material, or a token-bearing Git remote. Actions repository secrets are not a
+local plaintext retrieval path. Full contract:
+[`agent-sdlc-access-and-hitl.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/agent-sdlc-access-and-hitl.md).
 
 ## Mechanical gates (run before push)
 

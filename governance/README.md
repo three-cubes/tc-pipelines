@@ -18,8 +18,8 @@ which wires a repo from these templates.
 | [`dependabot.yml`](dependabot.yml) | 3-day-cooldown dependency policy (pip + npm + github-actions), grouped, security-toggle-OFF. | committed to `.github/dependabot.yml` |
 | [`pre-commit-config.yaml`](pre-commit-config.yaml) | The cheap local gate (hygiene + detect-secrets + actionlint + shellcheck + ruff + bandit) before the CI round-trip. | committed to `.pre-commit-config.yaml` |
 | [`gitignore`](gitignore) | The canonical ignore baseline for local machine artefacts and build/test caches, including `.DS_Store`. | committed to `.gitignore` |
-| [`agent-sdlc-access-and-hitl.md`](agent-sdlc-access-and-hitl.md) | The canonical SDLC-access + HITL standard: capability (per-agent GitHub Apps) vs enforcement (the gates a human owns). | read + apply per repo |
-| [`agent-app-manifests/`](agent-app-manifests/) | The canonical per-agent GitHub App set (`tc-agent-builder`/`shape`/`consultant`/`growth`) with tiered permissions. Minted by the `agent-token` CLI + `github-app-token` action (`--agent`/`agent:`). | one App created per manifest by the org owner |
+| [`agent-sdlc-access-and-hitl.md`](agent-sdlc-access-and-hitl.md) | The canonical SDLC-access + HITL standard: capability vs enforcement, canonical local commit metadata, and the brokered remote-write credential boundary. | read + apply per repo and agent host |
+| [`agent-app-manifests/`](agent-app-manifests/) | The canonical per-agent GitHub App set (`tc-agent-builder`/`shape`/`consultant`/`growth`) with tiered permissions. | one App created per manifest by the org owner; tokens minted only by trusted CI or host-broker surfaces |
 
 These are a **starting baseline** — a repo trims/extends them (drop `npm` if it
 ships no JS; add repo-specific CODEOWNERS paths or pre-commit hooks). The

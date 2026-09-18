@@ -22,7 +22,7 @@ description: |
     permissions: { id-token: write, contents: read }
     steps:
       - id: app
-        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@8eac47d7519032e61b1d4fe00f3e4ac1ef67579e # v1.19.12
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@c985f7a72f3110f4a91fcc5e8a40c1246c4dea24 # v2.2.1
         with:
           client-id:       {{ vars.AZURE_CLIENT_ID }}
           tenant-id:       {{ vars.AZURE_TENANT_ID }}
@@ -76,7 +76,10 @@ outputs:
     description: The GitHub App installation access token (masked).
     value: ${{ steps.app-token.outputs.token }}
   app-slug:
-    description: The App slug (e.g. three-cubes-agent) — use for the git author identity.
+    description: >-
+      The authenticated remote actor's App slug (e.g. tc-agent-builder). Do not
+      use it for Git author or committer metadata; commits always use the
+      canonical three-cubes-agent[bot] identity.
     value: ${{ steps.app-token.outputs.app-slug }}
   installation-id:
     description: The installation id the token was minted for.
@@ -86,7 +89,7 @@ runs:
   using: composite
   steps:
     - name: Azure login (WIF)
-      uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@8eac47d7519032e61b1d4fe00f3e4ac1ef67579e # v1.19.12
+      uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@c985f7a72f3110f4a91fcc5e8a40c1246c4dea24 # v2.2.1
       with:
         client-id: ${{ inputs.client-id }}
         tenant-id: ${{ inputs.tenant-id }}

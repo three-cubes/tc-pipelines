@@ -39,7 +39,7 @@ engine + reusables, then every repo converges up — nobody is down-levelled.
 
 ## 4. Merge governance (the model)
 
-Agents author PRs as a **dedicated GitHub App** — the canonical `three-cubes-agent`, or a **per-agent App** (`tc-agent-builder`/`shape`/`consultant`/`growth`) so the audit log shows *which* agent acted — never a human identity, so review is possible and attribution is clean. The capability-vs-enforcement model, the per-agent App set, and the token-mint surfaces are the [**Agent SDLC-access + HITL standard**](agent-sdlc-access-and-hitl.md) + [`agent-app-manifests/`](agent-app-manifests/). The merge model:
+Agents create commits locally with canonical `three-cubes-agent[bot]` metadata and no credential. A trusted host broker performs off-CI remote writes with a repository-scoped, short-lived token for the selected **per-agent App** (`tc-agent-builder`/`shape`/`consultant`/`growth`); Actions uses the WIF-backed composite. Agent harnesses do not receive Key Vault access or tokens, and Actions repository secrets are not a local plaintext retrieval path. The full credential boundary, capability-vs-enforcement model, and App set are the [**Agent SDLC-access + HITL standard**](agent-sdlc-access-and-hitl.md) + [`agent-app-manifests/`](agent-app-manifests/). The merge model:
 
 - **Autonomous on green** for ordinary work — a green gate auto-merges, no human, no admin bypass.
 - **HITL only on the control plane** — the gate's own definition (CI, `[tool.tc_fitness]`, schemas, validators, dep pins, governance) needs a human (`@three-cubes/maintainers`) via **CODEOWNERS**, so an agent can never weaken the gate that gates it.
