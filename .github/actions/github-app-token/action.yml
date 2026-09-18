@@ -89,7 +89,7 @@ runs:
   using: composite
   steps:
     - name: Azure login (WIF)
-      uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@02bc49afcffb7e0d01fc8c2dadc0352791a46046 # v2.2.1
+      uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@768d493122d1f4bd6acf2411a6d83c46f505a66e # v2.2.1
       with:
         client-id: ${{ inputs.client-id }}
         tenant-id: ${{ inputs.tenant-id }}
