@@ -235,10 +235,10 @@ def test_wiring_requires_an_immutable_pipelines_sha() -> None:
     assert "40-character" in result.stderr
 
 
-def test_release_wiring_prepares_a_review_branch_before_cutting_a_tag(
+def test_release_wiring_prepares_and_releases_the_same_reviewed_pr(
     tmp_path: Path,
 ) -> None:
-    """The generated release caller cannot skip the prepared-release receipt."""
+    """Preparation updates the feature branch; its exact merge is released."""
     out_dir = tmp_path / "wire"
     result = _render(out_dir, "--with-release")
     assert result.returncode == 0, result.stderr
@@ -246,12 +246,35 @@ def test_release_wiring_prepares_a_review_branch_before_cutting_a_tag(
     prepare = (out_dir / ".github/workflows/prepare-release.yml").read_text(
         encoding="utf-8"
     )
-    cut = (out_dir / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    release = (out_dir / ".github/workflows/release-on-merge.yml").read_text(
+        encoding="utf-8"
+    )
     assert "prepare-release-metadata" in prepare
     assert f"@{PIPELINES_SHA}" in prepare
     assert '"$GITHUB_REF_NAME" = "main"' in prepare
+    assert "github-app-token" in prepare
+    assert "token: ${{ steps.app.outputs.token }}" in prepare
+    assert "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b" in prepare
+    assert "if: inputs.bump != '' || inputs.version-file == ''" in prepare
     assert 'git push origin "HEAD:$GITHUB_REF_NAME"' in prepare
-    assert "version: ${{ inputs.version }}" in cut
+    assert "bump: ${{ inputs.bump }}" in prepare
+    assert "pull_request:" in release
+    assert ".release-prepared.json" in release
+    assert "github.event.pull_request.merge_commit_sha" in release
+    assert f"@{PIPELINES_SHA}" in release
+    linted = subprocess.run(
+        [
+            "actionlint",
+            "-color=false",
+            str(out_dir / ".github/workflows/prepare-release.yml"),
+            str(out_dir / ".github/workflows/release-on-merge.yml"),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=out_dir,
+        check=False,
+    )
+    assert linted.returncode == 0, linted.stdout + linted.stderr
 
 
 def test_wiring_render_resolves_every_token(tmp_path: Path) -> None:

@@ -1,0 +1,124 @@
+name: release prepared merge
+
+# Resolve a reviewed preparation receipt from the exact PR merge commit, then
+# delegate tag and GitHub Release creation to the canonical release spine.
+on:
+  workflow_call:
+    inputs:
+      merge-sha:
+        description: Exact merge commit SHA from the merged pull request.
+        type: string
+        required: true
+      calver-pattern:
+        description: Extended regular expression the prepared tag must match.
+        type: string
+        default: '^v[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}(\.[0-9]+)?$'
+      changelog-file:
+        description: Repository-relative CHANGELOG path.
+        type: string
+        default: CHANGELOG.md
+      version-file:
+        description: Repository-relative plain version source; empty for pyproject versions.
+        type: string
+        default: VERSION
+      release-preparation-file:
+        description: Repository-relative preparation receipt changed by the merged PR.
+        type: string
+        default: .release-prepared.json
+      release-title:
+        description: GitHub Release title template; literal $VERSION is expanded.
+        type: string
+        default: "$VERSION"
+      tag-message:
+        description: Annotated tag message template; literal $VERSION is expanded.
+        type: string
+        default: "release $VERSION"
+      draft:
+        description: Create the GitHub Release as a draft.
+        type: boolean
+        default: false
+      fan-out-command:
+        description: Optional command run once after a new GitHub Release is created.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve reviewed release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      merge-sha: ${{ steps.release.outputs.merge-sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.merge-sha }}
+          fetch-depth: 2
+
+      - name: Resolve prepared release from merge commit
+        id: release
+        shell: bash
+        env:
+          MERGE_SHA: ${{ inputs.merge-sha }}
+          PREPARATION_FILE: ${{ inputs.release-preparation-file }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::merge-sha must be an exact 40-character commit SHA" >&2
+            exit 1
+          fi
+          resolved="$(git rev-parse --verify "${MERGE_SHA}^{commit}")"
+          if [ "$resolved" != "$MERGE_SHA" ]; then
+            echo "::error::merge-sha resolved to $resolved, not $MERGE_SHA" >&2
+            exit 1
+          fi
+          parents="$(git rev-list --parents -n 1 "$MERGE_SHA")"
+          if [ "$(wc -w <<< "$parents" | tr -d ' ')" -lt 3 ]; then
+            echo "::error::$MERGE_SHA is not a merge commit" >&2
+            exit 1
+          fi
+          changed="$(git diff --name-only "${MERGE_SHA}^1" "$MERGE_SHA" -- "$PREPARATION_FILE")"
+          if [ "$changed" != "$PREPARATION_FILE" ]; then
+            echo "::error::merge $MERGE_SHA did not change $PREPARATION_FILE" >&2
+            exit 1
+          fi
+          version="$(python3 - "$PREPARATION_FILE" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          receipt = Path(sys.argv[1])
+          try:
+              value = json.loads(receipt.read_text(encoding="utf-8"))["version"]
+          except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+              raise SystemExit(f"::error::invalid release preparation receipt: {error}")
+          if not isinstance(value, str) or not value or any(c in value for c in "\r\n"):
+              raise SystemExit("::error::release preparation receipt has an invalid version")
+          print(value)
+          PY
+          )"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          printf 'merge-sha=%s\n' "$MERGE_SHA" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Release reviewed merge
+    needs: resolve
+    permissions:
+      actions: write
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.resolve.outputs.version }}
+      calver-pattern: ${{ inputs.calver-pattern }}
+      changelog-file: ${{ inputs.changelog-file }}
+      version-file: ${{ inputs.version-file }}
+      release-preparation-file: ${{ inputs.release-preparation-file }}
+      release-title: ${{ inputs.release-title }}
+      tag-message: ${{ inputs.tag-message }}
+      draft: ${{ inputs.draft }}
+      ref: ${{ needs.resolve.outputs.merge-sha }}
+      fan-out-command: ${{ inputs.fan-out-command }}

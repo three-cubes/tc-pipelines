@@ -150,7 +150,7 @@ Once `develop` is validated on the VM:
    - Run the canonical `prepare-release-metadata` action once with
      `version: v2026.4.18`. It updates the repository's version source, moves
      populated `Unreleased` notes into `## [2026.4.18] — <date>`, and writes the
-     preparation receipt. Do not hand-edit those coordinated fields.
+     preparation receipt.
    - Commit the action's outputs in this reviewed PR. The release workflow
      rejects a tag when that receipt, the version source, or the CHANGELOG digest
      is absent or differs.
@@ -160,12 +160,11 @@ Once `develop` is validated on the VM:
    ancestry required by immutable internal pins; repository settings disable
    squash and rebase merges.
 
-3. **Tag on main:**
-   ```bash
-   git checkout main && git pull
-   git tag v2026.4.18
-   git push origin v2026.4.18
-   ```
+3. **Release the merge automatically.** The receipt-changing merged-PR workflow
+   passes the exact merge commit SHA to `release-on-merge.yml`. The reusable
+   validates the receipt, creates the annotated tag at that SHA, and creates the
+   GitHub Release as `three-cubes-agent`. Replaying the workflow confirms the
+   existing tag and Release without creating another release.
 
 4. **Immediately cut a new develop alpha** for the next cycle:
    ```bash
@@ -181,11 +180,30 @@ Once `develop` is validated on the VM:
    pip install git+https://github.com/quanyeomans/kairix@v2026.4.18
    ```
 
+### Trunk-only package repositories
+
+A trunk-only package repository prepares and releases the feature PR that
+contains the releasable change:
+
+1. Add the user-visible CHANGELOG entry under `Unreleased` while implementing
+   the change.
+2. Dispatch `Prepare release` on that feature branch with an exact version or
+   `major`, `minor`, or `patch`. The App commits the generated version, lockfile,
+   dated CHANGELOG section, and receipt to the same branch.
+3. Review and run the required checks on the resulting feature PR head.
+4. Merge with a merge commit. A receipt-filtered `pull_request.closed` caller
+   passes `merge_commit_sha` to the pinned `release-on-merge.yml` reusable.
+5. Consume the immutable tag created at that exact reviewed merge commit.
+
+The feature PR is the release candidate. Preparation changes the same branch,
+and merge completes the release without another version-only PR or a repeated
+post-merge quality run.
+
 ---
 
 ## 7. CHANGELOG format
 
-Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every PR to `develop` that adds user-visible behaviour adds a bullet under `## [Unreleased]`. The release PR moves those bullets to a dated section.
+Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every PR that adds user-visible behaviour adds a bullet under `## [Unreleased]`. The preparation action moves those bullets to a dated section on the reviewed release-candidate branch.
 
 ```markdown
 ## [Unreleased]

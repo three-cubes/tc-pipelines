@@ -3,7 +3,7 @@ name: release
 # Reusable (workflow_call) release SPINE for three-cubes repos.
 #
 # The THIN COMMON spine only — the steps every three-cubes release shares:
-#   1. validate the CalVer tag (regex + tag-doesn't-already-exist)
+#   1. validate the release tag
 #   2. extract the matching CHANGELOG section into release notes
 #   3. create + push the annotated git tag
 #   4. `gh release create` (draft by default for human review)
@@ -17,9 +17,9 @@ name: release
 # passed: a caller reaches this workflow only after its own pre-release job is
 # green.
 #
-# TOUCHES THE RELEASE PATH (HITL / G4): running a caller that invokes this
-# workflow cuts a real tag + GitHub Release and (when enabled) fans out to
-# publish. It must only be dispatched with explicit per-action authorization.
+# The reviewed candidate PR authorises a merge-triggered release. A manual
+# workflow dispatch carries the same explicit release intent. Production
+# deployment remains governed by its protected environment.
 #
 # All input values are bound through `env:` before use in `run:` scripts to
 # avoid workflow-injection via the input string.
@@ -65,8 +65,8 @@ on:
         default: VERSION
       release-preparation-file:
         description: >-
-          Repository-relative receipt created by prepare-release-metadata before
-          the release PR is merged.
+          Repository-relative receipt created by prepare-release-metadata on
+          the reviewed candidate branch before it is merged.
         type: string
         default: .release-prepared.json
       release-title:
@@ -114,7 +114,6 @@ jobs:
   release:
     name: Tag + GitHub Release (from CHANGELOG)
     runs-on: ubuntu-latest
-    environment: production
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -141,11 +140,6 @@ jobs:
             echo "fix: pass a tag matching the pattern, or override calver-pattern for this repo."
             exit 1
           fi
-          if git rev-parse "$VERSION" >/dev/null 2>&1; then
-            echo "::error::tag '$VERSION' already exists"
-            echo "fix: bump the version input; a tag is immutable once pushed."
-            exit 1
-          fi
 
       - name: Validate prepared release metadata
         shell: bash
@@ -161,7 +155,7 @@ jobs:
           VERSION_FILE="${VERSION_FILE:-VERSION}"
           if [ ! -f "$PREPARATION_FILE" ]; then
             echo "::error::release preparation receipt is absent: $PREPARATION_FILE" >&2
-            echo "fix: run three-cubes/tc-pipelines/actions/prepare-release-metadata in the release PR and commit its outputs before cutting $VERSION." >&2
+            echo "fix: run three-cubes/tc-pipelines/actions/prepare-release-metadata on the candidate branch and commit its outputs before merging." >&2
             exit 1
           fi
           python3 - "$VERSION" "$CHANGELOG_FILE" "$VERSION_FILE" "$PREPARATION_FILE" <<'PY'
@@ -249,22 +243,56 @@ jobs:
           cat /tmp/release-notes.md
           echo "::endgroup::"
 
-      - name: Tag ref
+      - name: Ensure exact release tag
+        id: tag
         shell: bash
         env:
           VERSION: ${{ inputs.version }}
           TAG_MESSAGE: ${{ inputs.tag-message }}
-          GH_TOKEN: ${{ steps.app.outputs.token }}
+          RELEASE_TARGET_SHA: ${{ inputs.ref }}
         run: |
           set -euo pipefail
+          target="$(git rev-parse --verify 'HEAD^{commit}')"
+          if [[ "$RELEASE_TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] && [ "$target" != "$RELEASE_TARGET_SHA" ]; then
+            echo "::error::checked-out release target is $target, not requested SHA $RELEASE_TARGET_SHA" >&2
+            exit 1
+          fi
+          if ! git check-ref-format "refs/tags/$VERSION"; then
+            echo "::error::invalid release tag '$VERSION'" >&2
+            exit 1
+          fi
+          if git show-ref --verify --quiet "refs/tags/$VERSION"; then
+            tag_type="$(git cat-file -t "refs/tags/$VERSION")"
+            if [ "$tag_type" != "tag" ]; then
+              echo "::error::existing release tag '$VERSION' is not annotated" >&2
+              exit 1
+            fi
+            existing="$(git rev-list -n 1 "refs/tags/$VERSION")"
+            if [ "$existing" != "$target" ]; then
+              echo "::error::existing tag '$VERSION' targets $existing, requested $target" >&2
+              exit 1
+            fi
+            echo "release tag $VERSION already targets $target"
+            printf 'created=false\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git config user.name "three-cubes-agent[bot]"
           git config user.email "295831460+three-cubes-agent[bot]@users.noreply.github.com"
           # Expand $VERSION inside the message template the caller supplied.
           message=$(VERSION="$VERSION" envsubst <<< "$TAG_MESSAGE")
-          git tag -a "$VERSION" -m "$message"
-          git push origin "$VERSION"
+          git tag -a "$VERSION" "$target" -m "$message"
+          printf 'created=true\n' >> "$GITHUB_OUTPUT"
+
+      - name: Push new release tag
+        if: steps.tag.outputs.created == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: git push origin "refs/tags/$VERSION"
 
       - name: Create GitHub Release
+        id: github-release
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
@@ -273,6 +301,11 @@ jobs:
           DRAFT: ${{ inputs.draft }}
         run: |
           set -euo pipefail
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "GitHub Release $VERSION already exists"
+            printf 'created=false\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Draft (default) lands the Release for operator review of the rendered
           # CHANGELOG notes before Publish. The git tag (and any artefacts built
           # from its SHA) ship deterministically regardless of draft state, so the
@@ -287,9 +320,10 @@ jobs:
               --notes-file /tmp/release-notes.md \
               --verify-tag \
               "${draft_flag[@]}"
+          printf 'created=true\n' >> "$GITHUB_OUTPUT"
 
       - name: Fan out to downstream publish workflows
-        if: inputs.fan-out-command != ''
+        if: inputs.fan-out-command != '' && steps.github-release.outputs.created == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
