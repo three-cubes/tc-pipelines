@@ -162,7 +162,7 @@ jobs:
           exit 1
 
       - name: Run the suite and store durations
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@b6d221e50825ba8b1052b91acfae653a3ff877bd # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@234ca87b4a55591ccf99c077371cf192455b309e # v2.2.1 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -199,6 +199,7 @@ jobs:
           coverage-xml-path: "coverage.xml"
           coverage-artifact-name: "coverage-data"
           upload-coverage-artifact: false
+          provision-osv-scanner: true
 
       - name: Assert the map was written and is usable
         env:

@@ -311,7 +311,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run the gate (unsharded)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@b6d221e50825ba8b1052b91acfae653a3ff877bd # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@234ca87b4a55591ccf99c077371cf192455b309e # v2.2.1 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -335,6 +335,7 @@ jobs:
           coverage-xml-path: ${{ inputs.coverage-xml-path }}
           coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
           tier: ${{ inputs.tier }}
+          provision-osv-scanner: true
           shard-index:
           shard-total:
 
@@ -373,7 +374,7 @@ jobs:
         shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Run the gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@b6d221e50825ba8b1052b91acfae653a3ff877bd # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@234ca87b4a55591ccf99c077371cf192455b309e # v2.2.1 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -397,6 +398,7 @@ jobs:
           coverage-xml-path: ${{ inputs.coverage-xml-path }}
           coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
           tier: ${{ inputs.shard-tier != '' && inputs.shard-tier || inputs.tier }}
+          provision-osv-scanner: false
           shard-index: ${{ matrix.shard }}
           shard-total: ${{ inputs.pytest-shards }}
 
@@ -615,7 +617,7 @@ jobs:
           echo "::error::shard-tier is set but non-shard-tier is empty — every step outside the shard tier would drop out of the gate while it still reported green. fix: set non-shard-tier to the tier holding those steps. next: re-run."
           exit 1
       - name: Run the gate (non-shard tier)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@b6d221e50825ba8b1052b91acfae653a3ff877bd # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@234ca87b4a55591ccf99c077371cf192455b309e # v2.2.1 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -642,6 +644,7 @@ jobs:
           coverage-xml-path: ${{ inputs.coverage-xml-path }}
           coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
           tier: ${{ inputs.non-shard-tier }}
+          provision-osv-scanner: true
           upload-coverage-artifact: false
 
   # ── The single required-status context (shard-count-independent) ────────────
