@@ -7,6 +7,7 @@ import datetime as dt
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,6 +15,7 @@ SCHEMA = "three-cubes/release-preparation/v1"
 UNRELEASED = re.compile(r"^## \[Unreleased\][^\n]*(?:\n|$)", re.MULTILINE)
 SECOND_LEVEL = re.compile(r"^## ", re.MULTILINE)
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+BUMP_PARTS = ("major", "minor", "patch")
 
 
 def _label(version: str) -> str:
@@ -32,6 +34,45 @@ def _write(path: Path, content: str) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(content, encoding="utf-8")
     temporary.replace(path)
+
+
+def _bump_project_version(part: str, tag_prefix: str) -> str:
+    bumped = subprocess.run(
+        ["uv", "version", "--bump", part, "--no-sync"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if bumped.returncode != 0:
+        detail = bumped.stderr.strip() or bumped.stdout.strip() or "uv version failed"
+        raise ValueError(detail)
+    resolved = subprocess.run(
+        ["uv", "version", "--short"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if resolved.returncode != 0:
+        detail = resolved.stderr.strip() or resolved.stdout.strip() or "uv version failed"
+        raise ValueError(detail)
+    project_version = resolved.stdout.strip()
+    if not project_version or "\n" in project_version or "\r" in project_version:
+        raise ValueError("uv version returned an invalid project version")
+    version = f"{tag_prefix}{project_version}"
+    _label(version)
+    return version
+
+
+def _set_project_version(version: str) -> None:
+    updated = subprocess.run(
+        ["uv", "version", version, "--no-sync"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if updated.returncode != 0:
+        detail = updated.stderr.strip() or updated.stdout.strip() or "uv version failed"
+        raise ValueError(detail)
 
 
 def prepare(
@@ -87,26 +128,36 @@ def prepare(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", required=True)
+    coordinate = parser.add_mutually_exclusive_group(required=True)
+    coordinate.add_argument("--version")
+    coordinate.add_argument("--bump", choices=BUMP_PARTS)
+    parser.add_argument("--tag-prefix", default="v")
     parser.add_argument("--date", default=dt.datetime.now(tz=dt.UTC).date().isoformat())
     parser.add_argument("--changelog", default="CHANGELOG.md")
     parser.add_argument("--version-file", default="VERSION")
     parser.add_argument("--preparation-file", default=".release-prepared.json")
     arguments = parser.parse_args()
     try:
+        version_file = Path(arguments.version_file) if arguments.version_file else None
+        version = (
+            arguments.version
+            if arguments.version is not None
+            else _bump_project_version(arguments.bump, arguments.tag_prefix)
+        )
+        if arguments.version is not None and version_file is None:
+            _set_project_version(_label(version))
         prepare(
-            version=arguments.version,
+            version=version,
             release_date=arguments.date,
             changelog=Path(arguments.changelog),
-            version_file=Path(arguments.version_file)
-            if arguments.version_file
-            else None,
+            version_file=version_file,
             preparation_file=Path(arguments.preparation_file),
         )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
-    print(f"prepared release {arguments.version}")
+    print(f"prepared release {version}")
+    print(f"version={version}")
     return 0
 
 

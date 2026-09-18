@@ -523,13 +523,17 @@ name: "Prepare release"
 on:
   workflow_dispatch:
     inputs:
-      version: { description: "CalVer tag (e.g. v2026.7.10)", required: true, type: string }
+      version: { description: "Exact tag; set this or bump", required: false, type: string }
+      bump: { description: "Semantic bump: major, minor, or patch", required: false, type: string }
       release-date: { description: "Optional ISO-8601 date (defaults to UTC today)", required: false, type: string }
-permissions:
-  contents: write
+      version-file: { description: "Plain version file; empty for pyproject", required: false, default: "VERSION", type: string }
+permissions: {}
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - name: Refuse main; preparation belongs in a reviewed release branch
         shell: bash
@@ -539,43 +543,67 @@ jobs:
             echo "::error::dispatch Prepare release from a release branch, not main" >&2
             exit 1
           fi
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Mint three-cubes-agent token
+        id: app
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@${PIPELINES_SHA}
+        with:
+          client-id: \${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: \${{ vars.AZURE_TENANT_ID }}
+          subscription-id: \${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Checkout release branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: \${{ github.ref_name }}
+          token: \${{ steps.app.outputs.token }}
+      - name: Install pinned uv for semantic bump
+        if: inputs.bump != '' || inputs.version-file == ''
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version-file: .uv-version
+          enable-cache: false
       - name: Mechanically prepare the release ledger
+        id: release
         uses: three-cubes/tc-pipelines/actions/prepare-release-metadata@${PIPELINES_SHA}
         with:
           version: \${{ inputs.version }}
+          bump: \${{ inputs.bump }}
           release-date: \${{ inputs.release-date }}
+          version-file: \${{ inputs.version-file }}
       - name: Commit preparation for review
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "three-cubes-agent[bot]"
           git config user.email "295831460+three-cubes-agent[bot]@users.noreply.github.com"
-          git add CHANGELOG.md VERSION .release-prepared.json
+          git add -A
           git diff --cached --quiet && {
             echo "::error::preparation made no release-ledger change" >&2
             exit 1
           }
-          git commit -m "chore(release): prepare \${{ inputs.version }}"
+          git commit -m "chore(release): prepare \${{ steps.release.outputs.version }}"
           git push origin "HEAD:\$GITHUB_REF_NAME"
 EOF
-      cat > "${OUT_DIR}/.github/workflows/release.yml" <<EOF
+      cat > "${OUT_DIR}/.github/workflows/release-on-merge.yml" <<EOF
 ---
-name: "Release"
+name: "Release prepared merge"
 on:
-  workflow_dispatch:
-    inputs:
-      version: { description: "CalVer tag (e.g. v2026.7.10)", required: true, type: string }
-permissions:
-  contents: write
-  id-token: write
+  pull_request:
+    types: [closed]
+    paths:
+      - .release-prepared.json
+permissions: {}
 jobs:
   release:
-    uses: three-cubes/tc-pipelines/.github/workflows/release.yml@${PIPELINES_SHA}
+    if: \${{ github.event.pull_request.merged == true }}
+    permissions:
+      actions: write
+      contents: write
+      id-token: write
+    uses: three-cubes/tc-pipelines/.github/workflows/release-on-merge.yml@${PIPELINES_SHA}
     with:
-      version: \${{ inputs.version }}
+      merge-sha: \${{ github.event.pull_request.merge_commit_sha }}
 EOF
-      echo "ok: rendered prepare-release.yml + release.yml"
+      echo "ok: rendered prepare-release.yml + release-on-merge.yml"
     fi
 
     # The affordance skeletons rendered to OUT_DIR too, so it is a complete drop-in.

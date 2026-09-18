@@ -4,8 +4,17 @@ description: >-
   source, and write the receipt required before tc-pipelines cuts a tag.
 inputs:
   version:
-    description: Immutable tag to prepare (for example v2026.9.7).
-    required: true
+    description: Immutable tag to prepare. Set this or bump, never both.
+    required: false
+    default: ""
+  bump:
+    description: Semantic version part to bump in pyproject.toml via uv (major, minor, or patch).
+    required: false
+    default: ""
+  tag-prefix:
+    description: Prefix applied to the uv project version in bump mode.
+    required: false
+    default: v
   release-date:
     description: ISO-8601 release date. Empty uses the current UTC date.
     default: ""
@@ -18,13 +27,20 @@ inputs:
   preparation-file:
     description: Repository-relative receipt path consumed by release.yml.
     default: .release-prepared.json
+outputs:
+  version:
+    description: Resolved immutable tag written to the preparation receipt.
+    value: ${{ steps.prepare.outputs.version }}
 runs:
   using: composite
   steps:
     - name: Prepare release ledger
+      id: prepare
       shell: bash
       env:
         RELEASE_VERSION: ${{ inputs.version }}
+        RELEASE_BUMP: ${{ inputs.bump }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
         RELEASE_DATE: ${{ inputs.release-date }}
         CHANGELOG_FILE: ${{ inputs.changelog-file }}
         VERSION_FILE: ${{ inputs.version-file }}
@@ -32,13 +48,25 @@ runs:
       run: |
         set -euo pipefail
         command=(python3 "$GITHUB_ACTION_PATH/prepare_release.py"
-          --version "$RELEASE_VERSION"
           --changelog "$CHANGELOG_FILE"
           --preparation-file "$PREPARATION_FILE")
+        if [[ -n "$RELEASE_VERSION" && -n "$RELEASE_BUMP" ]]; then
+          echo "::error::set version or bump, not both" >&2
+          exit 2
+        elif [[ -n "$RELEASE_VERSION" ]]; then
+          command+=(--version "$RELEASE_VERSION")
+        elif [[ -n "$RELEASE_BUMP" ]]; then
+          command+=(--bump "$RELEASE_BUMP" --tag-prefix "$TAG_PREFIX")
+        else
+          echo "::error::set version or bump" >&2
+          exit 2
+        fi
         if [ -n "$RELEASE_DATE" ]; then
           command+=(--date "$RELEASE_DATE")
         fi
-        if [ -n "$VERSION_FILE" ]; then
-          command+=(--version-file "$VERSION_FILE")
-        fi
-        "${command[@]}"
+        command+=(--version-file "$VERSION_FILE")
+        output="$("${command[@]}")"
+        printf '%s\n' "$output"
+        version="$(sed -n 's/^version=//p' <<< "$output")"
+        [[ -n "$version" ]]
+        printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"

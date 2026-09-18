@@ -12,11 +12,11 @@ emptiness check written as a file-size test counts that one byte as content: the
 extractor's output reaches `--notes-file` unchanged, the step prints an empty
 preview group, the job reports success, and the Release publishes with nothing
 in it. That is the state the documented CHANGELOG flow leaves `## [Unreleased]`
-in — the release PR moves its bullets into a dated section before the tag is
+in — the preparation action moves its bullets into a dated section before the tag is
 cut.
 
 A missing section costs the record rather than the run.
-`governance/standards/sdlc-release-workflow.md` requires the release PR to add
+`governance/standards/sdlc-release-workflow.md` requires the candidate PR to add
 the dated section, and consumers pinned to `@vN` read it to decide whether to
 move the pin. Every tag in LEGACY_TAGS_WITHOUT_NOTES lacks one, so that range
 carries no such record.
@@ -26,7 +26,7 @@ the reusable no longer accepts an independently maintained heading label that
 can make its release notes drift from its tag.
 
 Only tag -> section is checked. A section with no tag is the correct state of a
-release PR, which adds the dated section before the tag is pushed, so the
+candidate PR, which adds the dated section before the tag is pushed, so the
 reverse direction would be unsatisfiable on every such PR.
 
 Tags cut before this guard are frozen in LEGACY_TAGS_WITHOUT_NOTES with their
@@ -63,7 +63,7 @@ RELEASE_TAG = re.compile(r"^v(\d+\.\d+\.\d+)$")
 # Tags cut before this guard existed. Their record survives only in tag
 # annotations and merge-commit subjects, which name the branch or the release
 # theme but not the consumer-facing input changes, so a section written now
-# would be a reconstruction rather than the release PR's own statement.
+# would be a reconstruction rather than the reviewed candidate's own statement.
 LEGACY_TAGS_WITHOUT_NOTES = frozenset(
     {
         "v1.1.0",
@@ -132,7 +132,7 @@ def test_released_tag_has_a_changelog_section(tag: str) -> None:
     major = version.split(".")[0]
     assert _has_section(version), (
         f"tag {tag} has no `## [{version}]` section in CHANGELOG.md. "
-        f"governance/standards/sdlc-release-workflow.md has the release PR move "
+        f"governance/standards/sdlc-release-workflow.md has preparation move "
         f"the `## [Unreleased]` bullets into a dated section before the tag is "
         f"pushed. Without it release.yml extracts zero bytes and stops the "
         f"release, and a consumer "
