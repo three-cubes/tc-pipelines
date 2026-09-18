@@ -10,6 +10,11 @@ for the consumer-facing `@vN` workflow/action references.
 
 ### Changed
 
+- **The canonical testing standard now distinguishes structural checks from
+  executable behavioural evidence.** Critical deployable surfaces are routed
+  to the released `tc-fitness` `core:behavioural_evidence` contract, which binds
+  each matched surface to marked tests and the exact executable and observed
+  output that prove its behaviour.
 - **Local agent commits no longer imply local credential access.** Commits use
   canonical `three-cubes-agent[bot]` metadata without a credential; off-CI
   remote writes use a trusted host broker that confines a short-lived App token

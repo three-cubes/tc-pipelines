@@ -102,6 +102,33 @@ A `@tier:walker` scenario for the same area would point a sibling sabotage test 
 - **Land the executor in the same PR as `@tier:e2e`.** Tag and subprocess executor ship together; the gate FAILs the tag without the executor.
 - **Override walker-acceptable scenarios per-scenario.** When a feature-level `@tier:e2e` block contains scenarios that are walker-acceptable, add `@tier:walker` on those scenarios; keep the feature-level tag as the default and let scenario-level overrides win.
 
+## Behavioural evidence integrity
+
+A source-shape test proves only the static invariant it asserts. Reading a
+Dockerfile, workflow, script or configuration file and checking strings,
+ordering, keys or syntax does not prove that the build, command, deployment or
+runtime works. Keep those tests when the invariant matters, and describe them
+as structural policy or contract evidence.
+
+Every critical deployable surface also declares executable evidence through
+the `tc-fitness` `core:behavioural_evidence` check. Its consumer configuration:
+
+1. selects the critical files with `surface_globs`;
+2. names the accepted integration, E2E, journey or equivalent pytest markers
+   with `behaviour_markers`; and
+3. declares one or more `claims`, each with a stable `id`, exact `surfaces`,
+   behavioural `tests` and invoked `executables`.
+
+The check passes only when a named, marked test invokes the declared executable,
+observes process success and asserts a produced file, response or retained
+receipt passed to that executable. Static source assertions, an unrelated
+subprocess, missing or unmarked tests, unclaimed matched surfaces, an unobserved
+process result, or an unobserved output fail the check. This is a hard gate;
+baselines cannot suppress its findings.
+
+Run every named behavioural test in the required local release gate and PR
+gate. Nightly or soak-only execution does not provide merge evidence.
+
 ---
 
 ## Contract Testing

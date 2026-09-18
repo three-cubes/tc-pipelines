@@ -188,6 +188,12 @@ Unit and contract tests use real temporary files and public check entrypoints. C
 tests materialise a Linux filesystem and execute the access matrix as real identities. Production
 qualification exercises the exact candidate and records the live receipt.
 
+Critical build and deployment surfaces bind their executable tests through the
+[testing strategy's `core:behavioural_evidence`
+contract](testing-strategy.md#behavioural-evidence-integrity). Structural
+assertions remain useful policy checks, but they do not satisfy an executable
+evidence claim.
+
 ## Adoption and release
 
 Delivery follows this order:
