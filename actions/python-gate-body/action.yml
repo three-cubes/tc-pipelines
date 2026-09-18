@@ -82,6 +82,12 @@ inputs:
       runs the full gate. Needs three-cubes-fitness >= v0.10.0.
     required: false
     default: ""
+  provision-osv-scanner:
+    description: >-
+      Whether this lane owns provisioning the consumer-declared OSV scanner.
+      The reusable workflow assigns ownership to the single full/catalogue lane
+      so a sharded gate downloads and verifies the scanner exactly once.
+    required: true
   upload-coverage-artifact:
     required: true
   coverage-xml-path:
@@ -110,12 +116,12 @@ runs:  # ${{ inputs.probe-undeclared-input }}
         sync-args: ${{ inputs.sync-args }}
 
     # A consumer opts into SCA by declaring the shared core-check contract.
-    # Smoke and matrix lanes do not execute the full/catalogue SCA rule, so
-    # they do not download its scanner. Repositories with no contract do no
-    # OSV setup work at all.
+    # Repositories with no contract do no OSV setup work at all. The reusable
+    # workflow assigns this step to one lane; the composite does not infer
+    # ownership from consumer-defined tier names.
     - name: Read declared OSV scanner contract
       id: osv-contract
-      if: inputs.tier != 'smoke' && inputs.tier != 'matrix'
+      if: inputs.provision-osv-scanner == 'true'
       shell: bash
       run: python "$GITHUB_ACTION_PATH/declared_osv_contract.py" >> "$GITHUB_OUTPUT"
 

@@ -27,7 +27,15 @@ def _config(repo_root: Path) -> dict[str, Any]:
 
 def emit(repo_root: Path) -> int:
     contract = _config(repo_root)
-    required = contract.get("required") is True
+    if not contract:
+        print("required=false")
+        print("version=")
+        return 0
+    required_value = contract.get("required")
+    if not isinstance(required_value, bool):
+        print("OSV SCA contract required must be a boolean", file=sys.stderr)
+        return 1
+    required = required_value
     if not required:
         print("required=false")
         print("version=")
@@ -36,6 +44,17 @@ def emit(repo_root: Path) -> int:
     if EXACT_VERSION.fullmatch(version) is None:
         print(
             "required OSV SCA contract must declare an exact scanner_version (x.y.z)",
+            file=sys.stderr,
+        )
+        return 1
+    lockfiles = contract.get("lockfiles")
+    if (
+        not isinstance(lockfiles, list)
+        or not lockfiles
+        or any(not isinstance(path, str) or not path.strip() for path in lockfiles)
+    ):
+        print(
+            "required OSV SCA contract must declare a non-empty lockfiles list",
             file=sys.stderr,
         )
         return 1
