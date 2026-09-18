@@ -36,7 +36,7 @@ jobs:
       contents: read
       id-token: write        # WIF federation to mint the App token
       pull-requests: write   # enable auto-merge on the PR
-    uses: three-cubes/tc-pipelines/.github/workflows/auto-merge-on-green.yml@b6d221e50825ba8b1052b91acfae653a3ff877bd # v2.2.1
+    uses: three-cubes/tc-pipelines/.github/workflows/auto-merge-on-green.yml@86d158854bf4c197adba2443bbbc0b0fb00852d8 # v2.2.1
     with:
       fan-in-check-name: "Quality gate"
       merge-method: merge            # merge commit; all methods enabled, standardise on merge
