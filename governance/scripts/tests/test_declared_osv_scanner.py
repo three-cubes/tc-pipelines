@@ -33,6 +33,38 @@ def _run(repo: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_with_python310_tomli_fallback(repo: Path) -> subprocess.CompletedProcess[str]:
+    """Run the reader with ``tomllib`` unavailable and a ``tomli`` substitute."""
+    runner = f"""
+import importlib.abc
+import runpy
+import sys
+import tomllib as stdlib_tomllib
+import types
+
+fallback = types.ModuleType("tomli")
+fallback.loads = stdlib_tomllib.loads
+sys.modules["tomli"] = fallback
+sys.modules.pop("tomllib", None)
+
+class BlockTomllib(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "tomllib":
+            raise ModuleNotFoundError("No module named 'tomllib'", name="tomllib")
+        return None
+
+sys.meta_path.insert(0, BlockTomllib())
+sys.argv = [{str(SCRIPT)!r}, "--repo-root", {str(repo)!r}]
+runpy.run_path({str(SCRIPT)!r}, run_name="__main__")
+"""
+    return subprocess.run(
+        [sys.executable, "-c", runner],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def test_repo_without_sca_contract_does_not_request_install(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.tc_fitness]\n", encoding="utf-8")
 
@@ -142,6 +174,25 @@ def test_contract_reader_has_a_python310_tomli_fallback() -> None:
 
     assert "import tomllib" in source
     assert "import tomli as tomllib" in source
+
+
+def test_python310_tomli_fallback_reads_multiline_contract(tmp_path: Path) -> None:
+    (tmp_path / ".tc-fitness.toml").write_text(
+        """
+[core_checks.osv_scanner_sca]
+required = true
+scanner_version = "2.2.4"
+lockfiles = [
+  "uv.lock",
+]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = _run_with_python310_tomli_fallback(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["required=true", "version=2.2.4"]
 
 
 @pytest.mark.parametrize("required", ['"true"', "1", '"false"'])
