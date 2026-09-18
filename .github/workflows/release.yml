@@ -152,7 +152,10 @@ jobs:
           set -euo pipefail
           PREPARATION_FILE="${PREPARATION_FILE:-.release-prepared.json}"
           CHANGELOG_FILE="${CHANGELOG_FILE:-CHANGELOG.md}"
-          VERSION_FILE="${VERSION_FILE:-VERSION}"
+          # Empty is a valid, intentional value for pyproject-backed releases.
+          # Default only when the variable is absent; `${name:-default}` would
+          # also replace an explicit empty string and fabricate a VERSION file.
+          VERSION_FILE="${VERSION_FILE-VERSION}"
           if [ ! -f "$PREPARATION_FILE" ]; then
             echo "::error::release preparation receipt is absent: $PREPARATION_FILE" >&2
             echo "fix: run three-cubes/tc-pipelines/actions/prepare-release-metadata on the candidate branch and commit its outputs before merging." >&2
