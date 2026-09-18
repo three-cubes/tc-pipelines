@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10; provisioned by the composite action.
+    import tomli as tomllib
 from pathlib import Path
 from typing import Any
 
@@ -24,59 +27,18 @@ def _config_path(repo_root: Path) -> tuple[Path, tuple[str, ...]] | None:
     return None
 
 
-def _without_comment(line: str) -> str:
-    quote = ""
-    escaped = False
-    for index, character in enumerate(line):
-        if quote:
-            if character == "\\" and quote == '"' and not escaped:
-                escaped = True
-                continue
-            if character == quote and not escaped:
-                quote = ""
-            escaped = False
-            continue
-        if character in {"'", '"'}:
-            quote = character
-        elif character == "#":
-            return line[:index]
-    return line
-
-
-def _value(raw: str) -> Any:
-    value = raw.strip()
-    if value == "true":
-        return True
-    if value == "false":
-        return False
-    if value.startswith('"'):
-        return json.loads(value)
-    if value.startswith("'") and value.endswith("'"):
-        return value[1:-1]
-    if value.startswith("["):
-        return [_value(item) for item in value[1:-1].split(",") if item.strip()]
-    return value
-
-
 def _config(repo_root: Path) -> dict[str, Any]:
     selected = _config_path(repo_root)
     if selected is None:
         return {}
     path, wanted = selected
-    current: tuple[str, ...] = ()
-    contract: dict[str, Any] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = _without_comment(raw_line).strip()
-        if not line:
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            current = tuple(part.strip() for part in line[1:-1].split("."))
-            continue
-        if current != wanted or "=" not in line:
-            continue
-        key, raw_value = line.split("=", 1)
-        contract[key.strip()] = _value(raw_value)
-    return contract
+    document = tomllib.loads(path.read_text(encoding="utf-8"))
+    current: Any = document
+    for key in wanted:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return current if isinstance(current, dict) else {}
 
 
 def emit(repo_root: Path) -> int:

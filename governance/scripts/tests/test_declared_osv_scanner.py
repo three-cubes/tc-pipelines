@@ -99,10 +99,49 @@ lockfiles = ["uv.lock"]
     assert result.stdout.splitlines() == ["required=true", "version=2.2.4"]
 
 
-def test_contract_reader_does_not_require_python311_tomllib() -> None:
+@pytest.mark.parametrize(
+    ("name", "contract"),
+    [
+        (
+            ".tc-fitness.toml",
+            """
+[core_checks.osv_scanner_sca]
+required = true
+scanner_version = "2.2.4"
+lockfiles = [
+  "uv.lock",
+]
+""",
+        ),
+        (
+            "pyproject.toml",
+            """
+[tool.tc_fitness.core_checks.osv_scanner_sca]
+required = true
+scanner_version = "2.2.4"
+lockfiles = [
+  "uv.lock",
+]
+""",
+        ),
+    ],
+)
+def test_required_contract_accepts_multiline_lockfiles(
+    tmp_path: Path, name: str, contract: str
+) -> None:
+    (tmp_path / name).write_text(contract.strip(), encoding="utf-8")
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == ["required=true", "version=2.2.4"]
+
+
+def test_contract_reader_has_a_python310_tomli_fallback() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
 
-    assert "import tomllib" not in source
+    assert "import tomllib" in source
+    assert "import tomli as tomllib" in source
 
 
 @pytest.mark.parametrize("required", ['"true"', "1", '"false"'])
@@ -163,6 +202,7 @@ def test_composite_installs_and_verifies_only_when_lane_owns_provisioning() -> N
     install = next(step for step in steps if step.get("name") == "Install declared OSV scanner")
 
     assert "declared_osv_contract.py" in detect["run"]
+    assert "uv pip install --python python --no-deps tomli==2.3.0" in detect["run"]
     assert detect["if"] == "inputs.provision-osv-scanner == 'true'"
     assert install["if"] == "steps.osv-contract.outputs.required == 'true'"
     assert "osv-scanner_SHA256SUMS" in install["run"]

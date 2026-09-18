@@ -123,7 +123,11 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       id: osv-contract
       if: inputs.provision-osv-scanner == 'true'
       shell: bash
-      run: python "$GITHUB_ACTION_PATH/declared_osv_contract.py" >> "$GITHUB_OUTPUT"
+      run: |
+        if ! python -c 'import tomllib' 2>/dev/null; then
+          uv pip install --python python --no-deps tomli==2.3.0
+        fi
+        python "$GITHUB_ACTION_PATH/declared_osv_contract.py" >> "$GITHUB_OUTPUT"
 
     - name: Install declared OSV scanner
       if: steps.osv-contract.outputs.required == 'true'
