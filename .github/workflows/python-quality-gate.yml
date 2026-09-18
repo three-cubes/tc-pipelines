@@ -398,7 +398,10 @@ jobs:
           coverage-xml-path: ${{ inputs.coverage-xml-path }}
           coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
           tier: ${{ inputs.shard-tier != '' && inputs.shard-tier || inputs.tier }}
-          provision-osv-scanner: false
+          # A partitioned gate runs SCA once in quality-non-shard. Legacy
+          # unpartitioned sharding runs the full gate in each shard, so each
+          # shard must retain the scanner needed by that full gate.
+          provision-osv-scanner: ${{ inputs.shard-tier == '' }}
           shard-index: ${{ matrix.shard }}
           shard-total: ${{ inputs.pytest-shards }}
 

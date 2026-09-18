@@ -16,6 +16,14 @@ SCRIPT = REPO_ROOT / "actions" / "python-gate-body" / "declared_osv_contract.py"
 ACTION = REPO_ROOT / "actions" / "python-gate-body" / "action.yml"
 
 
+def _lane_owns_provisioning(value: bool | str, *, shard_tier: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value == "${{ inputs.shard-tier == '' }}":
+        return shard_tier == ""
+    raise AssertionError(f"unknown scanner-provisioning expression: {value}")
+
+
 def _run(repo: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--repo-root", str(repo)],
@@ -135,7 +143,7 @@ def test_composite_installs_and_verifies_only_when_lane_owns_provisioning() -> N
     assert "steps.osv-contract.outputs.version" in install["env"]["OSV_SCANNER_VERSION"]
 
 
-def test_full_and_sharded_workflow_provision_scanner_exactly_once() -> None:
+def test_full_and_partitioned_sharded_workflow_provision_scanner_exactly_once() -> None:
     workflow = yaml.safe_load(
         (REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml").read_text(
             encoding="utf-8"
@@ -146,17 +154,26 @@ def test_full_and_sharded_workflow_provision_scanner_exactly_once() -> None:
     unsharded_count = int(
         jobs["quality"]["steps"][0]["with"]["provision-osv-scanner"] is True
     )
-    sharded_count = (
-        4
-        * int(
-            jobs["quality-shard"]["steps"][0]["with"]["provision-osv-scanner"]
-            is True
-        )
+    shard_owner = jobs["quality-shard"]["steps"][0]["with"]["provision-osv-scanner"]
+    partitioned_sharded_count = (
+        4 * int(_lane_owns_provisioning(shard_owner, shard_tier="matrix"))
         + int(
-            jobs["quality-non-shard"]["steps"][1]["with"]["provision-osv-scanner"]
-            is True
+            jobs["quality-non-shard"]["steps"][1]["with"]["provision-osv-scanner"] is True
         )
     )
 
     assert unsharded_count == 1
-    assert sharded_count == 1
+    assert partitioned_sharded_count == 1
+
+
+def test_unpartitioned_shards_keep_required_scanner_available() -> None:
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    shard_owner = workflow["jobs"]["quality-shard"]["steps"][0]["with"][
+        "provision-osv-scanner"
+    ]
+    assert _lane_owns_provisioning(shard_owner, shard_tier="") is True
