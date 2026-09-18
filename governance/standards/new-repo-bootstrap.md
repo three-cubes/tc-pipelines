@@ -86,7 +86,8 @@ tc-pipelines checkout it sources [`../skeletons/`](../skeletons/) locally.
 | `--fitness-tag vX.Y.Z` | the pinned tc-fitness engine tag baked into the script | The immutable tc-fitness tag the rendered `pyproject` pins and the CI no-attribution leg uses. |
 | `--pipelines-sha <sha>` | required | The immutable tc-pipelines v2 release commit used by rendered workflow calls. |
 | `--sonar` / `--no-sonar` | `--sonar` | Emit the SonarCloud jobs, or trim them from `ci.yml`. |
-| `--with-release` | off | Also render a `release.yml` caller. |
+| `--with-release` | off | Render same-branch release preparation and exact-merge release callers. |
+| `--release-version-source version-file\|pyproject` | `version-file` | Declare the repository version source once in generated release workflows. Release dispatches cannot override it. |
 | `--sonar-project-key <key>` | `three-cubes_<slug>` | The SonarCloud `projectKey` rendered into `sonar-project.properties`. |
 | `--out-dir <dir>` | a reported temp dir | Where the wiring + affordance payload renders. |
 | `--verify` | off | Run the self-check after rendering. |
@@ -130,7 +131,9 @@ complete drop-in:
 - **`.pre-commit-config.yaml`** + **`scripts/git-hooks/{commit-msg,pre-push}`** —
   the local hook config and the repo-local hook scripts it points at.
 - **`sonar-project.properties`** — only under `--sonar`; policy per
-- **`.github/workflows/release.yml`** — only under `--with-release`.
+- **`.github/workflows/{prepare-release,release-on-merge}.yml`** — only under
+  `--with-release`; the generated workflows bind the version source selected by
+  `--release-version-source` and do not expose it as a dispatch input.
 - The six affordance docs, so `--out-dir` is a self-contained drop-in.
 
 ### `--verify` self-check
@@ -165,8 +168,9 @@ non-fast-forward. Ship one feature = one branch = one PR authored by the
 three-cubes-agent App; `auto-merge.yml` merges on green. See
 [development-workflow](development-workflow.md).
 
-Cut releases the canonical way via [sdlc-release-workflow](sdlc-release-workflow.md);
-render the `release.yml` caller with `--with-release`.
+Cut releases via [sdlc-release-workflow](sdlc-release-workflow.md). Render both
+release workflows with `--with-release` and declare `version-file` or
+`pyproject` once through `--release-version-source`.
 
 ## The quality gate
 

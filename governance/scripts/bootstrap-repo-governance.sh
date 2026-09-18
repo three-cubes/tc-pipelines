@@ -27,6 +27,7 @@
 #     [--fitness-tag vX.Y.Z] --pipelines-sha <40-char-sha> \
 #     [--merge-queue] \
 #     [--sonar | --no-sonar] [--with-release] \
+#     [--release-version-source version-file|pyproject] \
 #     [--sonar-project-key three-cubes_<name>] \
 #     [--out-dir <dir>] [--verify] [--verify-only] \
 #     [--no-secrets] [--no-ruleset] [--no-files] [--no-affordance] [--no-wiring] \
@@ -60,6 +61,7 @@ DRY_RUN=0
 FITNESS_TAG="v0.12.0"        # pinned tc-fitness engine (ships ci_consumes_shared_gate)
 PIPELINES_SHA=""             # required immutable tc-pipelines release commit
 DO_RELEASE=0                 # also render a release.yml caller
+RELEASE_VERSION_SOURCE="version-file" # declared once in generated release workflows
 MERGE_QUEUE=0                # exact-main push validation by default; queue profile opts out
 OUT_DIR=""                   # where wiring renders (default: a temp dir, reported)
 DO_VERIFY=0                  # run --verify after rendering
@@ -96,6 +98,7 @@ while [[ $# -gt 0 ]]; do
     --pipelines-sha) PIPELINES_SHA="$2"; shift 2 ;;
     --merge-queue) MERGE_QUEUE=1; shift ;;
     --with-release) DO_RELEASE=1; shift ;;
+    --release-version-source) RELEASE_VERSION_SOURCE="$2"; shift 2 ;;
     --out-dir) OUT_DIR="$2"; shift 2 ;;
     --verify) DO_VERIFY=1; shift ;;
     --verify-only) VERIFY_ONLY=1; DO_VERIFY=1; shift ;;
@@ -115,6 +118,10 @@ if [[ -z "$REPO" ]]; then
   echo "next: scripts/bootstrap-repo-governance.sh --repo three-cubes/<name>" >&2
   exit 2
 fi
+if [[ "$RELEASE_VERSION_SOURCE" != "version-file" && "$RELEASE_VERSION_SOURCE" != "pyproject" ]]; then
+  echo "fix: --release-version-source must be version-file or pyproject" >&2
+  exit 2
+fi
 if [[ "$DO_WIRING" == "1" && "$VERIFY_ONLY" == "0" && ! "$PIPELINES_SHA" =~ ^[0-9a-f]{40}$ ]]; then
   echo "fix: --pipelines-sha must be a 40-character lowercase tc-pipelines release commit" >&2
   echo "next: resolve an immutable v2 release tag with git rev-parse '<tag>^{commit}' and pass that SHA" >&2
@@ -124,6 +131,10 @@ fi
 # ── derived tokens ───────────────────────────────────────────────────────────
 REPO_SLUG="${REPO##*/}"                       # <name> from three-cubes/<name>
 FITNESS_FLOOR="${FITNESS_TAG#v}"              # engine_version_floor value (no leading v)
+RELEASE_VERSION_FILE="VERSION"
+if [[ "$RELEASE_VERSION_SOURCE" == "pyproject" ]]; then
+  RELEASE_VERSION_FILE=""
+fi
 : "${OUT_DIR:=${TMPDIR:-/tmp}/tc-bootstrap-${REPO_SLUG}}"
 
 run() {
@@ -526,7 +537,6 @@ on:
       version: { description: "Exact tag; set this or bump", required: false, type: string }
       bump: { description: "Semantic bump: major, minor, or patch", required: false, type: string }
       release-date: { description: "Optional ISO-8601 date (defaults to UTC today)", required: false, type: string }
-      version-file: { description: "Plain version file; empty for pyproject", required: false, default: "VERSION", type: string }
 permissions: {}
 jobs:
   prepare:
@@ -556,7 +566,6 @@ jobs:
           ref: \${{ github.ref_name }}
           token: \${{ steps.app.outputs.token }}
       - name: Install pinned uv for semantic bump
-        if: inputs.bump != '' || inputs.version-file == ''
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           version-file: .uv-version
@@ -568,7 +577,7 @@ jobs:
           version: \${{ inputs.version }}
           bump: \${{ inputs.bump }}
           release-date: \${{ inputs.release-date }}
-          version-file: \${{ inputs.version-file }}
+          version-file: "${RELEASE_VERSION_FILE}"
       - name: Commit preparation for review
         shell: bash
         run: |
@@ -602,6 +611,7 @@ jobs:
     uses: three-cubes/tc-pipelines/.github/workflows/release-on-merge.yml@${PIPELINES_SHA}
     with:
       merge-sha: \${{ github.event.pull_request.merge_commit_sha }}
+      version-file: "${RELEASE_VERSION_FILE}"
 EOF
       echo "ok: rendered prepare-release.yml + release-on-merge.yml"
     fi

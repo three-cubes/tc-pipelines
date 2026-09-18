@@ -1,6 +1,6 @@
 {
   "changelog": "CHANGELOG.md",
-  "changelog_sha256": "7167762e693cbdb380bcf38b186874d143802dbe99bbdee2e781de1621d3acc0",
+  "changelog_sha256": "ba9fb6f18797e3f0f9c5c9b4174fe8c286659ef929b885bb30dd768e9f1021d5",
   "schema": "three-cubes/release-preparation/v1",
   "version": "v2.2.0",
   "version_file": "VERSION",

@@ -210,6 +210,7 @@ def test_help_lists_the_quality_gate_wiring_flags() -> None:
         "--fitness-tag",
         "--pipelines-sha",
         "--with-release",
+        "--release-version-source",
         "--merge-queue",
         "--out-dir",
         "--verify",
@@ -255,7 +256,11 @@ def test_release_wiring_prepares_and_releases_the_same_reviewed_pr(
     assert "github-app-token" in prepare
     assert "token: ${{ steps.app.outputs.token }}" in prepare
     assert "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b" in prepare
-    assert "if: inputs.bump != '' || inputs.version-file == ''" in prepare
+    assert "version-file:" not in prepare.split("workflow_dispatch:", 1)[1].split(
+        "permissions:", 1
+    )[0]
+    assert "if: inputs.bump" not in prepare
+    assert 'version-file: "VERSION"' in prepare
     assert 'git push origin "HEAD:$GITHUB_REF_NAME"' in prepare
     assert "bump: ${{ inputs.bump }}" in prepare
     assert "pull_request:" in release
@@ -275,6 +280,34 @@ def test_release_wiring_prepares_and_releases_the_same_reviewed_pr(
         check=False,
     )
     assert linted.returncode == 0, linted.stdout + linted.stderr
+
+
+def test_release_version_source_is_declared_once_when_wiring_is_generated(
+    tmp_path: Path,
+) -> None:
+    """A release dispatch cannot choose a different version source per run."""
+    out_dir = tmp_path / "wire"
+    result = _render(
+        out_dir,
+        "--with-release",
+        "--release-version-source",
+        "pyproject",
+    )
+    assert result.returncode == 0, result.stderr
+
+    prepare = (out_dir / ".github/workflows/prepare-release.yml").read_text(
+        encoding="utf-8"
+    )
+    release = (out_dir / ".github/workflows/release-on-merge.yml").read_text(
+        encoding="utf-8"
+    )
+    dispatch_inputs = prepare.split("workflow_dispatch:", 1)[1].split(
+        "permissions:", 1
+    )[0]
+    assert "version-file" not in dispatch_inputs
+    assert "if: inputs.bump" not in prepare
+    assert 'version-file: ""' in prepare
+    assert 'version-file: ""' in release
 
 
 def test_wiring_render_resolves_every_token(tmp_path: Path) -> None:

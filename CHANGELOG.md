@@ -26,6 +26,13 @@ for the consumer-facing `@vN` workflow/action references.
   GitHub Release; production deployment retains its separate protected
   environment approval.
 
+### Fixed
+
+- **A pyproject-backed release preserves its declared empty version-file
+  value.** Receipt validation no longer replaces that value with `VERSION`, and
+  generated workflows bind the repository's version source once instead of
+  accepting a different path on each dispatch.
+
 ## [2.1.2] — 2026-09-15
 
 ### Fixed
