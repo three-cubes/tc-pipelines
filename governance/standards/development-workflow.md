@@ -45,7 +45,7 @@ Idea → Issue → Plan → Execute → Review → Merge → Deploy → Verify
 | **Plan → Execute** | Branch from `main`, follow commit conventions, run verification after every logical change. |
 | **Execute → Review** | Open PR as the App, all automated checks pass, complete manual verification checklist. |
 | **Review → Merge** | On a green gate, `auto-merge-on-green.yml` arms `gh pr merge --auto` as the App and GitHub merges the moment every required check passes — no human runs the merge. Branch deletes after merge. |
-| **Merge → Deploy → Verify** | A generic infrastructure merge to `main` runs `deploy-on-merge`, which calls `azure-vm-deploy.yml`: recovery point → apply → smoke. A product release runs candidate → protected publish → protected deployment as defined in `ci-release-deployment-architecture.md`. |
+| **Merge → Release or Deploy → Verify** | A trunk-only package release validates the feature PR's preparation receipt and creates the immutable tag and GitHub Release from that reviewed merge. A package with durable `develop` and `main` branches prepares the stable release on its reviewed `develop` → `main` PR. A generic infrastructure merge to `main` runs `deploy-on-merge`, which calls `azure-vm-deploy.yml`: recovery point → apply → smoke. A product release runs candidate → protected publish → protected deployment. See `sdlc-release-workflow.md` and `ci-release-deployment-architecture.md`. |
 
 > **Merge to `main` runs generic infrastructure deployment.** `deploy-on-merge` calls [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml): WIF/OIDC authentication, recovery point, selected scope (`auto`/`config`/`infra`), and post-apply smoke probe. Product releases dispatch from their published candidate and complete when the product workflow writes the PVT receipt in [`ci-release-deployment-architecture.md`](ci-release-deployment-architecture.md). The default recovery point is a target-host snapshot. The container-only path uses the protected path/configuration backup and immutable predecessor image, sets `snapshot-policy=forbidden` and `skip-snapshot=true`, and supplies `container-rollback-receipt-digest`. The production Environment requires a human reviewer. See [`deployment-verification.md`](deployment-verification.md), [`snapshot-before-apply.md`](snapshot-before-apply.md), and [`agent-sdlc-access-and-hitl.md`](../agent-sdlc-access-and-hitl.md).
 
@@ -82,6 +82,14 @@ Idea → Issue → Plan → Execute → Review → Merge → Deploy → Verify
 | `shellcheck` on touched shell scripts | CI shell linting |
 
 A push whose CI failure was locally reproducible is a process violation. If CI fails anyway, reproduce the failure locally first, fix it there, and push once.
+
+Record local evidence in the PR or handoff: tested commit, exact commands,
+terminal exit status, and the identity of each generated receipt or artifact. A
+started command or partial log records progress only. Passing evidence requires
+a complete terminal result with a successful verdict and the behavioural
+assertions required by that gate; process completion alone is not a passing
+result. The ordered validation ladder and stop conditions live in
+[`validation-and-backpressure.md`](validation-and-backpressure.md).
 
 Sync dependencies with **`uv sync --all-packages`** — bare `uv sync` uninstalls workspace-member dependencies (pptx, openpyxl, …) and false-fails `script_help_smoke`. The agent Bash tool runs **zsh**: `for x in $var` does not word-split (use `${(f)…}` or a literal list), and `mapfile` / `timeout` are unavailable.
 

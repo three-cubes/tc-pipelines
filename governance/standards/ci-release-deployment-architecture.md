@@ -111,6 +111,25 @@ exact-main head. Verify that the assets match the candidate record and that the
 generation is next. Candidate state records `active`, `revoked`, `superseded`,
 and `deployed`. Rollback selects an earlier deployed generation.
 
+## Evidence and handoff contract
+
+Each boundary passes a machine-readable identity to the next boundary. The
+workflow summary indexes the retained evidence.
+
+| Boundary | Required input | Required output |
+|---|---|---|
+| Local to PR | Tested commit, exact command and terminal status | PR evidence naming the local gate and generated artifacts |
+| PR to merge admission | PR head plus exact integration identity | Successful required contexts bound to the admitted tree |
+| Merge to publish | Preparation or candidate receipt plus immutable asset digests | Tag, release and published artifact identities |
+| Publish to deploy | Published candidate identity and protected-environment decision | Target-side admission receipt |
+| Deploy to production verdict | Target receipt, runtime identity and product probes | PVT receipt, candidate state and recovery decision |
+
+A failed or cancelled stage retains its stage name, run and attempt identity,
+exit classification, bounded sanitized diagnostics, receipt or locator digest,
+and rollback and cleanup results. Truncated console output is diagnostic context;
+the retained receipt and content-addressed artifact are the handoff. Candidate
+promotion requires a complete retained handoff.
+
 ## Release metadata
 
 Each repository uses its established version scheme. A CalVer package build uses
@@ -130,13 +149,27 @@ Each toolchain has one authored source:
 | Python | `.python-version` | local bootstrap and setup action |
 | uv | `.uv-version` | local bootstrap and setup action |
 
-`setup-uv-cached` resolves the repository files after checkout. A workflow can
-pass an explicit value only for a deliberate compatibility matrix. The action
-retains legacy fallbacks while repositories add the source files.
+`setup-uv-cached` resolves the repository files after checkout when its input is
+empty. Leave the Python and uv inputs empty for normal lanes so the repository
+files remain authoritative. A compatibility-matrix lane passes its deliberate
+alternate value explicitly. A nonempty input takes precedence over the file;
+the action does not compare them. Legacy fallbacks keep repositories without
+the source files working while they migrate.
+
+The dependency graph comes from the committed lockfile. Local bootstrap and
+reusable CI both use locked sync, so they install the same graph. A toolchain
+update changes its authored version source and any affected lockfile in one PR.
+Dependency automation updates the authored source and lockfile, then runs the
+local gate and reusable caller before merge. The reviewed workflow diff must
+identify any nonempty toolchain input as a compatibility-matrix value; it is
+not parity evidence for the repository's normal toolchain lane.
 
 ## Operational runbook
 
-1. Author a PR and use the repository's under-60-second local smoke command.
+1. Sync from the committed lockfile and authored toolchain files. Use the
+   repository's under-60-second smoke command while editing, then run the exact
+   full local gate before push. Record the tested commit, commands and terminal
+   results in the PR.
 2. Let the green PR enter the merge queue.
 3. The queue's exact integration result provides merge admission.
 4. Start the release candidate operation for the successful merge-group head
@@ -151,8 +184,11 @@ retains legacy fallbacks while repositories add the source files.
 7. Read the deployment's PVT receipt and terminal state. A green receipt is the
    production completion record; a held or failed receipt names the recovery
    operation and preserved evidence.
-8. If a stage fails, use the recorded candidate/attempt identity to resume,
-   roll back, or fix forward from the recorded identity.
+8. If a stage fails, retain its receipt, diagnostic artifact, rollback result
+   and cleanup result. Use the recorded candidate and attempt identity to
+   resume, roll back, or fix forward.
+9. Complete bounded cleanup after the retained evidence and recovery window
+   are verified. Cleanup preserves the failed candidate verdict.
 
 ## Migration and verification
 
