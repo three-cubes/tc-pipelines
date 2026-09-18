@@ -26,6 +26,9 @@
 
 - The canonical standard and full index: [`governance/STANDARDS.md`](governance/STANDARDS.md) — improve that one standard; do not fork your own copy.
 - The quality check itself: [tc-fitness](https://github.com/three-cubes/tc-fitness).
+- The current package-release path: [`governance/standards/sdlc-release-workflow.md`](governance/standards/sdlc-release-workflow.md) — prepare the feature PR once, merge it, then create or confirm the immutable tag and GitHub Release from the reviewed merge.
+- The product release and deployment path: [`governance/standards/ci-release-deployment-architecture.md`](governance/standards/ci-release-deployment-architecture.md) — local evidence, exact-merge admission, candidate publication, deployment handoff and PVT.
+- Runtime rollback, evidence and cleanup: [`governance/standards/infrastructure-deployment-fitness.md`](governance/standards/infrastructure-deployment-fitness.md) and [`governance/standards/deployment-verification.md`](governance/standards/deployment-verification.md).
 - Changing a check or a pipeline: [`governance/standards/improving-fitness-gates.md`](governance/standards/improving-fitness-gates.md) — converge up to the one home, tag-release, consumer-repin.
 - Deploy setup, migration, and cost notes: [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) · [docs/MIGRATION.md](docs/MIGRATION.md) · [docs/COST-OPTIMIZATION.md](docs/COST-OPTIMIZATION.md).
 
