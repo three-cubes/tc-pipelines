@@ -1,19 +1,22 @@
 # tools/ — `tc-agent-tools`
 
-Off-CI local agent tooling, installable by import (no per-repo copy). Single source of
-truth lives here; consuming repos pin a tag and run it via `uvx`.
+Trusted host-broker tooling, installable by import (no per-repo copy). The single
+source of truth lives here; broker deployments pin a release tag.
 
 ## `agent-token`
 
-Mint a short-lived GitHub App **installation token** from `kv-tc-agents` (via `az`),
-so a **local / MCP agent acts as the App, not a human** — PRs land for review with
-clean App authorship and no shared personal credentials. The App key never leaves the
-vault except as a ~9-minute in-memory assertion; the printed token is a ~1-hour
-installation token. This is the off-CI complement to the CI
+Mint a short-lived GitHub App **installation token** from `kv-tc-agents` (via
+`az`). This is a lower-level backend for the trusted off-CI host broker and a
+restricted platform-operator diagnostic; it is **not** a direct agent-harness
+interface because it prints the token on stdout. The private key, App JWT, and
+installation token stay inside the trusted broker process boundary; the printed
+token lasts about an hour.
+This is the off-CI complement to the CI
 [`github-app-token`](../.github/actions/github-app-token/action.yml) composite action —
 both mint the same App identities.
 
-**Requires:** an `az login` session with **Key Vault Secrets User** on `kv-tc-agents`.
+**Requires:** a broker or operator `az login` session with **Key Vault Secrets
+User** on `kv-tc-agents`. Agent harnesses must not inherit this session.
 
 ### Per-agent Apps (SGO-163)
 
@@ -21,29 +24,24 @@ both mint the same App identities.
 identity, resolving the Key Vault secrets `github-app-<agent>-id` /
 `github-app-<agent>-key` and discovering the installation from the App JWT. Omit
 `--agent` for the canonical `three-cubes-agent` org App (legacy secret names) —
-backward compatible with existing consumers. See the canonical
+backward compatible with existing broker deployments. See the canonical
 [per-agent App set + SDLC-access standard](../governance/agent-sdlc-access-and-hitl.md).
 
 | Flag | Effect |
 |---|---|
 | `--agent <name>` | select a per-agent App (`builder`/`shape`/`consultant`/`growth`); default = canonical `three-cubes-agent` |
-| `--repo OWNER/REPO` | scope the installation lookup to one repo (per-agent Apps) |
-| `--git-config` | also set `git config user.name/email` to the App's `[bot]` identity on mint |
+| `--repo three-cubes/REPO` | **required**; select one repository and include its bare name in the installation-token exchange for both canonical and per-agent Apps |
+| `--git-config` | set repository-local author and committer metadata to canonical `three-cubes-agent[bot]`, independent of the selected remote actor |
 
-### Use (pinned, single-source — nothing vendored into the consuming repo)
+### Broker integration contract
 
-```bash
-# Pin to a released tag (content-pinned); @v1 tracks the latest v1.x.
+The CLI rejects missing repositories, owners outside `three-cubes`, and
+multi-repository values. The broker captures stdout in memory, binds the token
+to one repository-scoped subprocess, and discards it when that subprocess exits.
+It never returns the token, Key Vault material, or its Azure session to the
+calling harness, and it never stores a token in Git configuration, a remote URL,
+a file, profile, shell history, or log.
 
-# canonical org App (default) — pure token on stdout:
-export GH_TOKEN="$(uvx --from 'git+https://github.com/three-cubes/tc-pipelines@v1.19.1#subdirectory=tools' agent-token)"
-git config user.name  'three-cubes-agent[bot]'
-git config user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com'
-
-# a per-agent App, setting the [bot] git author in the same step:
-export GH_TOKEN="$(uvx --from 'git+https://github.com/three-cubes/tc-pipelines@v1.19.1#subdirectory=tools' agent-token --agent builder --git-config)"
-# now git push / gh pr create / gh pr merge act as the App
-```
-
-Consuming repos document this invocation in their agent guide (`CLAUDE.md` / `AGENTS.md`)
-so an agent never raises a PR under a human's account.
+Agent hosts expose the broker's operation interface, not this token-mint CLI.
+The canonical boundary and local commit metadata are specified in
+[`governance/agent-sdlc-access-and-hitl.md`](../governance/agent-sdlc-access-and-hitl.md).

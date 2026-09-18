@@ -76,7 +76,10 @@ outputs:
     description: The GitHub App installation access token (masked).
     value: ${{ steps.app-token.outputs.token }}
   app-slug:
-    description: The App slug (e.g. three-cubes-agent) — use for the git author identity.
+    description: >-
+      The authenticated remote actor's App slug (e.g. tc-agent-builder). Do not
+      use it for Git author or committer metadata; commits always use the
+      canonical three-cubes-agent[bot] identity.
     value: ${{ steps.app-token.outputs.app-slug }}
   installation-id:
     description: The installation id the token was minted for.

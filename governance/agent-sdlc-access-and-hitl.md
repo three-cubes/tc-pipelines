@@ -106,10 +106,11 @@ them is itself a human action.
 This is strictly *more* HITL than a CI-only gate, while removing the human as the
 mechanical bottleneck.
 
-## Identity — one GitHub App per agent
+## Identity — canonical commits, per-agent remote actors
 
-Each agent authenticates as its **own GitHub App** (`tc-agent-builder`,
-`tc-agent-shape`, `tc-agent-consultant`, `tc-agent-growth`) — see
+Each agent's remote writes authenticate as its **own GitHub App**
+(`tc-agent-builder`, `tc-agent-shape`, `tc-agent-consultant`,
+`tc-agent-growth`) — see
 [`agent-app-manifests/`](agent-app-manifests/). Why apps, not a shared PAT:
 
 - **Distinct identity** — the audit log shows *which agent* did what (vs. one
@@ -118,32 +119,70 @@ Each agent authenticates as its **own GitHub App** (`tc-agent-builder`,
   PAT to leak or rotate by hand. Replaces the `*-openclaw-pat` secrets in KV.
 - **Per-agent least-privilege** — tiers (full / orchestration / contributor)
   scope each agent to its role; Growth can't edit workflows, only Builder can.
-- **Commit authorship unchanged** — the App is the *pusher* (clean audit); commit
-  *author* stays per the no-LLM-attribution rule (GitHub separates the two). The
-  mint helpers set `git config user.name/email` to the selected App's `[bot]`
-  identity so the pusher and the recorded author both resolve to the App.
+- **Commit metadata is separate** — the App is the authenticated remote actor;
+  every agent-authored commit records the canonical `three-cubes-agent[bot]`
+  author and committer. GitHub records the pusher separately.
 
-### Runtime: minting a token
+### Local commit boundary: no credential required
 
-Per GitHub operation the agent runtime:
-1. Reads `App ID` + private key from Key Vault (`github-app-<agent>-id`,
-   `github-app-<agent>-key`).
-2. Signs a short-lived **App JWT** (RS256, ≤10 min).
-3. Discovers the **installation** on the target repo and exchanges the JWT for an
-   **installation token** scoped to it.
-4. Uses that token for `git` / `gh` / the API; lets it expire.
+Creating a local branch, commit, or test result needs no GitHub credential. Set
+the repository-local identity once:
 
-Two canonical mint surfaces, both parametrised by agent, live in **this repo**:
+```bash
+git config --local user.name 'three-cubes-agent[bot]'
+git config --local user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com'
+```
 
-| Surface | Where | Selector |
+This metadata neither authenticates nor authorises a remote write. It stays the
+same whichever agent App later pushes the commit, so repository history has one
+canonical automation identity while GitHub's audit log retains the distinct
+remote actor.
+
+### Off-CI remote-write boundary: trusted host broker
+
+An agent harness does not mint, receive, export, or persist an App token. For
+each `git`, `gh`, or API write, it asks a trusted host broker to perform the
+operation with the target repository and agent selector. The broker:
+
+1. holds the Azure/Key Vault access needed to read the selected App ID and
+   private key;
+2. signs a short-lived App JWT and exchanges it for a repository-scoped
+   installation token;
+3. binds that token to one subprocess (or performs the operation itself); and
+4. discards the token when the subprocess exits.
+
+The broker must not return the token to the harness, place it in a remote URL or
+Git configuration, write it to a file, profile, shell history, or log, or expose
+its Azure session to the harness. There is no fallback to a human PAT. If the
+broker is unavailable, local commits and checks continue; the remote write
+stops until broker service is restored.
+
+The `agent-token` CLI in [`tools/`](../tools/README.md) is the lower-level mint
+implementation for that trusted broker and for restricted platform-operator
+diagnosis. Because it prints a token, it is not the agent-harness interface.
+It requires exactly one `three-cubes/REPO` scope and includes that repository in
+the installation-token exchange, including when the canonical App uses its
+fixed installation ID. Its optional `--git-config` helper always sets the same
+canonical local commit identity shown above, never the selected remote actor.
+
+### GitHub Actions boundary
+
+In Actions, the
+[`.github/actions/github-app-token`](../.github/actions/github-app-token/action.yml)
+composite uses the job's WIF identity to mint the same short-lived App token and
+passes it only to the authorised workflow steps. An Actions repository secret
+is available only inside an explicitly authorised workflow job; GitHub's API
+and `gh secret` commands expose names and metadata, not the stored plaintext.
+Actions secrets are therefore not a local credential store or retrieval path.
+
+| Context | Credential path | Commit metadata |
 |---|---|---|
-| **CI** composite action | [`.github/actions/github-app-token`](../.github/actions/github-app-token/action.yml) | `agent: builder\|shape\|consultant\|growth` (empty = canonical `three-cubes-agent`) |
-| **Off-CI / local / MCP** CLI | [`tools/`](../tools/README.md) (`agent-token`) | `--agent builder\|shape\|consultant\|growth` (default = canonical); `--git-config` sets the `[bot]` author on mint |
+| Local agent harness | trusted host broker; token remains outside the harness | canonical `three-cubes-agent[bot]` set with repository-local Git config |
+| GitHub Actions | WIF-backed `github-app-token` composite; token scoped to authorised steps | canonical `three-cubes-agent[bot]` |
+| Platform operator diagnosis | restricted direct use of `agent-token`; one `three-cubes/REPO` is mandatory | canonical metadata remains separate; `--git-config` always writes `three-cubes-agent[bot]` |
 
-The runtime consumer in `tc-agent-zone`
-(`agentic/skills/technology-management/github-ops/`) sources App creds from KV via
-these surfaces instead of the retired `*-openclaw-pat` PAT — tracked as the
-runtime follow-up below.
+The boundary is harness-neutral: terminal agents, MCP-hosted agents, service
+agents, and future harnesses all use the same local-metadata and broker contract.
 
 ## Setup checklist
 
@@ -158,9 +197,9 @@ agent cannot self-provision these:**
 5. Put vm-openclaw / hermes deploys behind a GitHub Environment with required
    reviewers.
 
-**Platform (follow-up PRs):**
-6. Point `tc-agent-zone`'s `github-ops` runtime at the parametrised
-   `agent-token` / `github-app-token` mint surfaces (replace `*-openclaw-pat`).
+**Platform:**
+6. Provide the trusted host broker and expose only its operation interface to
+   local agent harnesses; keep Key Vault and token material behind that boundary.
 7. Retire the `*-openclaw-pat` KV secrets once apps are live.
 
 ## Scope of this standard

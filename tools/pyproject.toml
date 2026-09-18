@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "tc-agent-tools"
 version = "0.2.0"
-description = "Off-CI local agent tooling for Three Cubes repos — mint a per-agent GitHub App token so a local/MCP agent acts as the App, not a human."
+description = "Trusted host-broker tooling for repository-scoped, short-lived GitHub App authentication."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["pyjwt[crypto]>=2,<3"]  # [crypto] -> cryptography, required for RS256 App JWTs

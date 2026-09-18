@@ -8,6 +8,16 @@ for the consumer-facing `@vN` workflow/action references.
 
 ## [Unreleased]
 
+### Changed
+
+- **Local agent commits no longer imply local credential access.** Commits use
+  canonical `three-cubes-agent[bot]` metadata without a credential; off-CI
+  remote writes use a trusted host broker that confines a short-lived App token
+  to one operation and one required `three-cubes/REPO` scope. The token exchange
+  carries that repository scope even for the canonical App's fixed installation,
+  and every Git-metadata helper writes the canonical bot identity. Actions
+  repository secrets are explicitly not a local plaintext retrieval mechanism.
+
 ## [2.2.0] — 2026-09-18
 
 ### Added
