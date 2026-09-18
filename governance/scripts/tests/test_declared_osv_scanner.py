@@ -72,8 +72,8 @@ def test_composite_installs_and_verifies_only_when_contract_is_required() -> Non
     install = next(step for step in steps if step.get("name") == "Install declared OSV scanner")
 
     assert "declared_osv_contract.py" in detect["run"]
+    assert detect["if"] == "inputs.tier != 'smoke' && inputs.tier != 'matrix'"
     assert install["if"] == "steps.osv-contract.outputs.required == 'true'"
     assert "osv-scanner_SHA256SUMS" in install["run"]
     assert '"$install_dir/osv-scanner" --version' in install["run"]
     assert "steps.osv-contract.outputs.version" in install["env"]["OSV_SCANNER_VERSION"]
-
