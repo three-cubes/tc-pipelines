@@ -173,6 +173,10 @@ def _assert_target_graph_matches_current(
         f"{target} at {sha[:12]} differs from its reviewed current content"
     )
     for _, nested_path, nested_sha in _self_pin_nodes(pinned):
+        assert _is_ancestor(nested_sha, _rev("HEAD")), (
+            f"{target} at self-pin {sha[:12]} calls {nested_path} at "
+            f"{nested_sha[:12]}, which is not reviewed repository history"
+        )
         _assert_target_graph_matches_current(nested_path, nested_sha, seen=seen)
 
 

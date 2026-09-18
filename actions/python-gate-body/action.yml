@@ -82,6 +82,12 @@ inputs:
       runs the full gate. Needs three-cubes-fitness >= v0.10.0.
     required: false
     default: ""
+  provision-osv-scanner:
+    description: >-
+      Whether this lane owns provisioning the consumer-declared OSV scanner.
+      The reusable workflow assigns ownership to the single full/catalogue lane
+      so a sharded gate downloads and verifies the scanner exactly once.
+    required: true
   upload-coverage-artifact:
     required: true
   coverage-xml-path:
@@ -103,11 +109,52 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       # install` has run that includes every `node_modules` tree. Measured on
       # a consumer: 79s here, against 1.1s in a job that installs uv first.
     - name: Locked uv install
-      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@c985f7a72f3110f4a91fcc5e8a40c1246c4dea24 # v2.2.1 candidate
+      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@02bc49afcffb7e0d01fc8c2dadc0352791a46046 # v2.2.1 candidate
       with:
         uv-version: ${{ inputs.uv-version }}
         python-version: ${{ inputs.python-version }}
         sync-args: ${{ inputs.sync-args }}
+
+    # A consumer opts into SCA by declaring the shared core-check contract.
+    # Repositories with no contract do no OSV setup work at all. The reusable
+    # workflow assigns this step to one lane; the composite does not infer
+    # ownership from consumer-defined tier names.
+    - name: Read declared OSV scanner contract
+      id: osv-contract
+      if: inputs.provision-osv-scanner == 'true'
+      shell: bash
+      run: python "$GITHUB_ACTION_PATH/declared_osv_contract.py" >> "$GITHUB_OUTPUT"
+
+    - name: Install declared OSV scanner
+      if: steps.osv-contract.outputs.required == 'true'
+      shell: bash
+      env:
+        OSV_SCANNER_VERSION: ${{ steps.osv-contract.outputs.version }}
+      run: |
+        set -euo pipefail
+        case "$(uname -m)" in
+          x86_64) arch=amd64 ;;
+          arm64|aarch64) arch=arm64 ;;
+          *) echo "::error::unsupported OSV scanner architecture: $(uname -m)" >&2; exit 1 ;;
+        esac
+        os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        asset="osv-scanner_${os}_${arch}"
+        release="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}"
+        workdir="$(mktemp -d)"
+        trap 'rm -rf "$workdir"' EXIT
+        curl --fail --silent --show-error --location "$release/$asset" --output "$workdir/$asset"
+        curl --fail --silent --show-error --location "$release/osv-scanner_SHA256SUMS" --output "$workdir/osv-scanner_SHA256SUMS"
+        checksum_line="$(grep -E "[[:space:]]${asset}$" "$workdir/osv-scanner_SHA256SUMS")"
+        [[ -n "$checksum_line" ]] || { echo "::error::release checksum does not list $asset" >&2; exit 1; }
+        printf '%s\n' "$checksum_line" | (cd "$workdir" && shasum -a 256 --check -)
+        install_dir="$RUNNER_TEMP/osv-scanner-${OSV_SCANNER_VERSION}"
+        mkdir -p "$install_dir"
+        install -m 0755 "$workdir/$asset" "$install_dir/osv-scanner"
+        reported="$("$install_dir/osv-scanner" --version 2>&1)"
+        expected_regex="(^|[^0-9])${OSV_SCANNER_VERSION//./\\.}([^0-9]|$)"
+        [[ "$reported" =~ $expected_regex ]] || { echo "::error::expected osv-scanner $OSV_SCANNER_VERSION, got: $reported" >&2; exit 1; }
+        echo "$install_dir" >> "$GITHUB_PATH"
+        echo "Installed $reported from the verified v${OSV_SCANNER_VERSION} release asset."
 
     # ── Node / pnpm half (opt-in) ───────────────────────────────────────
     - name: Set up pnpm
