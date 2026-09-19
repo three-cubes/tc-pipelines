@@ -256,9 +256,10 @@ def test_release_wiring_prepares_and_releases_the_same_reviewed_pr(
     assert "github-app-token" in prepare
     assert "token: ${{ steps.app.outputs.token }}" in prepare
     assert "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b" in prepare
-    assert "version-file:" not in prepare.split("workflow_dispatch:", 1)[1].split(
-        "permissions:", 1
-    )[0]
+    assert (
+        "version-file:"
+        not in prepare.split("workflow_dispatch:", 1)[1].split("permissions:", 1)[0]
+    )
     assert "if: inputs.bump" not in prepare
     assert 'version-file: "VERSION"' in prepare
     assert 'git push origin "HEAD:$GITHUB_REF_NAME"' in prepare

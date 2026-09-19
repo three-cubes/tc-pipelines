@@ -53,7 +53,9 @@ def _bump_project_version(part: str, tag_prefix: str) -> str:
         check=False,
     )
     if resolved.returncode != 0:
-        detail = resolved.stderr.strip() or resolved.stdout.strip() or "uv version failed"
+        detail = (
+            resolved.stderr.strip() or resolved.stdout.strip() or "uv version failed"
+        )
         raise ValueError(detail)
     project_version = resolved.stdout.strip()
     if not project_version or "\n" in project_version or "\r" in project_version:

@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -75,5 +74,11 @@ def test_dispatch_invokes_non_executable_repin_helper_through_python() -> None:
 
     text = WORKFLOW.read_text(encoding="utf-8")
 
-    assert 'python3 governance/scripts/repin_self_references.py --sha "$SHA" --version "$VERSION"' in text
-    assert 'python3 governance/scripts/repin_self_references.py --check --sha "$SHA" --version "$VERSION"' in text
+    assert (
+        'python3 governance/scripts/repin_self_references.py --sha "$SHA" --version "$VERSION"'
+        in text
+    )
+    assert (
+        'python3 governance/scripts/repin_self_references.py --check --sha "$SHA" --version "$VERSION"'
+        in text
+    )

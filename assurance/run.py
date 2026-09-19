@@ -179,6 +179,18 @@ def render(root, destination):
     )
 
 
+def prepare_generated_fixture(root):
+    """Refresh the checked-in bootstrap fixture from the canonical renderer."""
+    destination = root / "assurance/fixtures/generated/rendered"
+    with tempfile.TemporaryDirectory(prefix="tc-render-prepare-") as scratch:
+        rendered = Path(scratch) / "rendered"
+        render(root, rendered)
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(rendered, destination)
+    return {"rendered_files": sum(path.is_file() for path in destination.rglob("*"))}
+
+
 def initialise(root):
     require_command(["git", "init", "-q", "-b", "main"], root)
     require_command(["git", "config", "user.name", "three-cubes-agent[bot]"], root)
@@ -496,7 +508,7 @@ def lab(root, output, wheel=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", choices=["discover", "inventory", "render", "lab", "all"]
+        "command", choices=["discover", "inventory", "prepare", "render", "lab", "all"]
     )
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--output", type=Path)
@@ -508,6 +520,8 @@ def main():
             result = discover(root)
         elif args.command == "inventory":
             result = inventory(root)
+        elif args.command == "prepare":
+            result = prepare_generated_fixture(root)
         elif args.command == "render":
             if args.output is None or args.output.exists():
                 raise AssuranceError("render requires a new --output directory")

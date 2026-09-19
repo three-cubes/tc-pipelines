@@ -96,9 +96,7 @@ def _outside_the_contract(document: dict) -> dict:
     secret's own declaration as a use of that secret.
     """
     return {
-        key: value
-        for key, value in document.items()
-        if key is not True and key != "on"
+        key: value for key, value in document.items() if key is not True and key != "on"
     }
 
 
@@ -181,7 +179,9 @@ def _repeated_targets(document: dict) -> dict[str, dict[str, set[str]]]:
             continue
         match = LOCAL_REUSABLE.match(str(job.get("uses", "")))
         if match and (WORKFLOW_DIR / match.group(1)).is_file():
-            record(match.group(1), lane, _forwarded(job.get("with"), job.get("secrets")))
+            record(
+                match.group(1), lane, _forwarded(job.get("with"), job.get("secrets"))
+            )
         for step in job.get("steps") or []:
             if not isinstance(step, dict):
                 continue
@@ -204,7 +204,9 @@ def _lane_cases() -> list[tuple[str, str, str, str, bool]]:
         if path.name.startswith(ILLUSTRATIVE_PREFIX):
             continue
         for target, lanes in sorted(_repeated_targets(_load(path)).items()):
-            carried = Counter(name for forwarded in lanes.values() for name in forwarded)
+            carried = Counter(
+                name for forwarded in lanes.values() for name in forwarded
+            )
             for secret in sorted(name for name, seen in carried.items() if seen > 1):
                 for lane in sorted(lanes):
                     cases.append(

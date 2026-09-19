@@ -22,7 +22,7 @@ jobs:
       repository-owner: three-cubes
       repository-name: example
       workflow-run-id: "1"
-      pipelines-sha: 0000000000000000000000000000000000000000
+      trusted-validator-ref: 01f4e875cdbfe3f1aff5ef4eaf406a51e6332aa0
       azure-client-id: 00000000-0000-0000-0000-000000000000
       azure-tenant-id: 00000000-0000-0000-0000-000000000000
       azure-subscription-id: 00000000-0000-0000-0000-000000000000

@@ -49,10 +49,11 @@ import json
 import os
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 # ``loop_state_machine`` is a sibling module (this dir is not a package — the tests
 # use the same path shim). Import it whether we run as a script from the repo root
@@ -147,7 +148,7 @@ class Escalation:
     """A hand-off to the human-accountable assignee. ``issue_id`` is ``None`` for a
     fleet-level escalation (a global budget / circuit-breaker halt)."""
 
-    issue_id: Optional[str]
+    issue_id: str | None
     reason: str
     scope: str
     assignee: str
@@ -166,7 +167,7 @@ class CycleResult:
     reason: str
     attempts: int
     cost_spent: float
-    escalation: Optional[Escalation] = None
+    escalation: Escalation | None = None
 
 
 @dataclass
@@ -183,7 +184,7 @@ class IssueLedger:
     tokens_spent: int = 0
     escalated: bool = False
     done: bool = False
-    escalation: Optional[Escalation] = None
+    escalation: Escalation | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -252,7 +253,7 @@ class GovernorState:
         }
 
     @classmethod
-    def from_dict(cls, doc: dict) -> "GovernorState":
+    def from_dict(cls, doc: dict) -> GovernorState:
         """Rehydrate from a persisted dict, fail-CLOSED on a version it does not
         understand (a schema bump must be a deliberate migration, never a silent
         ledger reset)."""
@@ -289,7 +290,7 @@ class StateStore(Protocol):
 
     durable: bool
 
-    def load(self) -> Optional[GovernorState]: ...
+    def load(self) -> GovernorState | None: ...
 
     def save(self, state: GovernorState) -> None: ...
 
@@ -302,7 +303,7 @@ class NullStateStore:
 
     durable = False
 
-    def load(self) -> Optional[GovernorState]:
+    def load(self) -> GovernorState | None:
         return None
 
     def save(self, state: GovernorState) -> None:
@@ -326,7 +327,7 @@ class JsonFileStateStore:
     def __init__(self, path) -> None:
         self.path = Path(path)
 
-    def load(self) -> Optional[GovernorState]:
+    def load(self) -> GovernorState | None:
         try:
             raw = self.path.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -406,17 +407,19 @@ class Governor:
 
     def __init__(
         self,
-        config: Optional[GuardrailConfig] = None,
+        config: GuardrailConfig | None = None,
         *,
-        engine: Optional[LoopEngine] = None,
-        sink: Optional[EscalationSink] = None,
+        engine: LoopEngine | None = None,
+        sink: EscalationSink | None = None,
         clock: Callable[[], float] = time.monotonic,
         circuit_breaker_threshold: int = DEFAULT_CIRCUIT_BREAKER_THRESHOLD,
         escalation_assignee: str = DEFAULT_ESCALATION_ASSIGNEE,
     ) -> None:
         self.config = config or GuardrailConfig()
         self.engine = engine or LoopEngine(self.config, clock=clock)
-        self.sink: EscalationSink = sink if sink is not None else RecordingEscalationSink()
+        self.sink: EscalationSink = (
+            sink if sink is not None else RecordingEscalationSink()
+        )
         self._clock = clock
         self.circuit_breaker_threshold = circuit_breaker_threshold
         self.escalation_assignee = escalation_assignee
@@ -595,7 +598,10 @@ class Governor:
             )
         if self._halted:
             return Continuation(
-                False, ContinueAction.HALT, self._halt_reason or "fleet halted", "global"
+                False,
+                ContinueAction.HALT,
+                self._halt_reason or "fleet halted",
+                "global",
             )
         led = self.ledger(issue_id)
         if led.escalated:
@@ -779,7 +785,7 @@ class Governor:
         terminal outcome (``done`` / ``escalated`` / ``halted`` / ``refused``).
         ``max_cycles`` is a belt-and-braces bound; the real bound is the retry
         ceiling, which must fire first."""
-        result: Optional[CycleResult] = None
+        result: CycleResult | None = None
         for _ in range(max_cycles):
             result = self.run_cycle(
                 issue_id, dispatch=dispatch, verify=verify, close=close, cost=cost
@@ -796,7 +802,7 @@ class Governor:
         issue_id: str,
         outcome: Outcome,
         reason: str,
-        escalation: Optional[Escalation],
+        escalation: Escalation | None,
     ) -> CycleResult:
         led = self.ledger(issue_id)
         return CycleResult(

@@ -1,16 +1,13 @@
-#!/usr/bin/env python3
 """Stream a bounded deployment request through Cloudflare Access SSH."""
 
 from __future__ import annotations
 
 import base64
 import binascii
-from dataclasses import dataclass
 import hashlib
 import hmac
 import json
 import os
-from pathlib import Path
 import re
 import secrets
 import selectors
@@ -21,6 +18,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
+from pathlib import Path
 
 SCHEMA = "tc.deploy.request.v1"
 REQUEST_FIELDS = {

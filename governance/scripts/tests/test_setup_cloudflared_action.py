@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 import yaml
@@ -28,7 +28,7 @@ class _AssetServer(ThreadingHTTPServer):
 
 
 class _AssetHandler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         server = self.server
         assert isinstance(server, _AssetServer)
         if self.path == "/cloudflared-linux-amd64":

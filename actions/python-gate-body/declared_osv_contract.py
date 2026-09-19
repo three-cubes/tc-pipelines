@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Emit the consumer-declared OSV install contract for the composite action."""
 
 from __future__ import annotations
@@ -6,6 +5,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+
 try:
     import tomllib
 except ModuleNotFoundError:  # Python 3.10; provisioned by the composite action.

@@ -153,6 +153,10 @@ jobs:
   check:
     name: Quality gate
     needs: [gate, postmerge-evidence]
+    # A skipped required check can satisfy branch protection, so this job always
+    # emits an explicit verdict. A dirty PR head is red while the existing
+    # post-CI workflow writes its exact preparation receipt; the new head then
+    # starts an ordinary clean run.
     if: always()
     runs-on: ubuntu-latest
     permissions:
@@ -163,6 +167,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           R_GATE: ${{ needs.gate.result }}
           R_POSTMERGE: ${{ needs.postmerge-evidence.result }}
+          EVALUATED: ${{ needs.gate.outputs.evaluated }}
         run: |
           set -euo pipefail
           echo "gate=$R_GATE postmerge=$R_POSTMERGE"
@@ -170,6 +175,7 @@ jobs:
             [[ "$R_POSTMERGE" == "success" ]] || { echo "::error::Quality gate failed — exact-tree PR evidence was not promoted ($R_POSTMERGE)."; exit 1; }
           else
             [[ "$R_GATE" == "success" ]] || { echo "::error::Quality gate failed — the reusable python-quality-gate did not pass ($R_GATE)."; exit 1; }
+            [[ "$EVALUATED" == "true" ]] || { echo "::error::Quality gate withheld — deterministic preparation produced an exact writeback receipt for this PR head."; exit 1; }
           fi
           echo "Quality gate: PASS."
       - name: Checkout tested PR merge

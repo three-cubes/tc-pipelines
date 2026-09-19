@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Advance every tc-pipelines self-pin to one immutable released commit."""
 
 from __future__ import annotations
@@ -7,7 +6,6 @@ import argparse
 import re
 import sys
 from pathlib import Path
-
 
 SHA = re.compile(r"[0-9a-f]{40}")
 VERSION = re.compile(r"v[0-9]+(?:\.[0-9]+){2}(?:[-.][0-9A-Za-z]+)*")

@@ -20,6 +20,7 @@ dev = [
     # tools/ is a separate package with its own pyproject; its tests import
     # tc_agent_tools.agent_token, which signs RS256 App JWTs.
     "pyjwt[crypto]>=2,<3",
+    "ruff==0.16.8",
     "yamllint==1.38.0",
 ]
 

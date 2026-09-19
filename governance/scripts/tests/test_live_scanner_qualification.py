@@ -7,7 +7,6 @@ qualification boundary.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 import subprocess
@@ -18,8 +17,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from assurance.live_scanners import WORKFLOW_PATH, ReceiptError, digest, validate_receipt
-
+from assurance.live_scanners import (
+    WORKFLOW_PATH,
+    ReceiptError,
+    digest,
+    validate_receipt,
+)
 
 pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[3]
@@ -49,9 +52,7 @@ def receipt(root: Path) -> dict[str, object]:
     rule_path, rule_digest = _write(
         root,
         "rule-db.json",
-        json.dumps(
-            {"policy": "CKV_AWS_20", "policy_tree_digest": rule_identity}
-        )
+        json.dumps({"policy": "CKV_AWS_20", "policy_tree_digest": rule_identity})
         + "\n",
     )
     log_path, log_digest = _write(root, "execution.log", "checkov completed\n")
@@ -97,7 +98,9 @@ def test_live_scanner_receipt_binds_native_fixture_tool_and_rule_database(tmp_pa
     validate_receipt(value, tmp_path, candidate="a" * 40)
 
 
-def test_live_scanner_receipt_binds_repo_fixture_and_separate_retained_outputs(tmp_path):
+def test_live_scanner_receipt_binds_repo_fixture_and_separate_retained_outputs(
+    tmp_path,
+):
     repository = tmp_path / "candidate"
     evidence = tmp_path / "retained"
     repository.mkdir()
@@ -119,7 +122,9 @@ def test_live_scanner_receipt_binds_repo_fixture_and_separate_retained_outputs(t
         "protocol-ledger",
     ],
 )
-def test_live_scanner_receipt_rejects_missing_stale_or_non_native_evidence(tmp_path, defect):
+def test_live_scanner_receipt_rejects_missing_stale_or_non_native_evidence(
+    tmp_path, defect
+):
     value = receipt(tmp_path)
     if defect == "missing":
         value["evidence"]["outputs"] = value["evidence"]["outputs"][:-1]
@@ -132,9 +137,9 @@ def test_live_scanner_receipt_rejects_missing_stale_or_non_native_evidence(tmp_p
     elif defect == "wrong-rule-db":
         value["rule_database"]["kind"] = "osv-scanner-remote-response"
     elif defect == "fixture-sabotage":
-        (tmp_path / "assurance/fixtures/live-scanners/checkov/compliant/main.tf").write_text(
-            'acl = "public-read"\n'
-        )
+        (
+            tmp_path / "assurance/fixtures/live-scanners/checkov/compliant/main.tf"
+        ).write_text('acl = "public-read"\n')
     elif defect == "protocol-ledger":
         value["evidence"] = {
             "kind": "tc-fitness-protocol-unit",
@@ -144,7 +149,9 @@ def test_live_scanner_receipt_rejects_missing_stale_or_non_native_evidence(tmp_p
         validate_receipt(value, tmp_path, candidate="a" * 40)
 
 
-def test_receipt_rejects_an_unlisted_tc_fitness_ledger_even_with_matching_hashes(tmp_path):
+def test_receipt_rejects_an_unlisted_tc_fitness_ledger_even_with_matching_hashes(
+    tmp_path,
+):
     value = receipt(tmp_path)
     ledger_path, ledger_digest = _write(
         tmp_path, "ledger.json", json.dumps({"evidence_class": "protocol-unit"})
@@ -176,7 +183,9 @@ def test_live_workflow_uses_the_one_pinned_scanner_provisioner_and_retains_recei
     )
     assert "live_scanners.py qualify" in execute["run"]
     retained = next(
-        step for step in steps if step.get("name") == "Retain native scanner qualification evidence"
+        step
+        for step in steps
+        if step.get("name") == "Retain native scanner qualification evidence"
     )
     assert retained["with"]["path"] == ".assurance-live-scanners/"
 

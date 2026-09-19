@@ -29,8 +29,8 @@ Stdlib only, no network — matching the determinism the loop harness enforces.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 # Terminal (closed) Linear state types an ADP issue can land in — the close
 # boundary this invariant guards. Mirrors ``loop_state_machine.TERMINAL``'s

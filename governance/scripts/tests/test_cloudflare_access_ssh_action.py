@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
 import importlib.util
+import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 import yaml
@@ -570,8 +570,7 @@ def test_rejects_cloudflared_digest_before_executing_the_binary(
     cloudflared = Path(env["CLOUDFLARED_PATH"])
     _write_executable(
         cloudflared,
-        f"touch {executed}\n"
-        'echo "cloudflared version 2026.8.3"\n',
+        f'touch {executed}\necho "cloudflared version 2026.8.3"\n',
     )
 
     result = subprocess.run(
@@ -708,10 +707,7 @@ def test_supervisor_enforces_deadline_after_output_pipes_close(
     helper = tmp_path / "closed-pipes.py"
     _write_python_executable(
         helper,
-        "import os, time\n"
-        "os.close(1)\n"
-        "os.close(2)\n"
-        "time.sleep(2)\n",
+        "import os, time\nos.close(1)\nos.close(2)\ntime.sleep(2)\n",
     )
     request = tmp_path / "request"
     request.write_bytes(b"{}")

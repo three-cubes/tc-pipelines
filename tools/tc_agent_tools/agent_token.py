@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Mint a short-lived per-agent GitHub App installation token.
 
 This lower-level command is for a trusted off-CI host broker and restricted
@@ -117,8 +116,18 @@ def kv(name: str) -> str:
     """Read a secret value from the agent Key Vault via the local `az` login."""
     return subprocess.check_output(
         [
-            "az", "keyvault", "secret", "show",
-            "--vault-name", VAULT, "--name", name, "--query", "value", "-o", "tsv",
+            "az",
+            "keyvault",
+            "secret",
+            "show",
+            "--vault-name",
+            VAULT,
+            "--name",
+            name,
+            "--query",
+            "value",
+            "-o",
+            "tsv",
         ],
         text=True,
     ).strip()
@@ -127,7 +136,7 @@ def kv(name: str) -> str:
 def _api(path: str, token: str, *, bearer: bool = False) -> dict | list:
     """GET a GitHub API resource with an App JWT (bearer) or installation token."""
     scheme = "Bearer" if bearer else "token"
-    req = urllib.request.Request(  # noqa: S310 — fixed api.github.com base, not user input
+    req = urllib.request.Request(
         f"{API}{path}",
         headers={
             "Authorization": f"{scheme} {token}",
@@ -135,13 +144,13 @@ def _api(path: str, token: str, *, bearer: bool = False) -> dict | list:
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    with urllib.request.urlopen(req) as r:  # noqa: S310 — fixed api.github.com base
+    with urllib.request.urlopen(req) as r:
         return json.load(r)
 
 
 def _post(path: str, assertion: str, payload: dict) -> dict:
     """POST to a GitHub API resource with an App JWT bearer assertion."""
-    req = urllib.request.Request(  # noqa: S310 — fixed api.github.com base, not user input
+    req = urllib.request.Request(
         f"{API}{path}",
         method="POST",
         data=json.dumps(payload).encode("utf-8"),
@@ -152,7 +161,7 @@ def _post(path: str, assertion: str, payload: dict) -> dict:
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    with urllib.request.urlopen(req) as r:  # noqa: S310 — fixed api.github.com base
+    with urllib.request.urlopen(req) as r:
         return json.load(r)
 
 

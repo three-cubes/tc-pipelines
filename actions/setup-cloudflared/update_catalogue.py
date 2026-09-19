@@ -1,13 +1,12 @@
-#!/usr/bin/env python3
 """Resolve the latest cloudflared release for a reviewed dependency PR."""
 
 from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 

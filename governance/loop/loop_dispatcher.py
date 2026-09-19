@@ -51,10 +51,11 @@ import sys
 import time
 import unittest
 import urllib.request
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Iterable, Optional, Protocol, Sequence
+from typing import Protocol
 
 # ``loop_state_machine`` is a sibling module (this dir is not a package — the
 # tests use the same path shim). Import it whether we are run as ``-m
@@ -136,15 +137,15 @@ class CandidateIssue:
     created_at: str = ""
     labels: tuple[str, ...] = ()
     team_key: str = ""
-    assignee: Optional[str] = None
-    git_branch_name: Optional[str] = None
+    assignee: str | None = None
+    git_branch_name: str | None = None
     description: str = ""
     url: str = ""
     blockers: tuple[Blocker, ...] = ()
 
     # -- derived views ----------------------------------------------------- #
     @property
-    def wave(self) -> Optional[int]:
+    def wave(self) -> int | None:
         """The lowest ``adp-wave-N`` label as an int, or ``None`` if unlabelled."""
         waves = [int(m.group(1)) for lbl in self.labels if (m := _WAVE_RE.match(lbl))]
         return min(waves) if waves else None
@@ -169,7 +170,7 @@ class CandidateIssue:
 
     # -- construction ------------------------------------------------------ #
     @classmethod
-    def from_linear(cls, raw: dict) -> "CandidateIssue":
+    def from_linear(cls, raw: dict) -> CandidateIssue:
         """Build from a Linear/MCP issue dict (or this module's export shape).
 
         Tolerant of the shape differences between Linear's GraphQL, the MCP
@@ -231,7 +232,7 @@ class DispatchContract:
     repo: str
     branch: str
     acceptance_criteria: str
-    wave: Optional[int]
+    wave: int | None
     priority: int
     url: str
 
@@ -258,7 +259,7 @@ class DispatchPlan:
     contracts: tuple[DispatchContract, ...]
     skipped: tuple[tuple[str, str], ...]  # (issue_id, reason)
     armed: bool
-    refusal: Optional[str]
+    refusal: str | None
     per_issue_budget: float
     global_budget: float
     global_spent: float
@@ -296,7 +297,7 @@ def _team_key_from_identifier(identifier: str) -> str:
     return identifier.split("-", 1)[0].upper() if "-" in identifier else ""
 
 
-def _assignee_name(value: object) -> Optional[str]:
+def _assignee_name(value: object) -> str | None:
     if value is None:
         return None
     if isinstance(value, dict):
@@ -347,7 +348,7 @@ def slugify(text: str, *, max_len: int = 48) -> str:
     return slug
 
 
-def _repo_from_repos_line(description: str) -> Optional[str]:
+def _repo_from_repos_line(description: str) -> str | None:
     """The repo named on the ``**Repos:** <name>`` line, or ``None`` if absent."""
     m = _REPOS_LINE_RE.search(description or "")
     return m.group(1) if m else None
@@ -356,8 +357,8 @@ def _repo_from_repos_line(description: str) -> Optional[str]:
 def infer_repo(
     issue: CandidateIssue,
     *,
-    team_repo_map: Optional[dict[str, str]] = None,
-    description_resolver: Optional[Callable[["CandidateIssue"], str]] = None,
+    team_repo_map: dict[str, str] | None = None,
+    description_resolver: Callable[[CandidateIssue], str] | None = None,
 ) -> str:
     """Infer the target repo for an issue (PLA-311: "infer from team/labels").
 
@@ -423,11 +424,11 @@ def branch_for(issue: CandidateIssue, *, default_user: str = "dan") -> str:
 def _parse_ts(value: str) -> datetime:
     """Parse a Linear ISO-8601 timestamp; missing/garbage sorts last (newest)."""
     if not value:
-        return datetime.max.replace(tzinfo=timezone.utc)
+        return datetime.max.replace(tzinfo=UTC)
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return datetime.fromisoformat(value)
     except ValueError:
-        return datetime.max.replace(tzinfo=timezone.utc)
+        return datetime.max.replace(tzinfo=UTC)
 
 
 def _ready_sort_key(issue: CandidateIssue) -> tuple[float, float, datetime]:
@@ -457,7 +458,7 @@ MIN_GUARDRAIL_TESTS = 20
 
 def guardrails_validated(
     *,
-    test_dir: Optional[Path] = None,
+    test_dir: Path | None = None,
     pattern: str = "test_loop_guardrails.py",
     verbosity: int = 0,
     min_tests: int = MIN_GUARDRAIL_TESTS,
@@ -483,8 +484,10 @@ def guardrails_validated(
 
     Any of those failing → ``False`` → the loop cannot arm.
     """
-    test_dir = Path(test_dir) if test_dir is not None else (
-        Path(__file__).resolve().parent / "tests"
+    test_dir = (
+        Path(test_dir)
+        if test_dir is not None
+        else (Path(__file__).resolve().parent / "tests")
     )
     # FAIL CLOSED (1): the harness FILE must exist. A missing/renamed harness must
     # never read as green — check before discovery even runs.
@@ -609,16 +612,16 @@ class HttpLinearSource:
         ``endCursor`` until exhausted. Returns the raw GraphQL nodes for
         assembly into the parser's payload shape."""
         nodes: list[dict] = []
-        after: Optional[str] = None
+        after: str | None = None
         while True:
             payload = self._post(
                 PROJECT_ISSUES_PAGE_QUERY,
                 {"pid": project_id, "first": ISSUE_PAGE_SIZE, "after": after},
             )
             _raise_on_graphql_errors(payload)
-            issues = (
-                ((payload.get("data") or {}).get("project") or {}).get("issues") or {}
-            )
+            issues = ((payload.get("data") or {}).get("project") or {}).get(
+                "issues"
+            ) or {}
             nodes.extend(issues.get("nodes") or [])
             page_info = issues.get("pageInfo") or {}
             after = page_info.get("endCursor")
@@ -750,7 +753,7 @@ def parse_initiative_issues(payload: dict) -> list[CandidateIssue]:
     *related* issue blocks THIS one, so it becomes a :class:`Blocker` whose
     ``active`` flag reflects the blocker's own state.
     """
-    if "errors" in payload and payload["errors"]:
+    if payload.get("errors"):
         raise ValueError(f"Linear GraphQL errors: {payload['errors']}")
 
     initiative = (payload.get("data") or {}).get("initiative") or {}
@@ -827,8 +830,8 @@ def parse_issue_description(payload: dict) -> str:
 # --------------------------------------------------------------------------- #
 def _resolve_description_resolver(
     source: object,
-    explicit: Optional[Callable[[CandidateIssue], str]],
-) -> Optional[Callable[[CandidateIssue], str]]:
+    explicit: Callable[[CandidateIssue], str] | None,
+) -> Callable[[CandidateIssue], str] | None:
     """Pick the full-description resolver: an explicit callback wins; otherwise
     adapt a source's :class:`DescriptionSource` ``fetch_description`` capability
     (keyed by the issue identifier). ``None`` if neither is available — resolution
@@ -854,12 +857,12 @@ class Dispatcher:
         self,
         source: IssueSource,
         *,
-        config: Optional[loop.GuardrailConfig] = None,
-        team_repo_map: Optional[dict[str, str]] = None,
+        config: loop.GuardrailConfig | None = None,
+        team_repo_map: dict[str, str] | None = None,
         default_user: str = "dan",
         guardrails_validator: Callable[[], bool] = guardrails_validated,
         clock: Callable[[], float] = time.monotonic,
-        description_resolver: Optional[Callable[[CandidateIssue], str]] = None,
+        description_resolver: Callable[[CandidateIssue], str] | None = None,
     ) -> None:
         self.source = source
         self.config = config or loop.GuardrailConfig()
@@ -1099,7 +1102,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     source = _source_from_args(args)
     config = loop.GuardrailConfig(

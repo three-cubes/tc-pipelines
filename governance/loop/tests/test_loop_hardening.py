@@ -30,13 +30,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from loop_dispatcher import (  # noqa: E402 — path shim above
+from loop_dispatcher import (
     CandidateIssue,
     Dispatcher,
     StaticIssueSource,
     guardrails_validated,
 )
-from loop_governor import (  # noqa: E402
+from loop_governor import (
     DEFAULT_CIRCUIT_BREAKER_THRESHOLD,
     ContinueAction,
     Governor,
@@ -45,12 +45,12 @@ from loop_governor import (  # noqa: E402
     NullStateStore,
     StateStoreError,
 )
-from loop_runner import (  # noqa: E402
+from loop_runner import (
     LoggingDispatchSink,
     RunDecision,
     Runner,
 )
-from loop_state_machine import GuardrailConfig, GuardrailTripped  # noqa: E402
+from loop_state_machine import GuardrailConfig, GuardrailTripped
 
 
 # --------------------------------------------------------------------------- #
@@ -70,8 +70,16 @@ def _issue(id="PLA-1"):
     )
 
 
-def _fresh_runner(issues, store, *, config=None, soak_ticks=0, armed=True,
-                  cost=1.0, validator=lambda: True):
+def _fresh_runner(
+    issues,
+    store,
+    *,
+    config=None,
+    soak_ticks=0,
+    armed=True,
+    cost=1.0,
+    validator=lambda: True,
+):
     """A BRAND-NEW Runner + Governor (as a fresh process would build) bound to the
     given (possibly shared, on-disk) state store. Arming is re-decided here every
     call — exactly as the workflow re-arms from LOOP_ARMED each tick — so nothing
@@ -154,7 +162,9 @@ class RetryCeilingCrossTickTest(_HardeningCase):
 # --------------------------------------------------------------------------- #
 class BudgetCrossTickTest(_HardeningCase):
     def test_per_issue_budget_accumulates_across_fresh_processes(self):
-        cfg = GuardrailConfig(per_issue_budget=2.5, retry_ceiling=100, global_budget=1e9)
+        cfg = GuardrailConfig(
+            per_issue_budget=2.5, retry_ceiling=100, global_budget=1e9
+        )
         store = JsonFileStateStore(self._state_file())
         issues = [_issue("PLA-1")]
 
@@ -175,7 +185,9 @@ class BudgetCrossTickTest(_HardeningCase):
     def test_global_budget_accumulates_across_fresh_processes(self):
         # DISTINCT issue each tick so ONLY the fleet-wide global counter accrues
         # (no per-issue / retry interference).
-        cfg = GuardrailConfig(global_budget=2.5, per_issue_budget=1e9, retry_ceiling=100)
+        cfg = GuardrailConfig(
+            global_budget=2.5, per_issue_budget=1e9, retry_ceiling=100
+        )
         store = JsonFileStateStore(self._state_file())
 
         for iid in ("PLA-A", "PLA-B"):
@@ -197,7 +209,9 @@ class BudgetCrossTickTest(_HardeningCase):
 # --------------------------------------------------------------------------- #
 class CircuitBreakerCrossTickTest(_HardeningCase):
     def test_circuit_breaker_opens_across_fresh_processes(self):
-        cfg = GuardrailConfig(per_issue_budget=1e9, global_budget=1e9, retry_ceiling=100)
+        cfg = GuardrailConfig(
+            per_issue_budget=1e9, global_budget=1e9, retry_ceiling=100
+        )
         store = JsonFileStateStore(self._state_file())
 
         # Simulate the verify/close side recording a verified-FAIL each tick, each
@@ -242,7 +256,9 @@ class JsonFileStateStoreTest(_HardeningCase):
         self.assertEqual(JsonFileStateStore(path).load().global_cost, 0.0)
 
     def test_round_trips_the_full_ledger(self):
-        cfg = GuardrailConfig(per_issue_budget=1e9, global_budget=1e9, retry_ceiling=100)
+        cfg = GuardrailConfig(
+            per_issue_budget=1e9, global_budget=1e9, retry_ceiling=100
+        )
         gov = Governor(cfg)
         gov.record_attempt("PLA-1")
         gov.record_attempt("PLA-1")
@@ -292,7 +308,9 @@ class JsonFileStateStoreTest(_HardeningCase):
         path = self._state_file()
         path.write_text("{ corrupt", encoding="utf-8")
         cfg = GuardrailConfig()
-        runner, _ = _fresh_runner([_issue("PLA-1")], JsonFileStateStore(path), config=cfg)
+        runner, _ = _fresh_runner(
+            [_issue("PLA-1")], JsonFileStateStore(path), config=cfg
+        )
         res = runner.run_once(LoggingDispatchSink(), dry_run=False)
         self.assertEqual(res.decision, RunDecision.REFUSED)
         self.assertFalse(res.dispatched)
@@ -303,7 +321,9 @@ class JsonFileStateStoreTest(_HardeningCase):
 # --------------------------------------------------------------------------- #
 class SoakBeforeLiveTest(_HardeningCase):
     def test_first_armed_ticks_record_only_then_go_live(self):
-        cfg = GuardrailConfig(retry_ceiling=100, per_issue_budget=1e9, global_budget=1e9)
+        cfg = GuardrailConfig(
+            retry_ceiling=100, per_issue_budget=1e9, global_budget=1e9
+        )
         store = JsonFileStateStore(self._state_file())
         issues = [_issue("PLA-1")]
 
@@ -330,7 +350,9 @@ class SoakBeforeLiveTest(_HardeningCase):
         self.assertTrue(res.dispatched)
 
     def test_zero_soak_dispatches_immediately(self):
-        cfg = GuardrailConfig(retry_ceiling=100, per_issue_budget=1e9, global_budget=1e9)
+        cfg = GuardrailConfig(
+            retry_ceiling=100, per_issue_budget=1e9, global_budget=1e9
+        )
         store = JsonFileStateStore(self._state_file())
         runner, _ = _fresh_runner([_issue("PLA-1")], store, config=cfg, soak_ticks=0)
         res = runner.run_once(LoggingDispatchSink(), dry_run=False)
@@ -375,7 +397,8 @@ class GuardrailsValidatedFailClosedTest(_HardeningCase):
         # -> empty discovery -> must fail closed (renaming defeats the gate).
         d = self._tmpdir()
         body = "import unittest\n\n\nclass Many(unittest.TestCase):\n" + "".join(
-            f"    def test_{i}(self):\n        self.assertTrue(True)\n" for i in range(30)
+            f"    def test_{i}(self):\n        self.assertTrue(True)\n"
+            for i in range(30)
         )
         (d / "test_renamed_guardrails.py").write_text(body, encoding="utf-8")
         self.assertFalse(guardrails_validated(test_dir=d))
@@ -408,7 +431,10 @@ class GuardrailsValidatedFailClosedTest(_HardeningCase):
             StaticIssueSource([_issue("PLA-1")]), guardrails_validator=validator
         )
         runner = Runner(
-            dispatcher, gov, guardrails_validator=validator, state_store=NullStateStore()
+            dispatcher,
+            gov,
+            guardrails_validator=validator,
+            state_store=NullStateStore(),
         )
         res = runner.run_once(LoggingDispatchSink(), dry_run=True)
         self.assertEqual(res.decision, RunDecision.REFUSED)

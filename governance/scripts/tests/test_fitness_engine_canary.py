@@ -72,7 +72,7 @@ def _stub_gate(dir_: Path, exit_code: int) -> str:
     stub = dir_ / f"stub-gate-{exit_code}.sh"
     stub.write_text(
         "#!/usr/bin/env bash\n"
-        '# Prove the gate ran in the consumer dir: drop a marker in $PWD.\n'
+        "# Prove the gate ran in the consumer dir: drop a marker in $PWD.\n"
         'echo "$PWD" > gate-ran.marker\n'
         f"exit {exit_code}\n",
         encoding="utf-8",
@@ -94,12 +94,17 @@ def _pin_ref_of(consumer: Path) -> str:
 
 
 @pytest.mark.parametrize("gate_exit", [0, 1, 2, 42])
-def test_canary_exit_code_equals_consumer_gate_exit_code(tmp_path: Path, gate_exit: int) -> None:
+def test_canary_exit_code_equals_consumer_gate_exit_code(
+    tmp_path: Path, gate_exit: int
+) -> None:
     consumer = _make_consumer(tmp_path / "consumer")
     result = _run(
-        "--consumer-dir", str(consumer),
-        "--candidate-ref", CANDIDATE_REF,
-        "--gate-cmd", _stub_gate(tmp_path, gate_exit),
+        "--consumer-dir",
+        str(consumer),
+        "--candidate-ref",
+        CANDIDATE_REF,
+        "--gate-cmd",
+        _stub_gate(tmp_path, gate_exit),
     )
     assert result.returncode == gate_exit, (
         f"canary must exit with the gate's code ({gate_exit}), got {result.returncode}\n"
@@ -111,9 +116,12 @@ def test_red_consumer_gate_blocks_the_release(tmp_path: Path) -> None:
     # A red (non-zero) consumer gate → the release is BLOCKED (canary non-zero).
     consumer = _make_consumer(tmp_path / "consumer")
     result = _run(
-        "--consumer-dir", str(consumer),
-        "--candidate-ref", CANDIDATE_REF,
-        "--gate-cmd", _stub_gate(tmp_path, 1),
+        "--consumer-dir",
+        str(consumer),
+        "--candidate-ref",
+        CANDIDATE_REF,
+        "--gate-cmd",
+        _stub_gate(tmp_path, 1),
     )
     assert result.returncode != 0, "a red consumer gate must block the release"
 
@@ -121,9 +129,12 @@ def test_red_consumer_gate_blocks_the_release(tmp_path: Path) -> None:
 def test_green_consumer_gate_lets_the_release_proceed(tmp_path: Path) -> None:
     consumer = _make_consumer(tmp_path / "consumer")
     result = _run(
-        "--consumer-dir", str(consumer),
-        "--candidate-ref", CANDIDATE_REF,
-        "--gate-cmd", _stub_gate(tmp_path, 0),
+        "--consumer-dir",
+        str(consumer),
+        "--candidate-ref",
+        CANDIDATE_REF,
+        "--gate-cmd",
+        _stub_gate(tmp_path, 0),
     )
     assert result.returncode == 0, result.stderr
 
@@ -135,9 +146,12 @@ def test_repin_rewrites_the_consumer_pin_to_the_candidate_ref(tmp_path: Path) ->
     consumer = _make_consumer(tmp_path / "consumer")
     assert _pin_ref_of(consumer) == BASELINE_PIN_REF  # precondition
     result = _run(
-        "--consumer-dir", str(consumer),
-        "--candidate-ref", CANDIDATE_REF,
-        "--gate-cmd", _stub_gate(tmp_path, 0),
+        "--consumer-dir",
+        str(consumer),
+        "--candidate-ref",
+        CANDIDATE_REF,
+        "--gate-cmd",
+        _stub_gate(tmp_path, 0),
     )
     assert result.returncode == 0, result.stderr
     assert _pin_ref_of(consumer) == CANDIDATE_REF, (
@@ -149,9 +163,12 @@ def test_repin_rewrites_the_consumer_pin_to_the_candidate_ref(tmp_path: Path) ->
 def test_gate_runs_inside_the_consumer_dir(tmp_path: Path) -> None:
     consumer = _make_consumer(tmp_path / "consumer")
     result = _run(
-        "--consumer-dir", str(consumer),
-        "--candidate-ref", CANDIDATE_REF,
-        "--gate-cmd", _stub_gate(tmp_path, 0),
+        "--consumer-dir",
+        str(consumer),
+        "--candidate-ref",
+        CANDIDATE_REF,
+        "--gate-cmd",
+        _stub_gate(tmp_path, 0),
     )
     assert result.returncode == 0, result.stderr
     marker = consumer / "gate-ran.marker"
@@ -193,9 +210,12 @@ def test_consumer_without_a_fitness_pin_is_an_actionable_error(tmp_path: Path) -
         encoding="utf-8",
     )
     result = _run(
-        "--consumer-dir", str(consumer),
-        "--candidate-ref", CANDIDATE_REF,
-        "--gate-cmd", _stub_gate(tmp_path, 0),
+        "--consumer-dir",
+        str(consumer),
+        "--candidate-ref",
+        CANDIDATE_REF,
+        "--gate-cmd",
+        _stub_gate(tmp_path, 0),
     )
     assert result.returncode == 2
     assert "three-cubes-fitness" in result.stderr

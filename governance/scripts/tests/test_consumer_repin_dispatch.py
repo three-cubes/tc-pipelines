@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -29,7 +28,7 @@ def test_published_release_dispatches_a_verified_sha_to_tc_agent_zone() -> None:
     assert '"version": $version' in text
     assert "repositories: tc-agent-zone" in text
     assert "environment: production" in text
-    assert 'repos/three-cubes/tc-pipelines/releases/tags/${version}' in text
+    assert "repos/three-cubes/tc-pipelines/releases/tags/${version}" in text
 
 
 def test_release_uses_the_agent_app_token_for_tags_releases_and_fan_out() -> None:

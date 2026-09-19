@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -13,7 +14,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 
 pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[3]
@@ -29,7 +29,10 @@ def git(root: Path, *args: str) -> str:
 
 def invoke(*args: object) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(CLI), *map(str, args)], text=True, capture_output=True
+        [sys.executable, str(CLI), *map(str, args)],
+        text=True,
+        capture_output=True,
+        check=False,
     )
 
 
@@ -40,7 +43,8 @@ def repository(tmp_path: Path) -> tuple[Path, str]:
     git(root, "config", "user.name", "contract")
     git(root, "config", "user.email", "contract@example.invalid")
     (root / "tracked.txt").write_text("before\n")
-    git(root, "add", "tracked.txt")
+    (root / "module.py").write_text("value = 1  \n")
+    git(root, "add", "tracked.txt", "module.py")
     git(root, "commit", "-qm", "initial")
     return root, git(root, "rev-parse", "HEAD")
 
@@ -92,8 +96,7 @@ def produce_after(root: Path, pre: Path, out: Path) -> tuple[Path, Path]:
 
 def produce(root: Path, head: str, out: Path) -> tuple[Path, Path]:
     pre = snapshot(root, head, out)
-    (root / "tracked.txt").write_text("after\n")
-    (root / "generated.txt").write_text("generated\n")
+    (root / "module.py").write_text("value = 1\n")
     return produce_after(root, pre, out)
 
 
@@ -102,7 +105,9 @@ def clone_at_head(source: Path, destination: Path) -> Path:
     return destination
 
 
-def apply(destination: Path, receipt: Path, patch: Path, head: str) -> subprocess.CompletedProcess[str]:
+def apply(
+    destination: Path, receipt: Path, patch: Path, head: str
+) -> subprocess.CompletedProcess[str]:
     return invoke(
         "apply",
         "--receipt",
@@ -115,6 +120,8 @@ def apply(destination: Path, receipt: Path, patch: Path, head: str) -> subproces
         "17",
         "--expected-head",
         head,
+        "--expected-policy",
+        "python-ruff-v1",
         "--expected-head-ref",
         "feature/prepare",
         "--workflow-run-id",
@@ -136,10 +143,13 @@ def replace_patch(receipt: Path, patch: Path, update) -> None:
     patch.write_text(json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n")
     document = json.loads(receipt.read_text())
     document["patch_digest"] = patch_digest(patch)
+    document["patch_bytes"] = patch.stat().st_size
     receipt.write_text(json.dumps(document, sort_keys=True) + "\n")
 
 
-def test_credential_free_producer_and_apply_round_trip_use_real_git(tmp_path: Path) -> None:
+def test_credential_free_producer_and_apply_round_trip_use_real_git(
+    tmp_path: Path,
+) -> None:
     source, head = repository(tmp_path)
     out = tmp_path / "evidence"
     out.mkdir()
@@ -150,15 +160,49 @@ def test_credential_free_producer_and_apply_round_trip_use_real_git(tmp_path: Pa
     assert document["head_tree"] == git(source, "rev-parse", f"{head}^{{tree}}")
     assert document["pre_tree"] != document["post_tree"]
     assert document["patch_digest"] == patch_digest(patch)
-    assert all("content_base64" not in entry for entry in json.loads((out / "pre.json").read_text())["entries"])
+    assert all(
+        "content_base64" not in entry
+        for entry in json.loads((out / "pre.json").read_text())["entries"]
+    )
     target = clone_at_head(source, tmp_path / "target")
     result = apply(target, receipt, patch, head)
     assert result.returncode == 0, result.stderr
-    assert (target / "tracked.txt").read_text() == "after\n"
-    assert (target / "generated.txt").read_text() == "generated\n"
+    assert (target / "module.py").read_text() == "value = 1\n"
+
+    replace_patch(
+        receipt,
+        patch,
+        lambda data: data["entries"][0].update(
+            content_base64=base64.b64encode(
+                b"import os\nos.system('not a formatter')\n"
+            ).decode("ascii")
+        ),
+    )
+    untrusted_target = clone_at_head(source, tmp_path / "untrusted-target")
+    result = apply(untrusted_target, receipt, patch, head)
+    assert result.returncode == 1
+    assert "trusted Ruff replay" in result.stderr
 
 
-def test_snapshot_scales_with_repository_identity_not_repository_content(tmp_path: Path) -> None:
+def test_writer_accepts_only_the_declared_trusted_transformation(
+    tmp_path: Path,
+) -> None:
+    source, head = repository(tmp_path)
+    out = tmp_path / "evidence"
+    out.mkdir()
+    pre = snapshot(source, head, out)
+    (source / "module.py").write_text("value = 1\n")
+    receipt, patch = produce_after(source, pre, out)
+
+    target = clone_at_head(source, tmp_path / "target")
+    result = apply(target, receipt, patch, head)
+    assert result.returncode == 0, result.stderr
+    assert (target / "module.py").read_text() == "value = 1\n"
+
+
+def test_snapshot_scales_with_repository_identity_not_repository_content(
+    tmp_path: Path,
+) -> None:
     source, head = repository(tmp_path)
     (source / "large.bin").write_bytes(b"x" * (17 * 1024 * 1024))
     git(source, "add", "large.bin")
@@ -168,7 +212,10 @@ def test_snapshot_scales_with_repository_identity_not_repository_content(tmp_pat
     out.mkdir()
     pre = snapshot(source, head, out)
     assert pre.stat().st_size < 4096
-    assert all("content_base64" not in entry for entry in json.loads(pre.read_text())["entries"])
+    assert all(
+        "content_base64" not in entry
+        for entry in json.loads(pre.read_text())["entries"]
+    )
     receipt, patch = produce_after(source, pre, out)
     assert receipt.exists()
     assert patch.stat().st_size < 4096
@@ -183,30 +230,41 @@ def test_snapshot_retains_git_valid_whitespace_filenames(tmp_path: Path) -> None
     out = tmp_path / "evidence"
     out.mkdir()
     pre = snapshot(source, head, out)
-    assert " leading-name.txt" in {entry["path"] for entry in json.loads(pre.read_text())["entries"]}
+    assert " leading-name.txt" in {
+        entry["path"] for entry in json.loads(pre.read_text())["entries"]
+    }
 
 
 @pytest.mark.parametrize("change", ["untracked", "delete"])
-def test_apply_round_trips_complete_git_visible_state(tmp_path: Path, change: str) -> None:
+def test_producer_rejects_changes_outside_the_declared_transformation(
+    tmp_path: Path, change: str
+) -> None:
     source, head = repository(tmp_path)
     out = tmp_path / "evidence"
     out.mkdir()
     pre = snapshot(source, head, out)
     if change == "untracked":
-        (source / "only-generated.txt").write_text("generated\n")
+        (source / "only-generated.py").write_text("generated\n")
     else:
         (source / "tracked.txt").unlink()
-    receipt, patch = produce_after(source, pre, out)
-    target = clone_at_head(source, tmp_path / "target")
-    result = apply(target, receipt, patch, head)
-    assert result.returncode == 0, result.stderr
-    if change == "untracked":
-        assert (target / "only-generated.txt").read_text() == "generated\n"
-    else:
-        assert not (target / "tracked.txt").exists()
+    result = invoke(
+        "produce",
+        "--snapshot",
+        pre,
+        "--receipt",
+        out / "receipt.json",
+        "--patch",
+        out / "patch.json",
+        "--root",
+        source,
+    )
+    assert result.returncode == 1
+    assert "trusted policy" in result.stderr
 
 
-def test_changed_and_push_use_real_git_without_persistent_credentials(tmp_path: Path) -> None:
+def test_changed_and_push_use_real_git_without_persistent_credentials(
+    tmp_path: Path,
+) -> None:
     source, head = repository(tmp_path)
     clean = invoke("changed", "--root", source)
     assert clean.returncode == 0
@@ -239,19 +297,28 @@ def test_changed_and_push_use_real_git_without_persistent_credentials(tmp_path: 
         text=True,
         capture_output=True,
         env=environment,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert "opaque-test-token" not in result.stdout + result.stderr
-    assert git(bare, "rev-parse", "refs/heads/feature/prepare") == git(source, "rev-parse", "HEAD")
-    assert subprocess.run(
-        ["git", "config", "--local", "--get-regexp", r"^http\\..*extraheader$"],
-        cwd=source,
-        text=True,
-        capture_output=True,
-    ).returncode == 1
+    assert git(bare, "rev-parse", "refs/heads/feature/prepare") == git(
+        source, "rev-parse", "HEAD"
+    )
+    assert (
+        subprocess.run(
+            ["git", "config", "--local", "--get-regexp", r"^http\\..*extraheader$"],
+            cwd=source,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).returncode
+        == 1
+    )
 
 
-def test_authenticated_fetch_uses_real_git_without_persistent_credentials(tmp_path: Path) -> None:
+def test_authenticated_fetch_uses_real_git_without_persistent_credentials(
+    tmp_path: Path,
+) -> None:
     source, head = repository(tmp_path)
     bare = tmp_path / "remote.git"
     git(tmp_path, "init", "-q", "--bare", bare)
@@ -275,16 +342,21 @@ def test_authenticated_fetch_uses_real_git_without_persistent_credentials(tmp_pa
         text=True,
         capture_output=True,
         env=environment,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert "opaque-read-token" not in result.stdout + result.stderr
     assert git(target, "rev-parse", f"{head}^{{commit}}") == head
-    assert subprocess.run(
-        ["git", "config", "--local", "--get-regexp", r"^http\\..*extraheader$"],
-        cwd=target,
-        text=True,
-        capture_output=True,
-    ).returncode == 1
+    assert (
+        subprocess.run(
+            ["git", "config", "--local", "--get-regexp", r"^http\\..*extraheader$"],
+            cwd=target,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).returncode
+        == 1
+    )
 
 
 def test_private_consumer_fetch_receives_the_read_token_in_the_fetch_step() -> None:
@@ -299,8 +371,16 @@ def test_private_consumer_fetch_receives_the_read_token_in_the_fetch_step() -> N
     assert fetch["env"]["GITHUB_READ_TOKEN"] == "${{ github.token }}"
 
 
-@pytest.mark.parametrize("entries", [("preparation-patch.json", "preparation-receipt.json"), ("preparation-receipt.json", "preparation-patch.json")])
-def test_receipt_artifact_accepts_exact_names_in_any_zip_order(tmp_path: Path, entries: tuple[str, str]) -> None:
+@pytest.mark.parametrize(
+    "entries",
+    [
+        ("preparation-patch.json", "preparation-receipt.json"),
+        ("preparation-receipt.json", "preparation-patch.json"),
+    ],
+)
+def test_receipt_artifact_accepts_exact_names_in_any_zip_order(
+    tmp_path: Path, entries: tuple[str, str]
+) -> None:
     archive = tmp_path / "receipt.zip"
     with zipfile.ZipFile(archive, "w") as output:
         for name in entries:
@@ -320,7 +400,9 @@ def test_receipt_artifact_accepts_exact_names_in_any_zip_order(tmp_path: Path, e
         ("preparation-receipt.json", "unexpected.json"),
     ],
 )
-def test_receipt_artifact_rejects_ambiguous_or_nested_entries(tmp_path: Path, entries: tuple[str, str]) -> None:
+def test_receipt_artifact_rejects_ambiguous_or_nested_entries(
+    tmp_path: Path, entries: tuple[str, str]
+) -> None:
     archive = tmp_path / "receipt.zip"
     with zipfile.ZipFile(archive, "w") as output:
         for position, name in enumerate(entries):
@@ -364,6 +446,7 @@ def test_receipt_artifact_rejects_oversized_extracted_stream(tmp_path: Path) -> 
         "future",
         "altered-pre-tree",
         "altered-post-tree",
+        "untrusted-policy",
         "unexpected-receipt-field",
         "unexpected-patch-field",
     ],
@@ -393,32 +476,54 @@ def test_apply_rejects_untrusted_or_nonidentical_preparation_evidence(
     elif defect == "oversize":
         document["patch_bytes"] = 1
     elif defect == "path-traversal":
-        replace_patch(receipt, patch, lambda data: data["entries"][0].update(path="../escape"))
+        replace_patch(
+            receipt, patch, lambda data: data["entries"][0].update(path="../escape")
+        )
     elif defect == "symlink":
-        replace_patch(receipt, patch, lambda data: data["entries"][0].update(kind="symlink"))
+        replace_patch(
+            receipt, patch, lambda data: data["entries"][0].update(kind="symlink")
+        )
     elif defect == "mode":
-        replace_patch(receipt, patch, lambda data: data["entries"][0].update(mode=0o777))
+        replace_patch(
+            receipt, patch, lambda data: data["entries"][0].update(mode=0o777)
+        )
     elif defect == "moved-head":
         (source / "other.txt").write_text("new head\n")
         git(source, "add", "other.txt")
         git(source, "commit", "-qm", "move head")
     elif defect == "duplicate-path":
-        replace_patch(receipt, patch, lambda data: data["entries"].append(data["entries"][0]))
+        replace_patch(
+            receipt, patch, lambda data: data["entries"].append(data["entries"][0])
+        )
     elif defect == "invalid-base64":
-        replace_patch(receipt, patch, lambda data: data["entries"][0].update(content_base64="%%%"))
+        replace_patch(
+            receipt, patch, lambda data: data["entries"][0].update(content_base64="%%%")
+        )
     elif defect == "future":
         document["issued_at"] = (datetime.now(UTC) + timedelta(days=2)).isoformat()
     elif defect == "altered-pre-tree":
         document["pre_tree"] = "sha256:" + "0" * 64
     elif defect == "altered-post-tree":
         document["post_tree"] = "sha256:" + "0" * 64
+    elif defect == "untrusted-policy":
+        document["policy"] = "candidate-arbitrary-rewrite-v1"
     elif defect == "unexpected-receipt-field":
         document["surplus"] = True
     elif defect == "unexpected-patch-field":
         replace_patch(receipt, patch, lambda data: data.update(surplus=True))
     if defect in {
-        "wrong-head", "wrong-pr", "wrong-run", "wrong-head-ref", "stale", "fork", "oversize",
-        "future", "altered-pre-tree", "altered-post-tree", "unexpected-receipt-field",
+        "wrong-head",
+        "wrong-pr",
+        "wrong-run",
+        "wrong-head-ref",
+        "stale",
+        "fork",
+        "oversize",
+        "future",
+        "altered-pre-tree",
+        "altered-post-tree",
+        "untrusted-policy",
+        "unexpected-receipt-field",
     }:
         receipt.write_text(json.dumps(document, sort_keys=True) + "\n")
     target = clone_at_head(source, tmp_path / "target")

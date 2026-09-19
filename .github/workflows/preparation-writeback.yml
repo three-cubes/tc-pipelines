@@ -11,7 +11,11 @@ on:
       workflow-run-id:
         required: true
         type: string
-      pipelines-sha:
+      trusted-validator-ref:
+        description: >-
+          Immutable tc-pipelines commit containing the validator. Consumer
+          callers pass their pinned revision; tc-pipelines passes the trusted
+          default-branch workflow_run SHA for its local reusable call.
         required: true
         type: string
       repository-owner:
@@ -47,14 +51,37 @@ jobs:
       id-token: write
       pull-requests: read
     steps:
+      # github.token is scoped to the consumer and cannot read a private
+      # tc-pipelines repository.  Mint a separately scoped token only for this
+      # immutable validator checkout; it has no consumer write authority.
+      - id: bootstrap
+        name: Mint scoped token for private tc-pipelines tools
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@c10c77b30ad489390ed71714db3a032f68d6c812 # v2.2.1
+        with:
+          client-id: ${{ inputs.azure-client-id }}
+          tenant-id: ${{ inputs.azure-tenant-id }}
+          subscription-id: ${{ inputs.azure-subscription-id }}
+          owner: three-cubes
+          repositories: tc-pipelines
+      - name: Require an immutable trusted-validator revision
+        shell: bash
+        env:
+          REF: ${{ inputs.trusted-validator-ref }}
+        run: |
+          set -euo pipefail
+          [[ "$REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::trusted-validator-ref must be a full immutable SHA."
+            exit 1
+          }
       # The validator comes from the immutable tc-pipelines revision, never the
       # PR checkout.  This checkout is the only source code this job executes.
       - name: Checkout trusted receipt validator
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: three-cubes/tc-pipelines
-          ref: ${{ inputs.pipelines-sha }}
+          ref: ${{ inputs.trusted-validator-ref }}
           path: .tc-pipelines-tools
+          token: ${{ steps.bootstrap.outputs.token }}
           persist-credentials: false
 
       - id: source
@@ -168,6 +195,7 @@ jobs:
             --repository "$REPOSITORY" \
             --pull-request "$PULL_REQUEST" \
             --expected-head "$HEAD_SHA" \
+            --expected-policy "python-ruff-v1" \
             --expected-head-ref "$HEAD_REF" \
             --workflow-run-id "$WORKFLOW_RUN_ID" \
             --workflow-run-attempt "$WORKFLOW_RUN_ATTEMPT" \

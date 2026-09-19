@@ -54,7 +54,6 @@ jobs:
           write-changed-files: 'false'
           changed-files-path: .tc-fitness-changed-files
           run-no-attribution: 'false'
-          pre-evaluation-normalize: ''
           pre-steps: cp assurance/fixtures/hosted/gate.toml .tc-fitness.toml
           post-steps: ''
           run-node: 'false'

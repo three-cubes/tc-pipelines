@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping, Sequence
 import json
-from pathlib import Path
 import re
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
-
 
 SCHEMA = "postmerge-pr-quality-evidence/v1"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -131,7 +130,7 @@ def verify_document(
     if parents != (before, head):
         raise ValueError("merge parents do not match the associated PR")
     if not isinstance(document, Mapping):
-        raise ValueError("PR evidence must be an object")
+        raise TypeError("PR evidence must be an object")
     expected = {
         "schema": SCHEMA,
         "repository": expected_repository,

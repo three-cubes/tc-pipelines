@@ -156,9 +156,7 @@ def _closure(jobs: dict[str, dict], root: str) -> set[str]:
 
 FAN_INS = _fan_ins()
 LANES = [
-    (workflow, name, lane)
-    for workflow, name, job in FAN_INS
-    for lane in _needs(job)
+    (workflow, name, lane) for workflow, name, job in FAN_INS for lane in _needs(job)
 ]
 
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Install the reviewed cloudflared release and verify the executable identity."""
 
 from __future__ import annotations
@@ -8,7 +7,6 @@ import hashlib
 import io
 import json
 import os
-from pathlib import Path
 import platform
 import re
 import stat
@@ -16,6 +14,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen

@@ -37,7 +37,9 @@ def _extract_run_block(text: str, name_substr: str) -> str:
             start = idx
             break
     if start is None:
-        raise AssertionError(f"step containing {name_substr!r} not found in {_WORKFLOW}")
+        raise AssertionError(
+            f"step containing {name_substr!r} not found in {_WORKFLOW}"
+        )
 
     run_idx = None
     for idx in range(start + 1, len(lines)):
@@ -72,8 +74,15 @@ class ValidateStepAllowlistTest(unittest.TestCase):
             _WORKFLOW.read_text(encoding="utf-8"), "Validate inputs"
         )
 
-    def _run(self, repo_in, *, issue="SGO-76", branch="dan/sgo-76-x",
-             owner="three-cubes", allowed=_DEFAULT_ALLOWED):
+    def _run(
+        self,
+        repo_in,
+        *,
+        issue="SGO-76",
+        branch="dan/sgo-76-x",
+        owner="three-cubes",
+        allowed=_DEFAULT_ALLOWED,
+    ):
         env = dict(os.environ)
         with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as fh:
             github_env = fh.name
@@ -88,7 +97,10 @@ class ValidateStepAllowlistTest(unittest.TestCase):
         try:
             return subprocess.run(
                 ["bash", "-c", self.script],
-                env=env, capture_output=True, text=True,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
             )
         finally:
             os.unlink(github_env)

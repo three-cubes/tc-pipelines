@@ -179,6 +179,35 @@ def test_fresh_render_rejects_stale_checked_in_consumer(tmp_path):
     assert "generated-render-drift" in result.stderr
 
 
+def test_prepare_refreshes_generated_consumer_and_reaches_a_fixed_point(tmp_path):
+    import shutil
+
+    root = tmp_path / "pipeline"
+    for name in ("governance", "assurance"):
+        shutil.copytree(
+            ROOT / name, root / name, ignore=shutil.ignore_patterns("__pycache__")
+        )
+    generated = root / "assurance/fixtures/generated/rendered"
+    (generated / "Makefile").write_text("stale\n")
+
+    first = invoke("prepare", "--root", root)
+    assert first.returncode == 0, first.stderr
+    assert (generated / "Makefile").read_text() != "stale\n"
+    first_tree = {
+        path.relative_to(generated): (path.read_bytes(), path.stat().st_mode & 0o777)
+        for path in generated.rglob("*")
+        if path.is_file()
+    }
+
+    second = invoke("prepare", "--root", root)
+    assert second.returncode == 0, second.stderr
+    assert {
+        path.relative_to(generated): (path.read_bytes(), path.stat().st_mode & 0o777)
+        for path in generated.rglob("*")
+        if path.is_file()
+    } == first_tree
+
+
 @pytest.mark.parametrize(
     "defect, diagnostic",
     [

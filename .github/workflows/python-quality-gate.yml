@@ -99,18 +99,6 @@ on:
           title/body are scanned.
         type: boolean
         default: true
-      pre-evaluation-normalize:
-        description: >-
-          Optional repo-owned deterministic source-normalisation command run
-          after the requested Python and Node toolchains are installed, before
-          changed-file capture or any evaluator. Use only safe mechanical
-          repairs (for example `ruff check --fix` and `ruff format`), never a
-          deploy, remote write, credential action, or network fetch. Evaluation
-          proceeds only when the prepared tree equals the committed candidate.
-          The same command runs in the consumer's local `make check` before
-          `tc-fitness run`. Empty string preserves the prior behaviour.
-        type: string
-        default: ""
       pre-steps:
         description: >-
           Optional bash run before `tc-fitness run`, for repo-specific
@@ -252,6 +240,12 @@ on:
           repo's `[tool.tc_fitness.core_checks.new_code_coverage].base_ref`.
         type: string
         default: "origin/main"
+    outputs:
+      evaluated:
+        description: >-
+          true only when every evaluator ran against a candidate whose
+          deterministic preparation was already a fixed point.
+        value: ${{ jobs.gate.outputs.evaluated }}
     secrets:
       gh-token:
         description: "GITHUB_TOKEN override for steps that need authenticated git/gh (engine secret-scan changed-file diff). Falls back to github.token."
@@ -264,6 +258,189 @@ permissions:
   contents: read
 
 jobs:
+  # Run deterministic mechanical preparation once, before any evaluator.  A
+  # changed PR head produces a bounded identity-bound writeback artifact and
+  # withholds evaluation; the caller emits an explicit red required context,
+  # then the existing post-CI workflow writes the exact patch
+  # and the new head starts an ordinary clean run.  Non-PR events cannot be
+  # written back and therefore reject a non-fixed-point candidate here.
+  preparation:
+    name: Prepare exact candidate once
+    runs-on: ubuntu-latest
+    outputs:
+      evaluated: ${{ steps.result.outputs.evaluated || steps.classify.outputs.evaluated }}
+      receipt-created: ${{ steps.result.outputs.receipt-created || steps.classify.outputs.receipt-created }}
+      candidate-head-sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - id: candidate
+        name: Bind preparation and evaluators to one immutable candidate
+        shell: bash
+        env:
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+          MERGE_GROUP_HEAD: ${{ github.event.merge_group.head_sha }}
+          FALLBACK_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          head="${EVENT_HEAD:-${MERGE_GROUP_HEAD:-$FALLBACK_HEAD}}"
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::candidate head must be an immutable full SHA."
+            exit 1
+          }
+          echo "sha=$head" >> "$GITHUB_OUTPUT"
+      - id: classify
+        name: Classify preparation request
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The closed trusted Ruff policy is a harmless no-op when this
+          # candidate has no tracked Python source.
+          echo "active=true" >> "$GITHUB_OUTPUT"
+      - name: Checkout the exact candidate head
+        if: steps.classify.outputs.active == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.candidate.outputs.sha }}
+          fetch-depth: ${{ inputs.fetch-depth }}
+          persist-credentials: false
+      - name: Locked uv install
+        if: steps.classify.outputs.active == 'true'
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@02bc49afcffb7e0d01fc8c2dadc0352791a46046 # v2.2.1 candidate
+        with:
+          uv-version: ${{ inputs.uv-version }}
+          python-version: ${{ inputs.python-version }}
+          sync-args: ${{ inputs.sync-args }}
+      - name: Set up pnpm
+        if: steps.classify.outputs.active == 'true' && inputs.run-node
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: ${{ inputs.pnpm-version }}
+      - name: Set up Node
+        if: steps.classify.outputs.active == 'true' && inputs.run-node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: ${{ inputs.node-version-file }}
+          cache: pnpm
+      - name: pnpm install
+        if: steps.classify.outputs.active == 'true' && inputs.run-node
+        shell: bash
+        run: pnpm install ${{ inputs.pnpm-install-args }}
+      - name: Capture committed candidate state
+        if: steps.classify.outputs.active == 'true'
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@319732202906c853c78c346faea8c41136c34d5f # v2.2.1 candidate
+        with:
+          mode: snapshot
+          repository: ${{ github.repository }}
+          pull-request: ${{ github.event.pull_request.number || 1 }}
+          head-sha: ${{ steps.candidate.outputs.sha }}
+          head-repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          head-ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          workflow-run-id: ${{ github.run_id }}
+          workflow-run-attempt: ${{ github.run_attempt }}
+          output: ${{ runner.temp }}/preparation-before.json
+          root: ${{ github.workspace }}
+      - name: Prepare candidate
+        if: steps.classify.outputs.active == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t paths < <(git ls-files -z -- '*.py' '*.pyi')
+          (( ${#paths[@]} == 0 )) && exit 0
+          uvx --from ruff==0.16.8 ruff check --force-exclude --select E,F,I,UP,B,S,RUF --target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero -- "${paths[@]}"
+          uvx --from ruff==0.16.8 ruff format --force-exclude --line-length 110 --target-version py312 -- "${paths[@]}"
+      - name: Capture first prepared state
+        if: steps.classify.outputs.active == 'true'
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@319732202906c853c78c346faea8c41136c34d5f # v2.2.1 candidate
+        with:
+          mode: snapshot
+          repository: ${{ github.repository }}
+          pull-request: ${{ github.event.pull_request.number || 1 }}
+          head-sha: ${{ steps.candidate.outputs.sha }}
+          head-repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          head-ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          workflow-run-id: ${{ github.run_id }}
+          workflow-run-attempt: ${{ github.run_attempt }}
+          output: ${{ runner.temp }}/preparation-first.json
+          root: ${{ github.workspace }}
+      - name: Produce bounded preparation evidence
+        if: steps.classify.outputs.active == 'true'
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@319732202906c853c78c346faea8c41136c34d5f # v2.2.1 candidate
+        with:
+          mode: produce
+          snapshot: ${{ runner.temp }}/preparation-before.json
+          receipt: ${{ runner.temp }}/preparation-receipt.json
+          patch: ${{ runner.temp }}/preparation-patch.json
+          root: ${{ github.workspace }}
+      - name: Prove preparation is a fixed point
+        if: steps.classify.outputs.active == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t paths < <(git ls-files -z -- '*.py' '*.pyi')
+          (( ${#paths[@]} == 0 )) && exit 0
+          uvx --from ruff==0.16.8 ruff check --force-exclude --select E,F,I,UP,B,S,RUF --target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero -- "${paths[@]}"
+          uvx --from ruff==0.16.8 ruff format --force-exclude --line-length 110 --target-version py312 -- "${paths[@]}"
+      - name: Capture second prepared state
+        if: steps.classify.outputs.active == 'true'
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@319732202906c853c78c346faea8c41136c34d5f # v2.2.1 candidate
+        with:
+          mode: snapshot
+          repository: ${{ github.repository }}
+          pull-request: ${{ github.event.pull_request.number || 1 }}
+          head-sha: ${{ steps.candidate.outputs.sha }}
+          head-repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          head-ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          workflow-run-id: ${{ github.run_id }}
+          workflow-run-attempt: ${{ github.run_attempt }}
+          output: ${{ runner.temp }}/preparation-second.json
+          root: ${{ github.workspace }}
+      - id: result
+        name: Admit clean candidate or request exact writeback
+        if: steps.classify.outputs.active == 'true'
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ runner.temp }}/preparation-before.json
+          FIRST: ${{ runner.temp }}/preparation-first.json
+          SECOND: ${{ runner.temp }}/preparation-second.json
+        run: |
+          set -euo pipefail
+          read_state() {
+            python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["pre_tree"])' "$1"
+          }
+          before="$(read_state "$BEFORE")"
+          first="$(read_state "$FIRST")"
+          second="$(read_state "$SECOND")"
+          [[ "$first" == "$second" ]] || {
+            echo "::error::deterministic preparation is not a fixed point; the second run changed the candidate again."
+            exit 1
+          }
+          if [[ "$before" == "$first" ]]; then
+            {
+              echo "evaluated=true"
+              echo "receipt-created=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [[ "$EVENT_NAME" == "pull_request" ]] || {
+            echo "::error::deterministic preparation changed a non-PR candidate that has no writeback path."
+            exit 1
+          }
+          {
+            echo "evaluated=false"
+            echo "receipt-created=true"
+          } >> "$GITHUB_OUTPUT"
+          echo "Candidate evaluation withheld: deterministic preparation produced a writeback receipt."
+      - name: Upload exact preparation receipt
+        if: steps.result.outputs.receipt-created == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: preparation-receipt-pr${{ github.event.pull_request.number }}-run${{ github.run_id }}-attempt${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/preparation-receipt.json
+            ${{ runner.temp }}/preparation-patch.json
+          retention-days: 1
+          if-no-files-found: error
+
   # Change-gate: decide whether the PR/push touched CODE (per code-change-filter)
   # so the pytest shard fan-out can be skipped on a docs/config-only change. With
   # an EMPTY filter (the default) this outputs `code-changed=true` with no git work,
@@ -272,6 +449,8 @@ jobs:
   # detection glitch costs a redundant run, never a skipped test.
   detect-changes:
     name: Detect code changes (change-gate)
+    needs: [preparation]
+    if: ${{ needs.preparation.outputs.evaluated == 'true' }}
     runs-on: ubuntu-latest
     outputs:
       code-changed: ${{ steps.detect.outputs.code-changed }}
@@ -308,8 +487,8 @@ jobs:
   # one catalogue lane runs so the fan-in `gate` still has a passing quality lane.
   quality:
     name: Python quality gate
-    needs: [detect-changes]
-    if: ${{ inputs.pytest-shards <= 1 || needs.detect-changes.outputs.code-changed != 'true' }}
+    needs: [preparation, detect-changes]
+    if: ${{ needs.preparation.outputs.evaluated == 'true' && (inputs.pytest-shards <= 1 || needs.detect-changes.outputs.code-changed != 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Run the gate (unsharded)
@@ -323,7 +502,7 @@ jobs:
           write-changed-files: ${{ inputs.write-changed-files }}
           changed-files-path: ${{ inputs.changed-files-path }}
           run-no-attribution: ${{ inputs.run-no-attribution }}
-          pre-evaluation-normalize: ${{ inputs.pre-evaluation-normalize }}
+          candidate-head-sha: ${{ needs.preparation.outputs.candidate-head-sha }}
           pre-steps: ${{ inputs.pre-steps }}
           post-steps: ${{ inputs.post-steps }}
           run-node: ${{ inputs.run-node }}
@@ -366,8 +545,8 @@ jobs:
   # declaring `shard_args` split (pytest), so the non-pytest legs re-run per shard
   # (cheap relative to the pytest win) while pytest wall-clock drops ~1/N.
   quality-shard:
-    needs: [shards, detect-changes]
-    if: ${{ inputs.pytest-shards > 1 && needs.detect-changes.outputs.code-changed == 'true' }}
+    needs: [preparation, shards, detect-changes]
+    if: ${{ needs.preparation.outputs.evaluated == 'true' && inputs.pytest-shards > 1 && needs.detect-changes.outputs.code-changed == 'true' }}
     name: Python quality gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
     runs-on: ubuntu-latest
     strategy:
@@ -386,7 +565,7 @@ jobs:
           write-changed-files: ${{ inputs.write-changed-files }}
           changed-files-path: ${{ inputs.changed-files-path }}
           run-no-attribution: ${{ inputs.run-no-attribution }}
-          pre-evaluation-normalize: ${{ inputs.pre-evaluation-normalize }}
+          candidate-head-sha: ${{ needs.preparation.outputs.candidate-head-sha }}
           pre-steps: ${{ inputs.pre-steps }}
           post-steps: ${{ inputs.post-steps }}
           run-node: ${{ inputs.run-node }}
@@ -419,11 +598,12 @@ jobs:
   # sets it true.
   coverage-combine:
     name: Coverage combine + new-code floor
-    needs: [quality, quality-shard, detect-changes]
+    needs: [preparation, quality, quality-shard, detect-changes]
     # Two reasons to run: shard reports to merge, or a floor to enforce against
     # whichever lane produced the report. Unsharded, only the second applies.
     if: >-
-      ${{ always() && inputs.upload-coverage-artifact
+      ${{ always() && needs.preparation.outputs.evaluated == 'true'
+          && inputs.upload-coverage-artifact
           && needs.detect-changes.outputs.code-changed == 'true'
           && (inputs.pytest-shards > 1 || inputs.enforce-new-code-coverage) }}
     runs-on: ubuntu-latest
@@ -431,6 +611,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ needs.preparation.outputs.candidate-head-sha }}
           # Full history, unconditionally. The floor scores the diff from
           # `git merge-base <trunk> HEAD`, and a shallow clone has no merge-base
           # to find — the check reads that as an empty change set and PASSES, so
@@ -461,33 +642,6 @@ jobs:
           uv-version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}
           sync-args: ${{ inputs.sync-args }}
-      # The coverage data was produced against the normalised source tree in
-      # each quality lane. Recreate that exact tree here before coverage xml
-      # maps executed lines back to source and before the new-code floor reads
-      # the report.
-      - name: Set up pnpm
-        if: ${{ inputs.pre-evaluation-normalize != '' && inputs.run-node }}
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          version: ${{ inputs.pnpm-version }}
-      - name: Set up Node
-        if: ${{ inputs.pre-evaluation-normalize != '' && inputs.run-node }}
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version-file: ${{ inputs.node-version-file }}
-          cache: pnpm
-      - name: pnpm install
-        if: ${{ inputs.pre-evaluation-normalize != '' && inputs.run-node }}
-        shell: bash
-        run: pnpm install ${{ inputs.pnpm-install-args }}
-      - name: Pre-evaluation normalization
-        if: ${{ inputs.pre-evaluation-normalize != '' }}
-        shell: bash
-        run: ${{ inputs.pre-evaluation-normalize }}
-      - name: Re-sync normalized project
-        if: ${{ inputs.pre-evaluation-normalize != '' }}
-        shell: bash
-        run: uv sync ${{ inputs.sync-args }}
       - name: Download shard coverage
         if: ${{ inputs.pytest-shards > 1 }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -608,8 +762,8 @@ jobs:
   # checks stay inside the required context instead of depending on every consumer
   # remembering to build and branch-protect a job of their own.
   quality-non-shard:
-    needs: [detect-changes]
-    if: ${{ inputs.pytest-shards > 1 && inputs.shard-tier != '' && needs.detect-changes.outputs.code-changed == 'true' }}
+    needs: [preparation, detect-changes]
+    if: ${{ needs.preparation.outputs.evaluated == 'true' && inputs.pytest-shards > 1 && inputs.shard-tier != '' && needs.detect-changes.outputs.code-changed == 'true' }}
     name: Python quality gate (non-shard)
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -632,11 +786,7 @@ jobs:
           write-changed-files: ${{ inputs.write-changed-files }}
           changed-files-path: ${{ inputs.changed-files-path }}
           run-no-attribution: false
-          # Forwarded like every other lane: a consumer that prepares fixtures or
-          # starts a service in pre-steps would otherwise have this lane run its
-          # checks against an unprepared environment, while the shard lanes ran
-          # against a prepared one.
-          pre-evaluation-normalize: ${{ inputs.pre-evaluation-normalize }}
+          candidate-head-sha: ${{ needs.preparation.outputs.candidate-head-sha }}
           pre-steps: ${{ inputs.pre-steps }}
           post-steps: ${{ inputs.post-steps }}
           run-node: ${{ inputs.run-node }}
@@ -662,19 +812,33 @@ jobs:
   # pins regardless of pytest-shards. Its name never changes with the shard count.
   gate:
     name: Python quality gate result
-    needs: [quality, quality-shard, quality-non-shard, coverage-combine]
+    needs: [preparation, quality, quality-shard, quality-non-shard, coverage-combine]
     if: ${{ always() }}
     runs-on: ubuntu-latest
+    outputs:
+      evaluated: ${{ steps.aggregate.outputs.evaluated }}
     steps:
-      - name: Aggregate the quality lanes
+      - id: aggregate
+        name: Aggregate the quality lanes
         env:
+          R_PREPARATION: ${{ needs.preparation.result }}
+          EVALUATED: ${{ needs.preparation.outputs.evaluated }}
           R_QUALITY: ${{ needs.quality.result }}
           R_SHARD: ${{ needs.quality-shard.result }}
           R_NONSHARD: ${{ needs.quality-non-shard.result }}
           R_COMBINE: ${{ needs.coverage-combine.result }}
         run: |
           set -euo pipefail
-          echo "quality=$R_QUALITY quality-shard=$R_SHARD quality-non-shard=$R_NONSHARD coverage-combine=$R_COMBINE"
+          echo "preparation=$R_PREPARATION evaluated=$EVALUATED quality=$R_QUALITY quality-shard=$R_SHARD quality-non-shard=$R_NONSHARD coverage-combine=$R_COMBINE"
+          if [[ "$R_PREPARATION" != "success" ]]; then
+            echo "::error::candidate preparation failed ($R_PREPARATION)."
+            exit 1
+          fi
+          if [[ "$EVALUATED" != "true" ]]; then
+            echo "evaluated=false" >> "$GITHUB_OUTPUT"
+            echo "Python quality evaluation withheld pending deterministic preparation writeback."
+            exit 0
+          fi
           for r in "$R_QUALITY" "$R_SHARD" "$R_NONSHARD" "$R_COMBINE"; do
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
               echo "::error::Python quality gate FAILED — a quality lane did not pass ($r)."
@@ -687,4 +851,5 @@ jobs:
             echo "::error::Python quality gate did not run — neither the unsharded nor the sharded lane executed."
             exit 1
           fi
+          echo "evaluated=true" >> "$GITHUB_OUTPUT"
           echo "Python quality gate: PASS."

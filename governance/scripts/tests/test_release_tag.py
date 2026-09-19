@@ -16,9 +16,7 @@ TAG_STEP = "Ensure exact release tag"
 
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [*args], capture_output=True, text=True, cwd=cwd, check=False
-    )
+    return subprocess.run([*args], capture_output=True, text=True, cwd=cwd, check=False)
 
 
 def _git(cwd: Path, *args: str) -> str:

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import stat
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -23,9 +23,7 @@ class GithubActionsLoader(yaml.SafeLoader):
 
 GithubActionsLoader.yaml_implicit_resolvers = {
     key: [
-        (tag, pattern)
-        for tag, pattern in resolvers
-        if tag != "tag:yaml.org,2002:bool"
+        (tag, pattern) for tag, pattern in resolvers if tag != "tag:yaml.org,2002:bool"
     ]
     for key, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
@@ -52,7 +50,9 @@ def test_checkout_runs_only_when_snapshot_implementation_runs() -> None:
     """
 
     steps = _workflow()["jobs"]["deploy"]["steps"]
-    checkout = next(step for step in steps if "actions/checkout@" in step.get("uses", ""))
+    checkout = next(
+        step for step in steps if "actions/checkout@" in step.get("uses", "")
+    )
     snapshot = _step("Snapshot all VMs")
     snapshot_predicate = "${{ inputs.snapshot-policy != 'forbidden' }}"
 
@@ -202,7 +202,9 @@ def test_workflow_surfaces_preflight_and_snapshot_evidence() -> None:
     )
 
 
-def test_failure_cleanup_runs_after_any_preflight_attempt_when_later_work_fails() -> None:
+def test_failure_cleanup_runs_after_any_preflight_attempt_when_later_work_fails() -> (
+    None
+):
     steps = _workflow()["jobs"]["deploy"]["steps"]
     preflight = next(step for step in steps if step.get("name") == "Remote preflight")
     cleanup = next(step for step in steps if step.get("name") == "Failure cleanup")
@@ -270,9 +272,9 @@ def test_preflight_requires_one_content_addressed_receipt_marker() -> None:
     assert "did not prove success" in text
     assert "run_with_retry" in text
     assert preflight.count('echo "receipt-digest=${RECEIPTS[0]}"') == 1
-    assert preflight.index("preflight produced multiple receipt digests") < preflight.index(
-        'echo "receipt-digest=${RECEIPTS[0]}"'
-    )
+    assert preflight.index(
+        "preflight produced multiple receipt digests"
+    ) < preflight.index('echo "receipt-digest=${RECEIPTS[0]}"')
 
 
 def test_terminal_conflict_does_not_sleep_before_failure() -> None:
@@ -323,8 +325,9 @@ def test_snapshot_lifecycle_is_incremental_and_tagged_for_the_48_hour_pruner() -
         "${{ steps.snap.outputs.snapshot-expires-at }}"
     )
     assert workflow_inputs["snapshot-retention-hours"]["default"] == "48"
-    assert "retention-hours: ${{ inputs.snapshot-retention-hours }}" in WORKFLOW.read_text(
-        encoding="utf-8"
+    assert (
+        "retention-hours: ${{ inputs.snapshot-retention-hours }}"
+        in WORKFLOW.read_text(encoding="utf-8")
     )
     assert "--incremental true" in step["run"]
     for tag in (
@@ -343,8 +346,12 @@ def test_snapshot_lifecycle_is_incremental_and_tagged_for_the_48_hour_pruner() -
 
 
 def test_snapshot_pruner_uses_valid_tag_queries_and_explicit_legacy_migration() -> None:
-    pruner_path = REPO_ROOT / ".github" / "actions" / "prune-azure-vm-snapshots" / "action.yml"
-    pruner = yaml.load(pruner_path.read_text(encoding="utf-8"), Loader=GithubActionsLoader)
+    pruner_path = (
+        REPO_ROOT / ".github" / "actions" / "prune-azure-vm-snapshots" / "action.yml"
+    )
+    pruner = yaml.load(
+        pruner_path.read_text(encoding="utf-8"), Loader=GithubActionsLoader
+    )
     run = pruner["runs"]["steps"][0]["run"]
 
     assert pruner["inputs"]["retention-hours"]["default"] == "48"
@@ -357,9 +364,15 @@ def test_snapshot_pruner_uses_valid_tag_queries_and_explicit_legacy_migration() 
     assert "timeCreated < '$LEGACY_CUTOFF'" in run
 
 
-def test_snapshot_pruner_executes_tagged_and_legacy_lifecycle_queries(tmp_path: Path) -> None:
-    pruner_path = REPO_ROOT / ".github" / "actions" / "prune-azure-vm-snapshots" / "action.yml"
-    pruner = yaml.load(pruner_path.read_text(encoding="utf-8"), Loader=GithubActionsLoader)
+def test_snapshot_pruner_executes_tagged_and_legacy_lifecycle_queries(
+    tmp_path: Path,
+) -> None:
+    pruner_path = (
+        REPO_ROOT / ".github" / "actions" / "prune-azure-vm-snapshots" / "action.yml"
+    )
+    pruner = yaml.load(
+        pruner_path.read_text(encoding="utf-8"), Loader=GithubActionsLoader
+    )
     runner = tmp_path / "prune.sh"
     runner.write_text(pruner["runs"]["steps"][0]["run"], encoding="utf-8")
     bin_dir = tmp_path / "bin"

@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+
 from conftest import pytest_xdist_auto_num_workers
 
 pytestmark = pytest.mark.contract
@@ -56,7 +57,7 @@ def _make_check_commands(*, outer_make: bool = False) -> list[str]:
 
 def test_self_gate_declares_the_contract_test_command() -> None:
     """Changing the gate's pytest argv would otherwise leave CI on another command."""
-    steps = (_project_config().get("tool", {}).get("tc_fitness", {}).get("steps", []))
+    steps = _project_config().get("tool", {}).get("tc_fitness", {}).get("steps", [])
     contract_steps = [step for step in steps if step.get("id") == "contract-tests"]
     assert len(contract_steps) == 1, (
         f"{PYPROJECT.name}: expected exactly one `contract-tests` tc-fitness step, "
@@ -73,19 +74,26 @@ def test_self_gate_declares_the_contract_test_command() -> None:
 def test_make_check_runs_the_declared_fitness_gate() -> None:
     """Replacing the engine command would make local success diverge from CI."""
     assert _make_check_commands() == [
+        "uv lock",
         "uv sync --locked",
+        "uv run --no-sync ruff check --fix .",
+        "uv run --no-sync ruff format .",
+        "uv run --no-sync python assurance/run.py prepare",
         "uv run --no-sync tc-fitness run",
     ], (
-        f"{MAKEFILE.name}: `check` must synchronise the locked environment then run "
-        "the configured tc-fitness gate. fix: use `uv sync --locked` followed by "
-        "`uv run --no-sync tc-fitness run`."
+        f"{MAKEFILE.name}: `check` must prepare deterministic mechanical and "
+        "generated state before running the configured tc-fitness gate."
     )
 
 
 def test_make_check_dry_run_is_stable_inside_an_outer_make() -> None:
     """GNU make directory notices must not become part of the command contract."""
     assert _make_check_commands(outer_make=True) == [
+        "uv lock",
         "uv sync --locked",
+        "uv run --no-sync ruff check --fix .",
+        "uv run --no-sync ruff format .",
+        "uv run --no-sync python assurance/run.py prepare",
         "uv run --no-sync tc-fitness run",
     ]
 
@@ -94,7 +102,9 @@ def test_ci_contract_tests_run_make_check() -> None:
     """A direct CI pytest invocation would bypass the configured local gate."""
     jobs = _ci_workflow().get("jobs") or {}
     steps = (jobs.get("tests") or {}).get("steps") or []
-    run_commands = [step.get("run") for step in steps if isinstance(step, dict) and "run" in step]
+    run_commands = [
+        step.get("run") for step in steps if isinstance(step, dict) and "run" in step
+    ]
     assert run_commands == ["make check"], (
         f"{CI_WORKFLOW.name}: the `tests` job runs {run_commands!r}. fix: invoke "
         "`make check` so CI executes the same configured tc-fitness gate as local "
@@ -136,14 +146,18 @@ def test_contract_suite_configures_supported_parallel_pytest_execution() -> None
     """Removing xdist or ``-n auto`` would make the full required local gate miss its budget."""
     project = _project_config()
     dev_dependencies = project.get("dependency-groups", {}).get("dev", [])
-    assert any(dependency.startswith("pytest-xdist") for dependency in dev_dependencies), (
+    assert any(
+        dependency.startswith("pytest-xdist") for dependency in dev_dependencies
+    ), (
         f"{PYPROJECT.name}: the contract suite has no pytest-xdist dependency, so "
         "the supported `-n auto` acceleration cannot be installed. fix: declare "
         "pytest-xdist in the dev dependency group."
     )
     options = project.get("tool", {}).get("pytest", {}).get("ini_options", {})
     addopts = shlex.split(options.get("addopts", ""))
-    assert any(addopts[index : index + 2] == ["-n", "auto"] for index in range(len(addopts))), (
+    assert any(
+        addopts[index : index + 2] == ["-n", "auto"] for index in range(len(addopts))
+    ), (
         f"{PYPROJECT.name}: pytest addopts is {options.get('addopts')!r}, so the "
         "complete contract suite runs sequentially. fix: set `addopts = '-n auto'` "
         "while retaining the fitness step argv as `pytest -q`."

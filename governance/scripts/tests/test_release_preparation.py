@@ -20,9 +20,7 @@ PREPARE_ACTION = REPO_ROOT / "actions" / "prepare-release-metadata" / "action.ym
 
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [*args], capture_output=True, text=True, cwd=cwd, check=False
-    )
+    return subprocess.run([*args], capture_output=True, text=True, cwd=cwd, check=False)
 
 
 def _project(tmp_path: Path) -> Path:

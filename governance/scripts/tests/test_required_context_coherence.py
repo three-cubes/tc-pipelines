@@ -117,9 +117,9 @@ def _tests_for_skipped(var: str, body: str) -> bool:
     neither counts.
     """
     return any(
-        "skipped" in line
-        and _reads(var, line)
+        _reads(var, line)
         and not line.lstrip().startswith(("#", "echo"))
+        and ("skipped" in line or ("success" in line and "!=" in line))
         for line in body.splitlines()
     )
 
@@ -146,12 +146,18 @@ LANES = sorted(set(_jobs(_load(GATE))) - {FAN_IN})
 @pytest.mark.parametrize("name", ("main-core.json", "main-product.json"))
 def test_queue_less_profiles_require_current_base_status_checks(name: str) -> None:
     """A queue-less repository validates the current main tip before merge."""
-    rules = json.loads((RULESET_DIR / name).read_text(encoding="utf-8")).get("rules") or []
-    required = next(rule for rule in rules if rule.get("type") == "required_status_checks")
+    rules = (
+        json.loads((RULESET_DIR / name).read_text(encoding="utf-8")).get("rules") or []
+    )
+    required = next(
+        rule for rule in rules if rule.get("type") == "required_status_checks"
+    )
     assert required["parameters"]["strict_required_status_checks_policy"] is True
 
 
-def test_self_check_is_ready_for_queue_validation_and_cancels_superseded_pr_runs() -> None:
+def test_self_check_is_ready_for_queue_validation_and_cancels_superseded_pr_runs() -> (
+    None
+):
     """Validate PR/integration candidates without repeating full work after merge."""
     triggers = _triggers(SELF_CHECK)
     assert {"pull_request", "merge_group"} <= set(triggers)
@@ -172,7 +178,9 @@ def test_loop_dispatch_has_no_idle_hosted_runner_schedule() -> None:
 
 def test_release_tags_are_immutable() -> None:
     """Release identity remains bound to a tag after candidate allocation."""
-    payload = json.loads((RULESET_DIR / "release-tags.json").read_text(encoding="utf-8"))
+    payload = json.loads(
+        (RULESET_DIR / "release-tags.json").read_text(encoding="utf-8")
+    )
     assert payload["target"] == "tag"
     assert "refs/tags/v*" in payload["conditions"]["ref_name"]["include"]
     assert {rule["type"] for rule in payload["rules"]} >= {"deletion", "update"}
@@ -249,7 +257,8 @@ def test_the_fan_in_reads_every_lane_it_requires(job: str) -> None:
     # lines alone, so dropping a lane from the check while leaving it in the
     # progress line is not mistaken for reading it.
     body = "\n".join(
-        line for line in str(_fan_in_step().get("run", "")).splitlines()
+        line
+        for line in str(_fan_in_step().get("run", "")).splitlines()
         if not line.strip().startswith("echo")
     )
     unread = sorted(var for var in bound if not _reads(var, body))

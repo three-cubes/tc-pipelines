@@ -106,7 +106,11 @@ def tree_digest(path: Path) -> str:
 def safe_output(root: Path, value: str) -> Path:
     path = Path(value)
     target = (root / path).resolve()
-    if path.is_absolute() or ".." in path.parts or not target.is_relative_to(root.resolve()):
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or not target.is_relative_to(root.resolve())
+    ):
         raise ReceiptError(f"unsafe output path: {value}")
     return target
 
@@ -155,12 +159,19 @@ def validate_receipt(
     case = CASES.get(case_id)
     if case is None:
         raise ReceiptError("unknown scanner qualification case")
-    if receipt.get("expected") != case["expected"] or receipt.get("actual") != case["expected"]:
+    if (
+        receipt.get("expected") != case["expected"]
+        or receipt.get("actual") != case["expected"]
+    ):
         raise ReceiptError("unexpected scanner outcome")
     candidate_data = receipt.get("candidate")
-    if not isinstance(candidate_data, dict) or candidate_data != {"pipeline_commit": candidate}:
+    if not isinstance(candidate_data, dict) or candidate_data != {
+        "pipeline_commit": candidate
+    }:
         raise ReceiptError("candidate identity mismatch")
-    if len(candidate) != 40 or any(char not in "0123456789abcdef" for char in candidate):
+    if len(candidate) != 40 or any(
+        char not in "0123456789abcdef" for char in candidate
+    ):
         raise ReceiptError("candidate must be an exact commit")
     fixture = receipt.get("fixture")
     if not isinstance(fixture, dict) or set(fixture) != {"path", "digest"}:
@@ -225,13 +236,20 @@ def validate_receipt(
     if not isinstance(evidence, dict) or set(evidence) != {"kind", "outputs"}:
         raise ReceiptError("invalid scanner evidence")
     if evidence["kind"] != "native-live-scanner":
-        raise ReceiptError("tc-fitness protocol ledger cannot satisfy live scanner evidence")
+        raise ReceiptError(
+            "tc-fitness protocol ledger cannot satisfy live scanner evidence"
+        )
     outputs = evidence["outputs"]
-    if not isinstance(outputs, list) or {row.get("id") for row in outputs if isinstance(row, dict)} != {
-        "scanner-report",
-        "rule-database",
-        "execution-log",
-    } or len(outputs) != 3:
+    if (
+        not isinstance(outputs, list)
+        or {row.get("id") for row in outputs if isinstance(row, dict)}
+        != {
+            "scanner-report",
+            "rule-database",
+            "execution-log",
+        }
+        or len(outputs) != 3
+    ):
         raise ReceiptError("missing or unexpected named scanner outputs")
     by_id: dict[str, dict[str, Any]] = {}
     for row in outputs:
@@ -248,7 +266,9 @@ def validate_receipt(
     except json.JSONDecodeError as error:
         raise ReceiptError("invalid retained scanner rule-database output") from error
     if tool["name"] == "checkov":
-        bound_identity = rule_data.get("policy_tree_digest") if isinstance(rule_data, dict) else None
+        bound_identity = (
+            rule_data.get("policy_tree_digest") if isinstance(rule_data, dict) else None
+        )
     else:
         bound_identity = digest(
             json.dumps(rule_data, sort_keys=True, separators=(",", ":")).encode()
@@ -258,7 +278,9 @@ def validate_receipt(
 
 
 def _run(command: list[str], root: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
+    return subprocess.run(
+        command, cwd=root, text=True, capture_output=True, check=False
+    )
 
 
 def _tool_identity(name: str) -> tuple[Path, str]:
@@ -281,10 +303,14 @@ def _rule_database(name: str, report: str) -> tuple[str, str, dict[str, Any]]:
         if module.returncode != 0:
             raise ReceiptError("cannot locate packaged Checkov policies")
         identity = tree_digest(Path(module.stdout.strip()))
-        return "packaged-checkov-policy-tree", identity, {
-            "policy_tree_digest": identity,
-            "policy": "CKV_AWS_20",
-        }
+        return (
+            "packaged-checkov-policy-tree",
+            identity,
+            {
+                "policy_tree_digest": identity,
+                "policy": "CKV_AWS_20",
+            },
+        )
     try:
         parsed = json.loads(report)
     except json.JSONDecodeError as error:
@@ -324,7 +350,9 @@ def _command(case: dict[str, str | None], executable: Path) -> list[str]:
     return [str(executable), "--lockfile", str(fixture), "--format", "json"]
 
 
-def _qualify_case(root: Path, destination: Path, candidate: str, case_id: str) -> dict[str, Any]:
+def _qualify_case(
+    root: Path, destination: Path, candidate: str, case_id: str
+) -> dict[str, Any]:
     case = CASES[case_id]
     executable, executable_digest = _tool_identity(str(case["tool"]))
     command = _command(case, executable)
@@ -335,7 +363,11 @@ def _qualify_case(root: Path, destination: Path, candidate: str, case_id: str) -
     (destination / "scanner-report.json").write_text(report)
     (destination / "execution.log").write_text(
         json.dumps(
-            {"command": command, "exit_code": result.returncode, "stderr": result.stderr},
+            {
+                "command": command,
+                "exit_code": result.returncode,
+                "stderr": result.stderr,
+            },
             indent=2,
         )
         + "\n"
@@ -397,7 +429,9 @@ def qualify(root: Path, destination: Path, candidate: str) -> None:
         or not os.environ.get("GITHUB_REPOSITORY")
     ):
         raise ReceiptError("live scanner qualification requires GitHub Actions")
-    if len(candidate) != 40 or any(char not in "0123456789abcdef" for char in candidate):
+    if len(candidate) != 40 or any(
+        char not in "0123456789abcdef" for char in candidate
+    ):
         raise ReceiptError("candidate must be an exact 40-hex commit")
     head = _run(["git", "rev-parse", "HEAD"], root)
     if head.returncode != 0 or head.stdout.strip() != candidate:
@@ -410,7 +444,9 @@ def qualify(root: Path, destination: Path, candidate: str) -> None:
         receipt = _qualify_case(root, case_dir, candidate, case_id)
         validate_receipt(receipt, root, candidate=candidate, evidence_root=case_dir)
         (case_dir / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
-        receipts.append({"case_id": case_id, "digest": file_digest(case_dir / "receipt.json")})
+        receipts.append(
+            {"case_id": case_id, "digest": file_digest(case_dir / "receipt.json")}
+        )
     (destination / "index.json").write_text(
         json.dumps({"candidate": candidate, "receipts": receipts}, indent=2) + "\n"
     )
@@ -426,10 +462,14 @@ def admit(root: Path, directory: Path, candidate: str) -> None:
         receipt = json.loads(path.read_text())
         validate_receipt(receipt, root, candidate=candidate, evidence_root=path.parent)
         receipts[case_id] = receipt
-    if set(path.parent.name for path in directory.rglob("receipt.json")) != set(CASES):
+    if {path.parent.name for path in directory.rglob("receipt.json")} != set(CASES):
         raise ReceiptError("unexpected live scanner receipt")
     run_ids = {
-        (row["execution"]["repository"], row["execution"]["workflow_run_id"], row["execution"]["attempt"])
+        (
+            row["execution"]["repository"],
+            row["execution"]["workflow_run_id"],
+            row["execution"]["attempt"],
+        )
         for row in receipts.values()
     }
     if len(run_ids) != 1:
@@ -483,16 +523,19 @@ def admit(root: Path, directory: Path, candidate: str) -> None:
     if artifact.get("digest") != digest(data):
         raise ReceiptError("hosted scanner artifact digest does not match GitHub")
     for case_id in CASES:
-        if archive_member(archive, f"{case_id}/receipt.json") != (
-            directory / case_id / "receipt.json"
-        ).read_bytes():
+        if (
+            archive_member(archive, f"{case_id}/receipt.json")
+            != (directory / case_id / "receipt.json").read_bytes()
+        ):
             raise ReceiptError("retained scanner receipt differs from GitHub artifact")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=["qualify", "admit"])
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--root", type=Path, default=Path(__file__).resolve().parents[1]
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--candidate", required=True)
     args = parser.parse_args()

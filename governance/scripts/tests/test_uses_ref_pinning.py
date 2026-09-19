@@ -258,14 +258,14 @@ def test_uses_ref_is_pinned_the_way_the_canon_requires(
 
     if ref.startswith(SELF_REPO_PREFIX):
         remedy = (
-            f"fix: repin to a full 40-character lowercase commit SHA of a "
-            f"released tag, with a `# vX.Y.Z` trailing comment. A floating "
-            f"major such as `@v1` only works while something advances that tag "
-            f"on every release; nothing here does, so it froze and a step "
-            f"loaded a revision of the composite that no longer emitted the "
-            f"output the workflow read — silently, because "
-            f"test_internal_call_contracts.py validates against the LOCAL file, "
-            f"not the ref that runs."
+            "fix: repin to a full 40-character lowercase commit SHA of a "
+            "released tag, with a `# vX.Y.Z` trailing comment. A floating "
+            "major such as `@v1` only works while something advances that tag "
+            "on every release; nothing here does, so it froze and a step "
+            "loaded a revision of the composite that no longer emitted the "
+            "output the workflow read — silently, because "
+            "test_internal_call_contracts.py validates against the LOCAL file, "
+            "not the ref that runs."
         )
     else:
         remedy = (

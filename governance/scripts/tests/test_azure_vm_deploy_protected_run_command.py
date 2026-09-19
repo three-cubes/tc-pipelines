@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import base64
 import os
-from pathlib import Path
 import stat
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -100,17 +100,21 @@ def test_opted_in_apply_output_crosses_the_reusable_workflow_boundary() -> None:
     assert "surface-apply-output" in output["description"]
 
 
-def test_opted_in_apply_output_is_written_before_the_step_returns_a_remote_failure() -> None:
+def test_opted_in_apply_output_is_written_before_the_step_returns_a_remote_failure() -> (
+    None
+):
     """A typed protected receipt remains available when the remote phase fails."""
 
     apply = _apply_step()["run"]
-    gate_failure = apply.index('if ! gate_run_command_output "$VM" "$REMOTE_EXIT_SENTINEL" "$MSG_FILE"; then')
+    gate_failure = apply.index(
+        'if ! gate_run_command_output "$VM" "$REMOTE_EXIT_SENTINEL" "$MSG_FILE"; then'
+    )
     output_write = apply.index('echo "apply-output<<${DELIM}"')
     terminal_exit = apply.index('exit "$APPLY_EXIT"')
 
-    assert 'APPLY_EXIT=0' in apply
-    assert 'APPLY_EXIT=1' in apply[gate_failure:output_write]
-    assert 'exit 1' not in apply[gate_failure:output_write]
+    assert "APPLY_EXIT=0" in apply
+    assert "APPLY_EXIT=1" in apply[gate_failure:output_write]
+    assert "exit 1" not in apply[gate_failure:output_write]
     assert gate_failure < output_write < terminal_exit
 
 
@@ -133,7 +137,10 @@ def test_protected_parameter_contract_is_fail_closed_and_bounded() -> None:
         "snapshot-policy=forbidden requires a verified container rollback receipt"
         in script
     )
-    assert "protected-diagnostic-prefix must be an uppercase ASCII prefix" in _validation_step()["run"]
+    assert (
+        "protected-diagnostic-prefix must be an uppercase ASCII prefix"
+        in _validation_step()["run"]
+    )
     assert "PROTECTED_DIAGNOSTIC_PREFIX" in _validation_step()["env"]
     steps = _workflow()["jobs"]["deploy"]["steps"]
     assert steps.index(_validation_step()) < next(
@@ -231,7 +238,10 @@ def test_protected_apply_can_surface_a_bounded_urlsafe_receipt() -> None:
 
     assert protected_input["default"] == ""
     assert "PROTECTED_DIAGNOSTIC_RECEIPT_PREFIX" in _apply_step()["env"]
-    assert "protected-diagnostic-receipt-prefix must identify a receipt-b64 marker" in validation
+    assert (
+        "protected-diagnostic-receipt-prefix must identify a receipt-b64 marker"
+        in validation
+    )
     assert "[A-Za-z0-9_-]+" in apply
     assert "REMOTE_DIAGNOSTIC_MAX_LINE_LENGTH=2190" in apply
     assert "REMOTE_DIAGNOSTIC_RECEIPT_PREFIX" in apply
@@ -671,7 +681,9 @@ def test_validation_rejects_malformed_protected_diagnostic_prefix_before_azure_w
     result = _run_validation(tmp_path, diagnostic_prefix="not-safe=")
 
     assert result.returncode != 0
-    assert "protected-diagnostic-prefix must be an uppercase ASCII prefix" in result.stderr
+    assert (
+        "protected-diagnostic-prefix must be an uppercase ASCII prefix" in result.stderr
+    )
 
 
 def test_validation_rejects_malformed_protected_diagnostic_receipt_prefix_before_azure_work(
@@ -685,7 +697,10 @@ def test_validation_rejects_malformed_protected_diagnostic_receipt_prefix_before
     )
 
     assert result.returncode != 0
-    assert "protected-diagnostic-receipt-prefix must identify a receipt-b64 marker" in result.stderr
+    assert (
+        "protected-diagnostic-receipt-prefix must identify a receipt-b64 marker"
+        in result.stderr
+    )
 
 
 def test_fake_azure_conflict_then_warning_keeps_json_and_token_private(
@@ -1057,9 +1072,7 @@ def test_container_only_path_is_tied_to_canonical_governance() -> None:
     development = " ".join(DEVELOPMENT_WORKFLOW.read_text(encoding="utf-8").split())
     readme = " ".join(README.read_text(encoding="utf-8").split())
 
-    assert (
-        "container-only deployment path" in snapshot_input["description"].lower()
-    )
+    assert "container-only deployment path" in snapshot_input["description"].lower()
     for required in (
         "Container-only deployment path",
         "`snapshot-policy=forbidden`",

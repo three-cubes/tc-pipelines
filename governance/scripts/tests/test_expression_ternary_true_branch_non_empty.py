@@ -320,7 +320,11 @@ CLASSIFIER_CASES = [
     ("cond && '' || 'fallback'", {}, "always-empty"),
     ("cond && inputs.env || inputs.other", {"env": EMPTY}, "always-empty"),
     ("cond && inputs.env || inputs.other", {"env": NO_DEFAULT}, "always-empty"),
-    ("inputs.u != '' && inputs.t || inputs.u", {"t": EMPTY, "u": EMPTY}, "always-empty"),
+    (
+        "inputs.u != '' && inputs.t || inputs.u",
+        {"t": EMPTY, "u": EMPTY},
+        "always-empty",
+    ),
     # Not ternaries at all.
     ("secrets.gh-token || github.token", {}, "not-a-ternary"),
     ("inputs.sign && inputs.push", {}, "not-a-ternary"),

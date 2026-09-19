@@ -195,13 +195,13 @@ and unrelated failures, and checks fresh non-empty JUnit/coverage and mixed
 workspace TAP output. Every evaluation starts without the preceding evaluation's
 output directory. Missing outputs and wrong sabotage diagnostics fail the lab.
 
-Refresh the generated reference deliberately when changing the skeleton:
+`make prepare` refreshes the generated reference after changing the skeleton.
+To inspect a render without updating the reference:
 
 ```sh
 uv run python assurance/run.py render --output /absolute/new-render-directory
 ```
 
-Review and replace the checked-in rendered files with that exact output; do not
-hand-edit the rendered fixture. Preparation does not update the reference.
+Do not hand-edit the rendered fixture. Review the generated diff before commit.
 The existing compatibility commands will move to `bootstrap`, `prepare`,
 `check` and `check-all` when tc-sdlc lands; this fixture suite remains the same.

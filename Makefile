@@ -1,9 +1,15 @@
 # tc-pipelines current self-gate; migrated behind tc-sdlc in Tranche 2.
 
-.PHONY: check assurance assurance-hosted
+.PHONY: prepare check assurance assurance-hosted
 
-check:
+prepare:
+	uv lock
 	uv sync --locked
+	uv run --no-sync ruff check --fix .
+	uv run --no-sync ruff format .
+	uv run --no-sync python assurance/run.py prepare
+
+check: prepare
 	uv run --no-sync tc-fitness run
 
 # Same local entrypoint is available to hosted consumers. Each invocation

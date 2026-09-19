@@ -242,6 +242,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp_tool_kit import async_tool_handler, wrap_tool_errors
 from .tools import example as example_tools
 
+
 def build_server() -> FastMCP:
     server = FastMCP("mcp-<name>")
     example_tools.register(server)
@@ -255,12 +256,15 @@ from mcp.server.fastmcp import FastMCP
 from mcp_tool_kit import async_tool_handler, wrap_tool_errors
 from pydantic import BaseModel, Field
 
+
 class ExampleInput(BaseModel):
     query: str = Field(..., description="Free-text input")
+
 
 @wrap_tool_errors
 def _tool_example_thing(query: str) -> dict:
     return {"result": f"echo: {query}"}
+
 
 def register(server: FastMCP) -> None:
     @server.tool(description="Agent-facing description with useful defaults.")
@@ -390,6 +394,7 @@ setTelemetrySink((event) => process.stderr.write(JSON.stringify(event) + "\n"));
 ```python
 # Python
 from mcp_tool_kit import set_telemetry_sink
+
 set_telemetry_sink(lambda event: print(json.dumps(event), file=sys.stderr))
 ```
 

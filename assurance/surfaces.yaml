@@ -50,6 +50,70 @@ surfaces:
       hosted: [.github/workflows/live-scanner-qualification.yml]
       live: [.github/workflows/live-scanner-qualification.yml]
     sabotage: [fixture-identity-mismatch, wrong-scanner-version, protocol-ledger]
+  - id: workflow.example-live-scanner-qualification
+    path: .github/workflows/example-live-scanner-qualification.yml
+    risk: control-plane
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['.github/workflows/live-scanner-qualification.yml', 'assurance/live_scanners.py']
+      release_probe: null
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_live_scanner_qualification.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.preparation-writeback
+    path: .github/workflows/preparation-writeback.yml
+    risk: control-plane
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['actions/preparation-writeback/**', 'governance/scripts/tests/test_preparation_writeback.py', '.github/actions/github-app-token/**']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_preparation_writeback.py, governance/scripts/tests/test_preparation_once_topology.py]
+      hermetic: [governance/scripts/tests/test_preparation_writeback.py]
+      hosted: []
+    sabotage: [moved-head, altered-patch, stale-receipt, invalid-path]
+  - id: workflow.example-preparation-writeback
+    path: .github/workflows/example-preparation-writeback.yml
+    risk: control-plane
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['.github/workflows/preparation-writeback.yml', 'actions/preparation-writeback/**']
+      release_probe: null
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.actions.preparation-writeback
+    path: actions/preparation-writeback/action.yml
+    risk: control-plane
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['actions/preparation-writeback/**', 'governance/scripts/tests/test_preparation_writeback.py']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_preparation_writeback.py]
+      hermetic: [governance/scripts/tests/test_preparation_writeback.py]
+      hosted: []
+    sabotage: [duplicate-path, invalid-base64, symlink, oversized-artifact]
   - id: workflow.auto-merge-on-green
     path: .github/workflows/auto-merge-on-green.yml
     hosted:

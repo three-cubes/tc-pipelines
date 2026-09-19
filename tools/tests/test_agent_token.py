@@ -10,7 +10,6 @@ from __future__ import annotations
 import io
 
 import pytest
-
 from tc_agent_tools import agent_token as at
 
 
@@ -90,9 +89,7 @@ def test_parse_args_defaults_and_choices():
 
     # the canonical key is not a --agent choice (it's the default, selector-free)
     with pytest.raises(SystemExit):
-        at.parse_args(
-            ["--agent", at.CANONICAL, "--repo", "three-cubes/tc-pipelines"]
-        )
+        at.parse_args(["--agent", at.CANONICAL, "--repo", "three-cubes/tc-pipelines"])
 
 
 def test_parse_args_requires_repository_scope():
@@ -122,9 +119,7 @@ def test_main_scopes_token_exchange_to_requested_repository(
     posts: list[tuple[str, str, dict[str, list[str]]]] = []
     api_calls: list[str] = []
 
-    monkeypatch.setattr(
-        at, "kv", lambda name: "4242" if name.endswith("id") else "pem"
-    )
+    monkeypatch.setattr(at, "kv", lambda name: "4242" if name.endswith("id") else "pem")
     monkeypatch.setattr(at.jwt, "encode", lambda *_args, **_kwargs: "assertion")
 
     def fake_api(path, _token, *, bearer=False):

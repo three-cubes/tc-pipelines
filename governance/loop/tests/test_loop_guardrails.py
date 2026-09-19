@@ -17,8 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import loop_state_machine as loop  # noqa: E402 — path shim above
-from loop_state_machine import (  # noqa: E402
+import loop_state_machine as loop
+from loop_state_machine import (
     AmbiguousVerification,
     BudgetExceeded,
     DeterminismViolation,
@@ -133,9 +133,13 @@ class RetryCeilingTest(unittest.TestCase):
         final = run_item(engine, item, lambda _i: _clean_fail(), max_cycles=50)
         self.assertEqual(final, State.ESCALATED)
         self.assertEqual(item.retries, 3)
-        dispatches = [ev for _, ev, _ in item.history if ev in (Event.DISPATCH, Event.RETRY)]
+        dispatches = [
+            ev for _, ev, _ in item.history if ev in (Event.DISPATCH, Event.RETRY)
+        ]
         # 1 initial dispatch + exactly N retries, then escalation.
-        self.assertEqual(dispatches, [Event.DISPATCH, Event.RETRY, Event.RETRY, Event.RETRY])
+        self.assertEqual(
+            dispatches, [Event.DISPATCH, Event.RETRY, Event.RETRY, Event.RETRY]
+        )
 
     def test_ceiling_plus_one_retry_raises(self):
         engine = LoopEngine(GuardrailConfig(retry_ceiling=2, per_issue_budget=1e9))
@@ -189,7 +193,9 @@ class BudgetCapTest(unittest.TestCase):
         self.assertEqual(ctx.exception.scope, "global")
         self.assertTrue(engine.halted)
         # The breaker halts the FLEET: even an untouched item is refused now.
-        self.assertEqual(c.state, State.READY)  # global breaker does not escalate the item
+        self.assertEqual(
+            c.state, State.READY
+        )  # global breaker does not escalate the item
         with self.assertRaises(BudgetExceeded):
             engine.dispatch(d, cost=0.1)
         ok, _reason = engine.can_dispatch(d, cost=0.1)

@@ -30,9 +30,9 @@ those tests pass). See the ADR's "The lights-out gate" section.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Optional
 
 
 # --------------------------------------------------------------------------- #
@@ -108,7 +108,7 @@ class GuardrailTripped(LoopError):
     #: Coarse category, e.g. "retry" / "budget" / "determinism" / "ambiguous".
     scope: str = "guardrail"
 
-    def __init__(self, message: str, scope: Optional[str] = None) -> None:
+    def __init__(self, message: str, scope: str | None = None) -> None:
         super().__init__(message)
         if scope is not None:
             self.scope = scope
@@ -171,7 +171,7 @@ class GuardrailConfig:
     #: Dispatch rate-limit (GUARDRAIL 5 / PLA-241) — at most ``dispatch_rate_max``
     #: dispatches per ``dispatch_rate_window`` seconds, shared across the fleet
     #: (Linear's quota is per-actor). ``None`` disables the limiter.
-    dispatch_rate_max: Optional[int] = None
+    dispatch_rate_max: int | None = None
     dispatch_rate_window: float = 3600.0
 
 
@@ -259,7 +259,7 @@ class LoopEngine:
         #: Set when the global circuit-breaker trips — no new dispatch fleet-wide.
         self.halted: bool = False
         self._auto_dispatch_armed: bool = False
-        self._rate: Optional[RateLimiter] = (
+        self._rate: RateLimiter | None = (
             RateLimiter(self.config.dispatch_rate_max, self.config.dispatch_rate_window)
             if self.config.dispatch_rate_max is not None
             else None

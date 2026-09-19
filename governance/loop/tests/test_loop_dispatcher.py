@@ -18,16 +18,17 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from typing import ClassVar
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import loop_dispatcher as disp  # noqa: E402 — path shim above
-import loop_state_machine as loop  # noqa: E402
-from loop_dispatcher import (  # noqa: E402
+import loop_dispatcher as disp
+import loop_state_machine as loop
+from loop_dispatcher import (
     Blocker,
     CandidateIssue,
-    Dispatcher,
     DispatchContract,
+    Dispatcher,
     HttpLinearSource,
     JsonIssueSource,
     StaticIssueSource,
@@ -427,7 +428,7 @@ class DispatchGateTest(unittest.TestCase):
 # GraphQL snapshot parser (pure — no network)
 # --------------------------------------------------------------------------- #
 class ParseInitiativeTest(unittest.TestCase):
-    PAYLOAD = {
+    PAYLOAD: ClassVar = {
         "data": {
             "initiative": {
                 "projects": {
@@ -586,8 +587,10 @@ class HttpSourceFetchDescriptionTest(unittest.TestCase):
         self.assertEqual(captured["body"]["variables"], {"id": "SGO-198"})
         # ... and that description resolves to the right repo via infer_repo.
         self.assertEqual(
-            infer_repo(_issue(id="SGO-198", description=""),
-                       description_resolver=lambda i: desc),
+            infer_repo(
+                _issue(id="SGO-198", description=""),
+                description_resolver=lambda i: desc,
+            ),
             "tc-fitness",
         )
 
@@ -657,9 +660,7 @@ class HttpSourcePaginatedFetchTest(unittest.TestCase):
         got = src.fetch("INIT")
 
         # candidates come from BOTH projects and ALL of project A's pages.
-        self.assertEqual(
-            [i.id for i in got], ["PLA-1", "PLA-2", "PLA-3", "SGO-9"]
-        )
+        self.assertEqual([i.id for i in got], ["PLA-1", "PLA-2", "PLA-3", "SGO-9"])
 
         # and match the pure parser fed the equivalent assembled payload shape.
         assembled = {
@@ -792,12 +793,11 @@ class JsonSourceTest(unittest.TestCase):
 
 class CliTest(unittest.TestCase):
     def _snapshot(self, items) -> str:
-        fh = tempfile.NamedTemporaryFile(
+        with tempfile.NamedTemporaryFile(
             "w", suffix=".json", delete=False, encoding="utf-8"
-        )
-        json.dump({"issues": items}, fh)
-        fh.close()
-        return fh.name
+        ) as fh:
+            json.dump({"issues": items}, fh)
+            return fh.name
 
     def test_dry_run_prints_queue_no_side_effects(self):
         path = self._snapshot(

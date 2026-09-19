@@ -24,20 +24,9 @@ inputs:
     required: true
   run-no-attribution:
     required: true
-  pre-evaluation-normalize:
-    description: >-
-      Optional repo-owned command that applies deterministic, safe source
-      normalisation after all requested toolchains are installed and before
-      any evaluation, changed-file capture, or `tc-fitness run`. The gate
-      re-syncs the project afterwards so non-editable installs execute the
-      normalised tree. Empty skips the phase. Use this for mechanical fixes
-      such as `ruff check --fix` and `ruff format`; the command must leave the
-      checkout clean, proving that the committed tree was already normalized.
-      A changed tracked or untracked path stops evaluation. The separate
-      preparation producer may turn those deterministic changes into a bounded,
-      identity-bound patch for trusted writeback. Do not use this input for
-      network, credential, deploy, or remote write operations.
-    required: true
+  candidate-head-sha:
+    required: false
+    default: ""
   pre-steps:
     required: true
   post-steps:
@@ -101,6 +90,7 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         fetch-depth: ${{ inputs.fetch-depth }}
+        ref: ${{ inputs.candidate-head-sha }}
 
       # ── Locked-uv install ───────────────────────────────────────────────
       # BEFORE the node half. setup-uv hashes files to key its cache, and the
@@ -153,34 +143,6 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       if: inputs.run-node == 'true'
       shell: bash
       run: pnpm install ${{ inputs.pnpm-install-args }}
-
-    # ── Deterministic source normalization (opt-in) ─────────────────────
-    # This is deliberately distinct from pre-steps: its contract is to run the
-    # same safe, mechanical normalizer as the local gate before *any* evaluator
-    # observes the tree. The following clean-tree assertion requires all repairs
-    # to be committed. It is forwarded through every quality lane and the
-    # duration-refresh reusable so every run evaluates the same source.
-    - name: Pre-evaluation normalization
-      if: inputs.pre-evaluation-normalize != ''
-      shell: bash
-      run: ${{ inputs.pre-evaluation-normalize }}
-
-    # An evaluator never attests uncommitted bytes under the original commit
-    # identity. A separate unprivileged producer may package deterministic
-    # changes for a trusted writeback workflow before this gate runs again.
-    - name: Bind evaluation to the committed tree
-      if: inputs.pre-evaluation-normalize != ''
-      shell: bash
-      run: bash "$GITHUB_ACTION_PATH/assert-clean-evaluated-tree.sh"
-
-    # `--no-editable` installs the project into site-packages. Re-sync after a
-    # normalizer changes source so pytest and source-based evaluators cannot
-    # observe different trees. A normalizer may also update generated package
-    # inputs without using --no-editable, so this applies to every opt-in run.
-    - name: Re-sync normalized project
-      if: inputs.pre-evaluation-normalize != ''
-      shell: bash
-      run: uv sync ${{ inputs.sync-args }}
 
     # ── Diff-scoped smoke support (opt-in) ─────────────────────────────
     - name: Write changed-file list

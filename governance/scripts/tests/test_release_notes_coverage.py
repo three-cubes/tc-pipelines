@@ -293,8 +293,7 @@ def test_release_validation_preserves_an_explicit_empty_version_file(
                 'export VERSION="$1"\n'
                 'export CHANGELOG_FILE="CHANGELOG.md"\n'
                 'export VERSION_FILE=""\n'
-                'export PREPARATION_FILE=".release-prepared.json"\n'
-                + step
+                'export PREPARATION_FILE=".release-prepared.json"\n' + step
             ),
             "guard",
             "v2099.9.9",

@@ -99,7 +99,9 @@ def _calls() -> list[tuple[str, str, dict, dict]]:
                 if not isinstance(step, dict):
                     continue
                 match = LOCAL_ACTION.match(str(step.get("uses", "")))
-                action = (match.group("local") or match.group("pinned")) if match else None
+                action = (
+                    (match.group("local") or match.group("pinned")) if match else None
+                )
                 if match and action in actions:
                     declared = (
                         _pinned_action_contract(action, match.group("sha"))

@@ -22,8 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import loop_state_machine as loop  # noqa: E402 — path shim above
-from loop_governor import (  # noqa: E402
+from loop_governor import (
     CircuitBreakerOpen,
     ContinueAction,
     Escalation,
@@ -32,11 +31,10 @@ from loop_governor import (  # noqa: E402
     Outcome,
     RecordingEscalationSink,
 )
-from loop_state_machine import (  # noqa: E402
+from loop_state_machine import (
     BudgetExceeded,
     GuardrailConfig,
     GuardrailTripped,
-    RetryCeilingExceeded,
     Verdict,
     VerificationRun,
 )
@@ -88,7 +86,9 @@ class Cycle:
         return {"dispatch": self.dispatch, "verify": self.verify, "close": self.close}
 
 
-def _armed(config: GuardrailConfig | None = None, **kw) -> tuple[Governor, RecordingEscalationSink]:
+def _armed(
+    config: GuardrailConfig | None = None, **kw
+) -> tuple[Governor, RecordingEscalationSink]:
     """An armed governor + its recording escalation sink (the human seam)."""
     sink = RecordingEscalationSink()
     gov = Governor(config, sink=sink, **kw)
@@ -364,9 +364,17 @@ class AccountingTest(unittest.TestCase):
     def test_should_continue_does_not_mutate(self):
         gov, _ = _armed()
         gov.record_attempt("PLA-63")
-        before = (gov.ledger("PLA-63").attempts, gov.ledger("PLA-63").cost_spent, gov.global_cost)
+        before = (
+            gov.ledger("PLA-63").attempts,
+            gov.ledger("PLA-63").cost_spent,
+            gov.global_cost,
+        )
         gov.should_continue("PLA-63", cost=1.0)
-        after = (gov.ledger("PLA-63").attempts, gov.ledger("PLA-63").cost_spent, gov.global_cost)
+        after = (
+            gov.ledger("PLA-63").attempts,
+            gov.ledger("PLA-63").cost_spent,
+            gov.global_cost,
+        )
         self.assertEqual(before, after)
 
 

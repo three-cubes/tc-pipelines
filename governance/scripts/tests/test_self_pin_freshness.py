@@ -46,6 +46,7 @@ SELF_PIN = re.compile(
     r"three-cubes/tc-pipelines/(?P<path>[^@\s]+)@(?P<sha>[0-9a-f]{40})"
 )
 
+
 def _source_files() -> list[Path]:
     found: list[Path] = []
     for directory in SEARCH_DIRS:
@@ -69,11 +70,17 @@ def _self_pin_nodes(text: str) -> list[tuple[int, str, str]]:
         if not isinstance(node, yaml.MappingNode):
             return
         for key, value in node.value:
-            if getattr(key, "value", None) == "uses" and isinstance(value, yaml.ScalarNode):
+            if getattr(key, "value", None) == "uses" and isinstance(
+                value, yaml.ScalarNode
+            ):
                 match = SELF_PIN.fullmatch(value.value)
                 if match:
                     found.append(
-                        (key.start_mark.line + 1, match.group("path"), match.group("sha"))
+                        (
+                            key.start_mark.line + 1,
+                            match.group("path"),
+                            match.group("sha"),
+                        )
                     )
             walk(value)
 
