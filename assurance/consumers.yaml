@@ -7,7 +7,7 @@ render:
 consumers:
   - id: python
     install: [[uv, lock], [uv, sync, --locked]]
-    prepare: [[make, fix]]
+    prepare: [[make, prepare]]
     evaluate:
       affected: [uv, run, --no-sync, tc-fitness, run, --changed-files-from, .assurance-changed-files]
       complete: [uv, run, --no-sync, tc-fitness, run]
@@ -19,7 +19,7 @@ consumers:
       output_result: test-failure
   - id: mixed
     install: [[uv, lock], [uv, sync, --locked], [pnpm, install, --frozen-lockfile]]
-    prepare: [[make, fix], [pnpm, --filter, consumer-web, run, generate]]
+    prepare: [[make, prepare], [pnpm, --filter, consumer-web, run, generate]]
     evaluate:
       affected: [uv, run, --no-sync, tc-fitness, run, --changed-files-from, .assurance-changed-files]
       complete: [uv, run, --no-sync, tc-fitness, run]
@@ -34,7 +34,7 @@ consumers:
   - id: generated
     catalogue_checks: [no-llm-attribution, canonical-commit-identity, engine-version-floor, harness-canon-reference, ci-consumes-shared-gate]
     install: [[uv, lock], [uv, sync, --locked]]
-    prepare: [[make, fix]]
+    prepare: [[make, prepare]]
     evaluate:
       affected: [uv, run, --no-sync, tc-fitness, run, --changed-files-from, .assurance-changed-files]
       complete: [uv, run, --no-sync, tc-fitness, run]

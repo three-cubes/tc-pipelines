@@ -156,7 +156,7 @@ Consumers share the minimal Python product fixture. The mixed consumer adds an
 actual pnpm workspace and Node-generated output. The generated consumer merges
 its product declaration with the entire unmodified rendered fitness fragment,
 including all five CORE rules and the secret scan. All consumers run the
-rendered compatibility `make fix`; mixed also runs its product generator. The
+rendered `make prepare`; mixed also runs its product generator. The
 second preparation must change no source, lock or generated file. The candidate
 wheel, when supplied, is installed through an explicit uv source override.
 

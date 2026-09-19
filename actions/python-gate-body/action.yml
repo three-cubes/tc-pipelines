@@ -33,11 +33,10 @@ inputs:
       normalised tree. Empty skips the phase. Use this for mechanical fixes
       such as `ruff check --fix` and `ruff format`; the command must leave the
       checkout clean, proving that the committed tree was already normalized.
-      A changed tracked or untracked path fails before evaluation and tells the
-      contributor to run, review and commit the same normalizer locally. Do not
-      use it for network, credential, deploy, or remote write operations. The
-      consumer's local `make check` must invoke the same command before its
-      fitness gate.
+      A changed tracked or untracked path stops evaluation. The separate
+      preparation producer may turn those deterministic changes into a bounded,
+      identity-bound patch for trusted writeback. Do not use this input for
+      network, credential, deploy, or remote write operations.
     required: true
   pre-steps:
     required: true
@@ -188,9 +187,9 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       shell: bash
       run: ${{ inputs.pre-evaluation-normalize }}
 
-    # Post-merge evidence can promote only the committed tree. A normalizer may
-    # repair source locally, but CI must not evaluate that unpublished state and
-    # then attest that the unmodified merge commit passed.
+    # An evaluator never attests uncommitted bytes under the original commit
+    # identity. A separate unprivileged producer may package deterministic
+    # changes for a trusted writeback workflow before this gate runs again.
     - name: Bind evaluation to the committed tree
       if: inputs.pre-evaluation-normalize != ''
       shell: bash

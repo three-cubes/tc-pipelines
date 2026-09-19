@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -185,6 +185,7 @@ def test_evaluated_tree_guard_rejects_tracked_and_untracked_normalizer_changes(
     assert tracked.returncode != 0
     assert "tracked.txt" in tracked.stderr
     assert "commit" in tracked.stderr
+    assert "evaluation withheld" in tracked.stderr
 
     _git(repo, "reset", "--hard", "HEAD")
     (repo / "generated.txt").write_text("generated\n", encoding="utf-8")

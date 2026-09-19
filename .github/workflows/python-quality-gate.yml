@@ -105,8 +105,9 @@ on:
           after the requested Python and Node toolchains are installed, before
           changed-file capture or any evaluator. Use only safe mechanical
           repairs (for example `ruff check --fix` and `ruff format`), never a
-          deploy, remote write, credential action, or network fetch. The same
-          command must run in the consumer's local `make check` before
+          deploy, remote write, credential action, or network fetch. Evaluation
+          proceeds only when the prepared tree equals the committed candidate.
+          The same command runs in the consumer's local `make check` before
           `tc-fitness run`. Empty string preserves the prior behaviour.
         type: string
         default: ""

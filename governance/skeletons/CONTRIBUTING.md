@@ -8,16 +8,15 @@
 
 ```bash
 make setup
-make fix
+make prepare
 ```
 
-`make setup` installs the repository hooks. `make fix` applies the deterministic
-formatting and lock maintenance implemented by the rendered compatibility
-Makefile. Commit preparation output with the change that produced it.
+`make setup` installs the repository hooks. `make prepare` applies deterministic
+formatting and lock maintenance. `make check` runs preparation before evaluation.
+Commit preparation output with the change that produced it.
 
-The coordinated `tc-sdlc` adoption change replaces these compatibility targets
-with `make bootstrap`, `make prepare`, `make check` and `make check-all`. Use the
-commands present in the repository Makefile until that change lands.
+The coordinated `tc-sdlc` adoption adds `make bootstrap` and `make check-all`
+while retaining `make prepare` and `make check`.
 
 ## Develop and verify
 

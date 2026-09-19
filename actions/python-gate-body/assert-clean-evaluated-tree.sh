@@ -3,9 +3,9 @@ set -euo pipefail
 
 status="$(git status --porcelain=v1 --untracked-files=all)"
 if [[ -n "$status" ]]; then
-  echo "::error::pre-evaluation-normalize changed the evaluated tree; commit the deterministic changes before CI." >&2
+  echo "::error::pre-evaluation-normalize changed the candidate; evaluation withheld until those exact bytes are committed." >&2
   printf '%s\n' "$status" >&2
-  echo "fix: run the same normalizer locally, review and commit its output, then rerun the gate." >&2
+  echo "next: the unprivileged preparation producer must emit an identity-bound patch for trusted bot writeback." >&2
   exit 1
 fi
 

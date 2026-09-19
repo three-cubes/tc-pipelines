@@ -343,30 +343,24 @@ def test_wiring_render_resolves_every_token(tmp_path: Path) -> None:
         )
 
 
-def test_wiring_makefile_has_a_fix_target_running_the_autofixers(
+def test_wiring_makefile_prepares_before_every_local_check(
     tmp_path: Path,
 ) -> None:
-    # `make fix` shift-left (SGO-280): the rendered Makefile must CORRECT
-    # lint/format/lockfile deterministically so the local loop auto-fixes rather
-    # than only reporting it. `make check` stays the VERIFIER (unchanged).
     out_dir = tmp_path / "wire"
     assert _render(out_dir).returncode == 0
     makefile = (out_dir / "Makefile").read_text(encoding="utf-8")
 
-    # A real `fix:` target exists and is declared .PHONY.
-    assert re.search(r"^fix:", makefile, re.MULTILINE), "Makefile has no `fix:` target"
-    assert re.search(r"^\.PHONY:.*\bfix\b", makefile, re.MULTILINE), (
-        "`fix` is not .PHONY"
+    assert re.search(r"^prepare:", makefile, re.MULTILINE), (
+        "Makefile has no `prepare:` target"
     )
-
-    # It runs the deterministic auto-fixers: ruff --fix + ruff format + uv lock.
-    assert "ruff check --fix" in makefile, "fix target does not run `ruff check --fix`"
-    assert "ruff format" in makefile, "fix target does not run `ruff format`"
-    assert "uv lock" in makefile, "fix target does not run `uv lock`"
-
-    # `make check` stays the VERIFIER — fix and check are distinct targets.
-    assert re.search(r"^check:", makefile, re.MULTILINE), (
-        "Makefile lost its `check:` verifier"
+    assert re.search(r"^\.PHONY:.*\bprepare\b", makefile, re.MULTILINE), (
+        "`prepare` is not .PHONY"
+    )
+    assert "ruff check --fix" in makefile
+    assert "ruff format" in makefile
+    assert "uv lock" in makefile
+    assert re.search(r"^check:\s+prepare$", makefile, re.MULTILINE), (
+        "`make check` does not run preparation first"
     )
 
 
