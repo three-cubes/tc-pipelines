@@ -1,6 +1,8 @@
 """Public inventory rejects missing, orphaned and understated obligations."""
 
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -295,3 +297,106 @@ def test_bootstrap_render_only_runs_without_remote_configuration(tmp_path):
         == {}
     )
     assert (tmp_path / "rendered/Makefile").is_file()
+
+
+@pytest.mark.parametrize(
+    "defect",
+    ["ten-failures", "ten-skips", "ten-todos", "ten-aborted", "wrong-identity"],
+)
+def test_workspace_validator_rejects_real_incorrect_tap(tmp_path, defect):
+    import shutil
+
+    shutil.copytree(
+        ROOT / "assurance/fixtures/python/project", tmp_path, dirs_exist_ok=True
+    )
+    env = {**os.environ, "PYTHONPATH": str(tmp_path / "src")}
+    for argv in (
+        [
+            sys.executable,
+            "-m",
+            "coverage",
+            "run",
+            "--source=consumer",
+            "-m",
+            "pytest",
+            "-q",
+            "tests",
+            "--junitxml=artifacts/junit.xml",
+        ],
+        [sys.executable, "-m", "coverage", "xml", "-o", "artifacts/coverage.xml"],
+    ):
+        result = subprocess.run(
+            argv, cwd=tmp_path, env=env, text=True, capture_output=True, check=False
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    cases = {
+        "ten-failures": "for (let i = 0; i < 10; i++) test('generated-total', () => assert.equal(9, 5));",
+        "ten-skips": "test('generated-total', () => assert.equal(5, 5)); for (let i = 0; i < 10; i++) test.skip('unused', () => {});",
+        "ten-todos": "test('generated-total', () => assert.equal(5, 5)); for (let i = 0; i < 10; i++) test.todo('pending');",
+        "ten-aborted": "test('generated-total', () => assert.equal(5, 5)); for (let i = 0; i < 10; i++) test('unfinished', { signal: AbortSignal.abort() }, () => {});",
+        "wrong-identity": "test('not-generated-total', () => assert.equal(5, 5));",
+    }
+    (tmp_path / "negative.mjs").write_text(
+        "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\n"
+        + cases[defect]
+    )
+    node = subprocess.run(
+        [
+            "node",
+            "--test",
+            "--test-reporter=tap",
+            "--test-reporter-destination=artifacts/workspace.tap",
+            "negative.mjs",
+        ],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert node.returncode == (1 if defect in {"ten-failures", "ten-aborted"} else 0)
+    spec = importlib.util.spec_from_file_location("surface_assurance", CLI)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with pytest.raises(module.AssuranceError, match="unexpected-workspace-result"):
+        module.output_evidence(
+            tmp_path,
+            tmp_path / "retained",
+            "workspace-failure" if defect == "ten-failures" else "pass",
+            workspace=True,
+        )
+
+
+@pytest.mark.parametrize("defect", ["skip", "duplicate"])
+def test_generated_terminal_validator_rejects_real_altered_result(tmp_path, defect):
+    import shutil
+
+    root = tmp_path / "pipeline"
+    for name in ("governance", "assurance"):
+        shutil.copytree(
+            ROOT / name, root / name, ignore=shutil.ignore_patterns("__pycache__")
+        )
+    path = root / "assurance/consumers.yaml"
+    manifest = yaml.safe_load(path.read_text())
+    generated = next(row for row in manifest["consumers"] if row["id"] == "generated")
+    original = generated["evaluate"]["affected"]
+    alteration = (
+        "text = text.replace('FAIL [harness-canon-reference]', 'SKIP [harness-canon-reference]')"
+        if defect == "skip"
+        else "text += '\\nPASS [consumer-tests] consumer-tests\\n'"
+    )
+    # Execute the actual gate and alter only its generated sabotage transcript.
+    # The engine, returned status, produced files and positive path remain real.
+    script = (
+        "import re, subprocess, sys\n"
+        f"result = subprocess.run({original!r}, text=True, capture_output=True)\n"
+        "text = re.sub(r'\\x1b\\[[0-9;]*m', '', result.stdout + result.stderr)\n"
+        "if 'missing required harness entrypoint: CLAUDE.md' in text:\n"
+        f"    {alteration}\n"
+        "print(text)\nsys.exit(result.returncode)\n"
+    )
+    generated["evaluate"]["affected"] = ["python", "-c", script]
+    path.write_text(yaml.safe_dump(manifest))
+    result = invoke("lab", "--root", root, "--output", tmp_path / "evidence")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "unexpected-terminal-result" in result.stderr

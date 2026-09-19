@@ -230,14 +230,27 @@ def output_evidence(root, destination, expected, *, workspace=False):
             raise AssuranceError("missing-required-output: workspace TAP")
         text = tap.read_text()
         failures = 1 if expected == "workspace-failure" else 0
-        if not all(
-            value in text
-            for value in (
-                "# tests 1",
-                f"# fail {failures}",
-                f"# pass {1 - failures}",
-                "generated-total",
-            )
+        expected_counts = {
+            "tests": 1,
+            "suites": 0,
+            "pass": 1 - failures,
+            "fail": failures,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0,
+        }
+        counts = re.findall(
+            r"^# (tests|suites|pass|fail|cancelled|skipped|todo) ([0-9]+)$",
+            text,
+            re.MULTILINE,
+        )
+        points = re.findall(r"^(ok|not ok) ([0-9]+) - (.+)$", text, re.MULTILINE)
+        expected_point = ("not ok" if failures else "ok", "1", "generated-total")
+        if (
+            len(counts) != len(expected_counts)
+            or {name: int(value) for name, value in counts} != expected_counts
+            or points != [expected_point]
+            or re.findall(r"^[0-9]+\.\.[0-9]+.*$", text, re.MULTILINE) != ["1..1"]
         ):
             raise AssuranceError("unexpected-workspace-result: " + text)
         sources.append(tap)
@@ -397,20 +410,25 @@ def lab(root, output, wheel=None):
                             raise AssuranceError(
                                 f"unexpected-exit: {spec['id']}/{variant}/{phase}: {result.returncode}\n{terminal[-7000:]}"
                             )
-                        statuses = set(
-                            re.findall(
-                                r"^(PASS|FAIL|SKIP) \[([^]]+)\]", terminal, re.MULTILINE
-                            )
+                        records = re.findall(
+                            r"^(PASS|FAIL|SKIP) \[([^]\n]+)\](.*)$",
+                            terminal,
+                            re.MULTILINE,
                         )
-                        if {name for status, name in statuses} != gate_steps or len(
-                            statuses
-                        ) != len(gate_steps):
+                        if any(status == "SKIP" for status, _, _ in records):
                             raise AssuranceError(
-                                f"missing-terminal-step: {spec['id']}/{variant}/{phase}\n{terminal[-7000:]}"
+                                "unexpected-terminal-result: SKIP is not an executed result"
                             )
-                        failures = {
-                            name for status, name in statuses if status != "PASS"
-                        }
+                        # A CORE check can print its own FAIL diagnostic before
+                        # the dispatcher emits the terminal record with an exit
+                        # code. Only the latter is the execution result. Retain
+                        # all result records so duplicates cannot disappear.
+                        statuses = [
+                            (status, name)
+                            for status, name, detail in records
+                            if status != "FAIL"
+                            or re.search(r" \(exit [1-9][0-9]*\)$", detail)
+                        ]
                         expected_failures = (
                             {spec["sabotage"]["step"]}
                             if variant == "sabotage"
@@ -418,9 +436,13 @@ def lab(root, output, wheel=None):
                         )
                         if variant == "sabotage" and spec["sabotage"].get("rule"):
                             expected_failures.add(spec["sabotage"]["rule"])
-                        if failures != expected_failures:
+                        expected_statuses = [
+                            ("FAIL" if name in expected_failures else "PASS", name)
+                            for name in gate_steps
+                        ]
+                        if sorted(statuses) != sorted(expected_statuses):
                             raise AssuranceError(
-                                f"unexpected-step-failure: expected {expected_failures}, got {failures}"
+                                f"unexpected-terminal-result: expected {expected_statuses}, got {statuses}"
                             )
                         if variant == "sabotage":
                             for fragment in spec["sabotage"]["diagnostics"]:

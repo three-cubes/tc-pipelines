@@ -42,5 +42,5 @@ consumers:
       path: CLAUDE.md
       step: core-governance-checks
       rule: harness-canon-reference
-      diagnostics: ['FAIL', harness-canon-reference, CLAUDE.md]
+      diagnostics: ['missing required harness entrypoint: CLAUDE.md']
       output_result: pass
