@@ -34,7 +34,8 @@ the target actually observed.
 ## Runtime contract
 
 The portable validation document uses schema identifier `tc-fitness/runtime-contract/v1`. A
-consumer authors one target registry in YAML or JSON. `tc-fitness` loads it strictly, selects one
+consumer authors one target registry in YAML or JSON and references it from `sdlc.yaml`.
+`tc-sdlc` invokes the compatible `tc-fitness` engine, which loads it strictly and selects one
 environment and target, and produces canonical JSON for hashing and deployment. YAML support uses
 the engine's optional PyYAML extra; selecting YAML without that dependency fails with an actionable
 dependency error. The selected canonical bytes are hashed with SHA-256 and travel with the
@@ -138,10 +139,11 @@ finding states the source, JSON pointer, violated invariant, `fix:`, `next:` and
 
 ## Pipeline execution
 
-The Azure VM reusable keeps its existing WIF, Run Command, protected-parameter transport, locking,
-snapshot and cancellation cleanup. A deployment-contract action invokes the consumer's pinned
-`tc-fitness-runtime-contract` executable before authentication and after target execution. The same
-engine code validates local fixtures and live receipts.
+The SDLC deployment graph invokes the catalogue-compatible
+`tc-fitness-runtime-contract` executable before authentication and after target
+execution. The same engine code validates local fixtures and live receipts.
+The existing Azure VM reusable remains the compatibility transport while the
+Cloudflare SSH and Azure paths converge on the typed request and receipt.
 
 The target packages the receipt and each allowlisted diagnostic into a bounded archive, uploads it
 to the contract's private content-addressed evidence store with its managed identity, and returns a
@@ -198,13 +200,13 @@ evidence claim.
 
 Delivery follows this order:
 
-1. Add the opt-in checks to an unreleased `tc-fitness` candidate.
-2. Prove unchanged behaviour for a consumer with no configuration.
-3. Bind the candidate in one real consumer and run valid plus sabotaged contracts.
-4. Publish an immutable `tc-fitness` tag after candidate qualification.
-5. Add the contract action to `tc-pipelines`, exercise its caller, then publish an immutable tag.
-6. Repin the consumer and run the shared checks beside its existing local checks.
+1. Add the checks to a candidate `tc-fitness` release.
+2. Bind that engine into a candidate coordinated `tc-pipelines` release.
+3. Run valid and sabotaged reference consumer contracts through the candidate graph.
+4. Publish one SDLC release catalogue after qualification.
+5. Upgrade the consumer declaration and generated lock together.
+6. Run shared checks beside the existing compatibility checks.
 7. Remove an overlapping local check after verdict and diagnostic parity is recorded.
-8. Run production deployment and product PVT against the exact attested candidate.
+8. Run production deployment and product PVT against the exact qualified digest.
 
 Retention is a consumer value. The Hermes deployment uses `172800` seconds, or 48 hours.

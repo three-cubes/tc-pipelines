@@ -45,9 +45,18 @@ Idea → Issue → Plan → Execute → Review → Merge → Deploy → Verify
 | **Plan → Execute** | Branch from `main`, follow commit conventions, run verification after every logical change. |
 | **Execute → Review** | Open PR as the App, all automated checks pass, complete manual verification checklist. |
 | **Review → Merge** | On a green gate, `auto-merge-on-green.yml` arms `gh pr merge --auto` as the App and GitHub merges the moment every required check passes — no human runs the merge. Branch deletes after merge. |
-| **Merge → Release or Deploy → Verify** | A trunk-only package release validates the feature PR's preparation receipt and creates the immutable tag and GitHub Release from that reviewed merge. A package with durable `develop` and `main` branches prepares the stable release on its reviewed `develop` → `main` PR. A generic infrastructure merge to `main` runs `deploy-on-merge`, which calls `azure-vm-deploy.yml`: recovery point → apply → smoke. A product release runs candidate → protected publish → protected deployment. See `sdlc-release-workflow.md` and `ci-release-deployment-architecture.md`. |
+| **Merge → Release or Deploy → Verify** | Exact integration allocates the release, builds one immutable candidate, publishes it through the protected environment and deploys that digest. Product PVT promotes or rolls back the candidate. See `sdlc-release-workflow.md` and `ci-release-deployment-architecture.md`. |
 
-> **Merge to `main` runs generic infrastructure deployment.** `deploy-on-merge` calls [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml): WIF/OIDC authentication, recovery point, selected scope (`auto`/`config`/`infra`), and post-apply smoke probe. Product releases dispatch from their published candidate and complete when the product workflow writes the PVT receipt in [`ci-release-deployment-architecture.md`](ci-release-deployment-architecture.md). The default recovery point is a target-host snapshot. The container-only path uses the protected path/configuration backup and immutable predecessor image, sets `snapshot-policy=forbidden` and `skip-snapshot=true`, and supplies `container-rollback-receipt-digest`. The production Environment requires a human reviewer. See [`deployment-verification.md`](deployment-verification.md), [`snapshot-before-apply.md`](snapshot-before-apply.md), and [`agent-sdlc-access-and-hitl.md`](../agent-sdlc-access-and-hitl.md).
+> **Product release deploys the qualified digest.** The release graph hands the
+> candidate receipt to the protected production environment. The target verifies
+> recovery coverage, applies that digest and records product PVT, rollback and
+> cleanup. See [`deployment-verification.md`](deployment-verification.md),
+> [`snapshot-before-apply.md`](snapshot-before-apply.md), and
+> [`agent-sdlc-access-and-hitl.md`](../agent-sdlc-access-and-hitl.md).
+
+The current container-only path remains governed by
+[`snapshot-before-apply.md`](snapshot-before-apply.md) until its typed transaction
+replacement passes the same rollback journey.
 
 ---
 
@@ -68,45 +77,37 @@ Idea → Issue → Plan → Execute → Review → Merge → Deploy → Verify
 
 ## Quality Gates
 
-> **Improving a gate?** To add or change a fitness gate or a pipeline recommendation, converge up to the canonical home — never fork a check or inline a pipeline in a consumer repo. The mechanics (tc-fitness CORE check → tag-release → consumer-repin; tc-pipelines reusable → SHA-pin → tag) are in [`improving-fitness-gates.md`](improving-fitness-gates.md); the bar a gate must clear is [`gate-hardening.md`](../gate-hardening.md).
+> **Improving the shared product?** Change the canonical `tc-fitness` or
+> `tc-pipelines` home and qualify one coordinated SDLC release through
+> [`improving-fitness-gates.md`](improving-fitness-gates.md). The fitness quality
+> bar is [`gate-hardening.md`](../gate-hardening.md).
 
 ### Local-first feedback loop
 
-**The CI/CD pipeline is sign-off, never the primary feedback loop.** It is designed to be slow and thorough; using it to discover what's broken burns its purpose and everyone's time. Before **every** push:
+The released SDLC environment provides the local feedback loop and the hosted
+sign-off path. Use the stable repository commands:
 
 | Run locally | Covers |
 |---|---|
-| `make check` | the fitness harness + ruff/bandit/secret-scan/bicep/TS gates — **but NOT the platform pytest**: it skips `tests/` with `No platform Python tests present in tests/; skipping pytest` |
-| `uv run pytest tests/fitness <skill-test-dirs>` | the pytest run CI's **Quality gate AND SonarCloud scan** both execute. `make check` passing does NOT imply these pass — run pytest before every test/Python push |
-| `uv run detect-secrets-hook --baseline .secrets.baseline $(git diff --name-only origin/main...HEAD)` | CI's changed-file secret scan, against the same base |
-| `shellcheck` on touched shell scripts | CI shell linting |
+| `make bootstrap` | Released toolchain, dependencies and generated SDLC lock. |
+| `make prepare` | Formatting, generators, manifests and other deterministic maintenance. |
+| `make check` | Affected language, build, security and `tc-fitness` tasks. |
+| `make check-all` | Complete graph required for release admission. |
 
-A push whose CI failure was locally reproducible is a process violation. If CI fails anyway, reproduce the failure locally first, fix it there, and push once.
+Repositories on the migration path use their documented `make check` command
+until `tc-sdlc` supplies these targets. Their adoption state is recorded in
+[`../../docs/MIGRATION.md`](../../docs/MIGRATION.md).
 
 Record local evidence in the PR or handoff: tested commit, exact commands,
-terminal exit status, and the identity of each generated receipt or artifact. A
-started command or partial log records progress only. Passing evidence requires
-a complete terminal result with a successful verdict and the behavioural
-assertions required by that gate; process completion alone is not a passing
-result. The ordered validation ladder and stop conditions live in
+terminal exit status, SDLC lock, task identities and generated receipt or
+artifact identities. Passing evidence requires a complete terminal result and
+the behavioural assertions required by that task. The ordered validation ladder
+and stop conditions live in
 [`validation-and-backpressure.md`](validation-and-backpressure.md).
 
-Sync dependencies with **`uv sync --all-packages`** — bare `uv sync` uninstalls workspace-member dependencies (pptx, openpyxl, …) and false-fails `script_help_smoke`. The agent Bash tool runs **zsh**: `for x in $var` does not word-split (use `${(f)…}` or a literal list), and `mapfile` / `timeout` are unavailable.
-
-#### Generated-artefact regen map
-
-Adding or changing a surface regenerates a tracked artefact that a freshness gate enforces. Regenerate it and commit it in the same change, or CI fails on a stale artefact:
-
-| When you… | Regenerate | Commit as |
-|---|---|---|
-| add/change a public interface (MCP tool, CLI, Bicep, plugin) | the interface-inventory generator → `public-interface-inventory.yaml` | the repo's **generator identity**, in its own commit (per the `storage_policy_validate` gate) |
-| add an argparse CLI | an F30 outcome test (subprocess the script with the **literal** path string in `args`; assert on stdout) + a paired test (`test_discipline`); ensure `--help` exits 0 (`script_help_smoke`) | normal |
-| add/change a skill | `python3 scripts/build-skills-catalog.py` → `docs/architecture/skills-catalog.md` + `agent-bootstrap/capabilities/*.json` | normal |
-| lift a skill's maturity level | `python3 scripts/checks/skill_maturity_ledger.py --write` (reports) then `--accept-ratchet` (pin the baseline) | normal |
-
-A runtime-type classifier (e.g. `build-skills-catalog.py:_infer_skill_type`) MUST exclude `tests/`/`evals/` — a validation test must not reclassify a prompt-only skill as code. In `set -euo pipefail` scripts increment with `n=$((n + 1))`, never `((n++))`: `((n++))` returns the pre-increment value, whose arithmetic exit status is 1 when `n` is 0, so `set -e` aborts the script.
-
-A detect-secrets false positive on a keyword-like name (`secret_resolution`, an `api_key` placeholder) clears with an inline `# pragma: allowlist secret`; commit the hook's auto-updated `.secrets.baseline` alongside it.
+The consumer's `sdlc.yaml` declares generator inputs and outputs. `make prepare`
+refreshes them before evaluation. Repository-specific generator instructions
+live beside the generator or in the consumer resolver.
 
 ### Pre-Code Gates (All Work)
 
@@ -125,14 +126,12 @@ A detect-secrets false positive on a keyword-like name (`secret_resolution`, an 
 | Security scan | ✅ Yes |
 | Build succeeds | ✅ Yes |
 
-### Manual Gates (PR Checklist)
+### Product acceptance gates
 
-| Gate | When Required |
-|------|--------------|
-| Mobile/responsive test | Any visual change |
-| Keyboard navigation test | Any interactive element change |
-| Accessibility audit | Any new interactive element |
-| UI copy review | Any user-facing text change |
+Each product declares the journeys required by its change surface. UI changes
+include accessibility and supported viewport journeys. Runtime changes include
+real dependency, state and recovery journeys. The graph selects the declared
+journeys through project dependencies and affected inputs.
 
 ### Post-Deploy Gates
 
@@ -140,7 +139,7 @@ A detect-secrets false positive on a keyword-like name (`secret_resolution`, an 
 |------|------|
 | Health check | Health endpoint returns 200 |
 | Auth enforced | Authenticated endpoint returns 401 without token |
-| Smoke test | Post-deploy script confirms core flow works |
+| Product verification test | Product journey proves the deployed candidate's intended outcome |
 | No crash loops | Container/service logs show clean startup |
 
 ### Definition of Done
@@ -148,7 +147,9 @@ A detect-secrets false positive on a keyword-like name (`secret_resolution`, an 
 A change is DONE when its behaviour is proven and its required gate is verified. Two clauses make that concrete as procedure (layer-3 in [`agent-process-controls.md`](agent-process-controls.md)) rather than guidance a busy agent may skip:
 
 - **Pin a shared-contract behaviour change with red-before-green evidence.** A change to a shared contract — a public method, or an engine surface a consumer depends on — is DONE only when the PR body carries the pinning test run against the **old** behaviour and shown **failing**, then green on the new code. The failing run proves the test binds the behaviour that changed; a test added after the change can pass without ever exercising it.
-- **Claim "done" or "green" only from a verified required check.** Cite the actual required-check result — the pasted `gh pr checks <pr>` output for the named required contexts (**Quality gate**, **SonarCloud scan**, **SonarCloud Code Analysis**). "No visible fails" is not a green. Human review is the backstop for the claim; instrument the claim-then-corrected rate so the pattern trends.
+- **Claim "done" or "green" from a verified required check.** Cite the
+  repository's actual required contexts and terminal results. A workflow still
+  running or a partial log records progress.
 
 ---
 
@@ -317,12 +318,8 @@ DO WORK → REFLECT → LEARN → IMPROVE → APPLY → repeat
 
 ---
 
-## Per-repo reconciliation notes
+## Consumer-specific instructions
 
-Apply these repo-specific rules when adopting this baseline in a given repo:
-
-- Branch from current `main` and use PRs for all repo changes.
-- Do not edit live runtime config directly; change templates/scripts in the repo and apply only after explicit approval.
-- Do not restart live services or deploy as part of documentation or standards work.
-- One complete-feature PR with evidence (diff, validation command, rollback note) — never micro-PRs.
-- Where a repo deploys to a host, treat the repo's checked-out tree as the canonical **deploy source** and engineering/edit surface — but **not a runtime path**. Operational code (gateway/MCP/plugins/hooks) should execute from an immutable, published tree; a deploy is `git pull` (source) → publish the immutable tree → render config + restart. See the repo's deploy runbook.
+The consumer resolver routes product files, runtime adapters and runbooks. The
+shared product supplies environment, orchestration and evidence. Product
+deployment applies immutable published artefacts and records the deployed digest.

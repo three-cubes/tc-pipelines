@@ -39,8 +39,8 @@ jobs:
       # here so the scan runs once.
       run-no-attribution: false
 
-  # The repo's product is workflows and composite actions, so its tests are
-  # contract tests over those files and the scripts they call. actionlint and
+  # The current self-gate exercises the migration-layer workflows, actions and
+  # helper scripts. actionlint and
   # yamllint judge each file alone and cannot see a broken relationship between
   # two of them — a lane dropping a required input, two reusables' defaults
   # drifting apart, a step pinned to a ref whose action no longer emits the

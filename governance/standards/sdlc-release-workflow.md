@@ -1,271 +1,146 @@
----
-type: standard
-context: three-cubes
-status: active
-version: "1.0"
-created: 2026-04-18
-owner: platform
-tags: [sdlc, git, release, branching, versioning, standards]
----
-
 # SDLC Release Workflow
 
-Standard branching model, versioning convention, and release process for **public Three Cubes repositories that ship as installable packages** (today: `quanyeomans/kairix`). This document is the canonical home for the CalVer + `main`/`develop` model.
+This standard defines how a reviewed integration commit becomes one immutable
+release. It implements the release portion of
+[`ai-sdlc-product-architecture.md`](ai-sdlc-product-architecture.md) and uses the
+candidate and evidence contract in
+[`ci-release-deployment-architecture.md`](ci-release-deployment-architecture.md).
 
-**Related:**
-- the development-workflow standard — general PR + quality-gate workflow
-- a trunk-only repo's `CLAUDE.md` — trunk-only operating posture (overrides the develop-branch model below for that repo)
-- the python-dependency-locking standard — uv lockfile rules (applies to released Python packages)
+## Release outcome
 
-> **Reconciliation with trunk-only repos.** A trunk-only repo (e.g. `tc-agent-zone`) follows this model by exception: `main` is the only durable branch (direct push is blocked — every change lands via PR), with one feature branch per feature merged to `main` ~daily per the development-workflow standard §Branching (no long-lived `develop`). The `main`/`develop`/alpha-tag model below applies to **kairix** and any **future package repos that need a public/internal split**. If a trunk-only repo's deploy story later requires pre-release pinning, this doc is the source pattern to adapt — but until then, do not introduce a `develop` branch into a trunk-only repo.
+A release produces:
 
----
+- one version allocated from the repository's declared version scheme;
+- one protected tag bound to the admitted commit;
+- one set of package or container artefacts;
+- content digests and build provenance;
+- generated release notes;
+- one candidate receipt;
+- one terminal publish result.
 
-## 1. Why this model
+Application artefacts are built once. Qualification, publication and deployment
+consume the recorded digests.
 
-We deploy to a private VM before publishing to a public repository. This creates a gap: the public `main` branch must only contain validated, production-quality code, but we need a stable target for CI and VM testing while features accumulate.
+## Trunk flow
 
-The model solves this with two durable branches and pre-release tags:
-
-- `main` is always releasable. Public users and `pip install` see only validated commits.
-- `develop` accumulates features between releases. The VM deploys from pre-release tags cut from `develop`.
-- `main` never receives direct commits — only merge commits from `develop` at release time.
-
----
-
-## 2. Branch structure
-
-```
-main        ← validated releases only
-             ← CalVer tags: v2026.4.18, v2026.5.1, …
-             ← CHANGELOG updated here
-             ← pip install kairix → this branch
-
-develop     ← all feature PRs merge here
-             ← CI runs on every PR
-             ← alpha tags: v2026.4.18a1, a2, …
-             ← VM deploys from alpha tags
-
-feature/*   ← one branch per feature or fix, PR → develop
-hotfix/*    ← urgent fix branched from main, PR → main AND back-merged to develop
-```
-
-### Branch naming
-
-| Prefix | Use |
-|---|---|
-| `feature/FEAT-NNN-short-description` | New capability, from develop |
-| `fix/short-description` | Bug fix, from develop |
-| `hotfix/short-description` | Critical production fix, from main |
-| `docs/short-description` | Docs-only change, from develop |
-| `chore/short-description` | Tooling, CI, dependency update |
-
----
-
-## 3. Versioning — CalVer
-
-All package repos use **Calendar Versioning**: `YYYY.MM.DD` (no leading zeros in month/day).
-
-| Context | Format | Example |
-|---|---|---|
-| Stable release (main) | `YYYY.MM.DD` | `2026.4.18` |
-| Same-day second release | `YYYY.MM.DD.N` | `2026.4.18.1` |
-| Alpha pre-release (develop) | `YYYY.MM.DDaN` | `2026.4.18a1` |
-| Development snapshot | `YYYY.MM.DD.devN` | `2026.4.18.dev1` |
-
-**Rules:**
-- `pyproject.toml` version is `YYYY.MM.DDaN` while on `develop`. Changed to `YYYY.MM.DD` in the merge-to-main PR.
-- Alpha numbering resets to `a1` for each new CalVer date. `a2`, `a3` etc. when multiple alpha tags are cut on the same date.
-- PEP 440 alpha releases (`aN`) are preferred over dev releases (`.devN`) because `pip install <package>` ignores alpha pre-releases by default — users on `pip install` always get stable.
-
----
-
-## 4. Day-to-day workflow
-
-### Starting a feature
-
-```bash
-git checkout develop
-git pull origin develop
-git checkout -b feature/FEAT-042-cross-encoder-reranking
-# ... work ...
-git push origin feature/FEAT-042-cross-encoder-reranking
-# Open PR → develop
+```text
+feature PR
+   |
+   v
+exact integration validation
+   |
+   v
+allocate version and build candidate
+   |
+   v
+protected publish
+   |
+   v
+deployment or package availability receipt
 ```
 
-### PR requirements before merge to develop
+The feature PR carries product behaviour and user-visible release-note input.
+The release graph allocates and materialises release metadata after the exact
+integration commit is known. This removes release-only PRs and hand-maintained
+version choreography.
 
-- All CI checks pass (unit tests, linting, type checking)
-- Benchmark gate passes (auto-triggers for retrieval code changes)
-- At least one reviewer approval (or self-merge with written rationale for solo work)
+## Version allocation
 
-### After PR merges to develop
+The consumer declaration selects its version scheme:
 
-If the VM needs this specific change immediately, cut a new alpha tag:
-```bash
-git checkout develop && git pull
-git tag v2026.4.18a2
-git push origin v2026.4.18a2
-```
-Then on the VM:
-```bash
-pip install git+https://github.com/quanyeomans/kairix@v2026.4.18a2
-```
+- semantic version for reusable packages and SDLC products;
+- calendar version for products that publish by date;
+- repository-native version where an external contract requires it.
 
-Otherwise wait — alpha tags are cut in batches when a VM deploy makes sense.
+The release allocator serialises allocation, reads the protected tag set and
+reserves the next valid version. The candidate receipt records the scheme,
+allocated version and source commit. A repeated run for the same commit returns
+the existing identity.
 
----
+Package metadata and version files are generated release outputs where the
+ecosystem requires them. Source code reads installed package metadata or the
+candidate receipt. Contributors do not maintain duplicate fallback versions.
 
-## 5. VM deployment from develop
+## Release notes
 
-The VM always runs a pinned alpha tag, never `@develop` directly (floating refs make rollback harder).
+Feature PRs provide user-visible notes through structured PR metadata or an
+`Unreleased` section when the product needs curated wording. The release task
+collects the merged entries, links work items and produces the final versioned
+notes.
 
-```bash
-# Deploy a specific alpha to VM
-pip install git+https://github.com/quanyeomans/kairix@v2026.4.18a1
+The release receipt records the input commit and release-note digest. A rerun
+for the same candidate verifies that digest before confirming the existing
+GitHub Release.
 
-# Check what is installed
-pip show kairix
+## Package release
 
-# Rollback to previous alpha
-pip install git+https://github.com/quanyeomans/kairix@v2026.4.17a2
-```
+The candidate graph:
 
-**Validation checklist before cutting a stable release:**
+1. creates a clean source archive or package build environment;
+2. installs from locked dependencies;
+3. runs the complete package and consumer contract graph;
+4. builds the package once;
+5. verifies package contents, metadata, import and CLI surfaces;
+6. records artefact digests and provenance;
+7. publishes after the protected environment decision.
 
-- [ ] `kairix onboard check` reports green on VM
-- [ ] `kairix embed` completes without errors
-- [ ] `kairix benchmark run` weighted total >= previous stable baseline
-- [ ] MCP server starts and responds to `search` tool call
-- [ ] No regression in monitoring log (`kairix eval monitor`)
+Reference consumer fixtures install the built package artefact, rather than a
+source checkout, before publication.
 
----
+## Container release
 
-## 6. Cutting a stable release
+The candidate graph:
 
-Once `develop` is validated on the VM:
+1. builds one OCI image;
+2. records the image digest and source identity;
+3. generates provenance and the configured SBOM;
+4. runs local and hosted qualification against that digest;
+5. publishes the qualified digest;
+6. dispatches protected deployment with the candidate receipt.
 
-1. **Open a PR: `develop → main`**
-   - Title: `release: v2026.4.18`
-   - Run the canonical `prepare-release-metadata` action once with
-     `version: v2026.4.18`. It updates the repository's version source, moves
-     populated `Unreleased` notes into `## [2026.4.18] — <date>`, and writes the
-     preparation receipt.
-   - Commit the action's outputs in this reviewed PR. The release workflow
-     rejects a tag when that receipt, the version source, or the CHANGELOG digest
-     is absent or differs.
-   - CI must pass on the PR
+Tags provide human-readable discovery. Digests provide execution identity.
 
-2. **Merge the PR with a merge commit.** This preserves the reviewed commit
-   ancestry required by immutable internal pins; repository settings disable
-   squash and rebase merges.
+## Coordinated tc-pipelines release
 
-3. **Release the merge automatically.** The receipt-changing merged-PR workflow
-   passes the exact merge commit SHA to `release-on-merge.yml`. The reusable
-   validates the receipt, creates the annotated tag at that SHA, and creates the
-   GitHub Release as `three-cubes-agent`. Replaying the workflow confirms the
-   existing tag and Release without creating another release.
+A `tc-pipelines` release binds:
 
-4. **Immediately cut a new develop alpha** for the next cycle:
-   ```bash
-   git checkout develop
-   git merge main  # keep develop ahead of main
-   # bump pyproject.toml version to next expected CalVer + a1
-   git commit -am "chore: bump develop to 2026.5.1a1"
-   git push origin develop
-   ```
+- `@three-cubes/tc-sdlc` package version;
+- canonical SDLC image digest;
+- GitHub workflow commit;
+- schema version;
+- compatible `tc-fitness` version.
 
-5. **VM final deploy from stable tag:**
-   ```bash
-   pip install git+https://github.com/quanyeomans/kairix@v2026.4.18
-   ```
+The published release catalogue is the input to generated consumer upgrades.
+See [`supply-chain-pinning.md`](supply-chain-pinning.md).
 
-### Trunk-only package repositories
+## Failure and retry
 
-A trunk-only package repository prepares and releases the feature PR that
-contains the releasable change:
+Every stage is idempotent for one candidate identity. A retry verifies existing
+tags, packages, images and releases by digest before confirming them. A digest
+mismatch stops publication and records the conflicting identity.
 
-1. Add the user-visible CHANGELOG entry under `Unreleased` while implementing
-   the change.
-2. The generated workflow holds the repository's version source. Bootstrap
-   sets it once with `--release-version-source version-file|pyproject`; a
-   release dispatch cannot replace it.
-3. Dispatch `Prepare release` on that feature branch with an exact version or
-   `major`, `minor`, or `patch`. The App commits the generated version, lockfile,
-   dated CHANGELOG section, and receipt to the same branch.
-4. Review and run the required checks on the resulting feature PR head.
-5. Merge with a merge commit. A receipt-filtered `pull_request.closed` caller
-   passes `merge_commit_sha` to the pinned `release-on-merge.yml` reusable.
-6. Consume the immutable tag created at that exact reviewed merge commit.
+Failed builds and qualification runs retain bounded diagnostics. Unpublished
+artefacts expire through lifecycle cleanup. Published immutable artefacts remain
+available for rollback according to product retention policy.
 
-The feature PR is the release candidate. Preparation changes the same branch,
-and merge completes the release without another version-only PR or a repeated
-post-merge quality run.
+## Current compatibility path
 
----
+The current preparation receipt, version source, CHANGELOG promotion and
+`release-on-merge.yml` workflows remain supported during migration. They become
+executors in the release graph before their standalone orchestration is removed.
 
-## 7. CHANGELOG format
+Repositories with a durable `develop` branch may retain that policy until they
+adopt exact-integration candidate allocation. The target release flow uses one
+protected trunk and short-lived feature branches.
 
-Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Every PR that adds user-visible behaviour adds a bullet under `## [Unreleased]`. The preparation action moves those bullets to a dated section on the reviewed release-candidate branch.
+## Acceptance criteria
 
-```markdown
-## [Unreleased]
-
-## [2026.4.18] - 2026-04-18
-
-### Added
-- Cross-encoder re-ranking (`pip install kairix[rerank]`, opt-in via config)
-- CI benchmark regression gate (contract suite, mock backend, auto PR comment)
-
-### Changed
-- Temporal chunk-date boost now requires explicit temporal marker in query (guard on by default)
-
-### Fixed
-- `_enrich_chunk_dates` path match now uses LIKE suffix (was exact match, missed all rows)
-```
-
----
-
-## 8. Hotfixes
-
-For urgent production bugs that cannot wait for the next release cycle:
-
-```bash
-git checkout main
-git checkout -b hotfix/critical-embed-bug
-# fix
-git push origin hotfix/critical-embed-bug
-# PR → main (fast, minimal review)
-# After merge to main:
-git checkout main && git pull
-git tag v2026.4.18.1   # same-day patch suffix
-git push origin v2026.4.18.1
-# Back-merge to develop
-git checkout develop
-git merge main
-git push origin develop
-```
-
----
-
-## 9. Applying this model to other repos
-
-The same model applies to all Three Cubes **package** repos. Repo-specific details:
-
-| Repo | Notes |
-|---|---|
-| `quanyeomans/kairix` | Public package. `main` is public-facing. Alpha tags for VM. |
-| `three-cubes/tc-agent-zone` | **Exception — trunk-only.** Private. No `develop` branch. See its `CLAUDE.md` and the development-workflow standard. Alpha tags not used. |
-| Future repos | Follow this standard by default. Document deviations in repo CONTRIBUTING.md or its `CLAUDE.md`. |
-
-For repos that deploy via `git pull` (not pip install), use the same alpha tag convention for VM pinning but deploy with:
-```bash
-git fetch origin
-git checkout v2026.4.18a1  # detached HEAD, pinned
-# or
-git reset --hard v2026.4.18a1
-```
-
-### Trunk-only VM-deploy repos — deploy on merge
-
-A trunk-only repo that deploys to a VM (e.g. `tc-agent-zone`) does not cut alpha tags or run a manual `git checkout` on the deploy path. Merge to `main` **triggers** its `deploy-on-merge` workflow, which calls the tc-pipelines [`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable (pinned to a `@vN` tag) to snapshot → apply → smoke the target VM. The deploy is bracketed by a recovery-point snapshot before the first mutation and a verification probe after — see [`snapshot-before-apply.md`](snapshot-before-apply.md) + [`deployment-verification.md`](deployment-verification.md). Reserve the manual pinned-checkout flow above for operator-driven or recovery deploys; the pip-install alpha-tag flow (§4–§6) stays scoped to package repos.
+- the admitted commit is the candidate source;
+- version allocation is unique and repeatable;
+- release metadata requires no release-only PR;
+- packages and images build once;
+- qualification consumes built artefacts;
+- every published artefact has a digest and provenance;
+- reruns confirm or reject existing state deterministically;
+- one release catalogue drives `tc-pipelines` consumer upgrades;
+- the release receipt links work item, commit, artefact and terminal result.

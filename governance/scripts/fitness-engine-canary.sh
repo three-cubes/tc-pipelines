@@ -10,7 +10,8 @@
 #
 # Contract: the canary EXITS WITH THE CONSUMER GATE'S EXIT CODE. A red consumer
 # gate (non-zero) → the canary exits non-zero → the release is blocked. A green
-# gate (0) → the canary exits 0 → the tag + repin may proceed. It repins the
+# gate (0) → the qualification exits 0 → the current release path may proceed.
+# It updates the
 # consumer's three-cubes-fitness pin to the candidate ref, then runs the gate in
 # the consumer dir; the gate command is injectable so the core is unit-testable
 # without a live engine or network.

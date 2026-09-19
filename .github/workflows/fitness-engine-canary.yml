@@ -13,7 +13,8 @@ name: fitness-engine-canary
 # consumer's three-cubes-fitness pin to `candidate-ref` and runs `gate-command`
 # in the consumer dir, EXITING WITH THE GATE'S EXIT CODE — so this job is red iff
 # the consumer gate is red against the candidate. Pin this in the engine-release
-# workflow as a REQUIRED step between "engine PR merged" and "tag + repin".
+# workflow as a REQUIRED compatibility step before the candidate engine is
+# admitted to the current release path.
 #
 # All caller-supplied inputs are env-bound before reaching a shell body (never
 # interpolated into a `run:` string) so a value can't break out of its string

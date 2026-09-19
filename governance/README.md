@@ -1,13 +1,12 @@
-# governance/ — Golden Path repo-governance templates
+# Governance library
 
-> 🛑 **Start at [`STANDARDS.md`](STANDARDS.md)** — the canonical index of the org's build/release/governance
-> intent (the Build & Release Health OKRs, the kairix#499 fitness spec, the canonical homes, the merge model).
-> **Do not re-derive any of it; converge up and promote improvements into the canonical homes.**
+> Start at [`standards/ai-sdlc-product-architecture.md`](standards/ai-sdlc-product-architecture.md)
+> for the product boundary and [`STANDARDS.md`](STANDARDS.md) for the standards index.
 
 
-The canonical baseline a new Three Cubes repo adopts so its branch protection,
-review routing, dependency policy, and local gate all match the Golden Path —
-without hand-copying drift. Applied by
+The canonical baseline a Three Cubes repository adopts so its SDLC declaration,
+fitness configuration, branch protection, review routing and dependency policy
+use the shared product. The current compatibility payload is applied by
 [`scripts/bootstrap-repo-governance.sh`](scripts/bootstrap-repo-governance.sh),
 which wires a repo from these templates.
 
@@ -26,10 +25,10 @@ ships no JS; add repo-specific CODEOWNERS paths or pre-commit hooks). The
 ruleset's required-check contexts are the Golden Path contract and should not be
 weakened.
 
-Branch protection is applied at the **org** level — no repo commits its own `main`
-ruleset — so every repo enforces the same gate. The fitness gate itself lives in
-[tc-fitness](https://github.com/three-cubes/tc-fitness); the reusable CI that
-produces the required `Quality gate` (and `no-attribution`) checks lives here in
+Branch protection is applied at the **org** level so every repo enforces the
+same required contexts. The fitness engine and check catalogue live in
+[tc-fitness](https://github.com/three-cubes/tc-fitness). The environment, task
+graph, hosted entrypoints and governance product live here in
 [tc-pipelines](../README.md).
 
 The bar those checks must meet for a repo to run **autonomously** (0 approvals on work) is

@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 # safe-commit.sh — commit only if the canonical gate passes. Repo-agnostic.
 #
-# The gate is the Three Cubes inner-loop contract (STANDARDS.md §5): replay
-# EXACTLY what CI runs —
+# Current compatibility implementation of the Three Cubes inner-loop contract:
 #   uv run pre-commit run [--all-files]   (cheap hygiene: lint/format/actionlint/
 #                                           shell-lint/secret-scan/no-attribution)
 #   uv run tc-fitness run   [--staged]     (the fitness catalogue: typing, honest
 #                                           coverage, mutation, architecture)
-# — then commit only on green. `make check == CI` by construction because both
-# read this repo's [tool.tc_fitness] block. There are NO repo-specific stages in
-# this script: the catalogue lives in tc-fitness, the hygiene set in
-# .pre-commit-config.yaml. Promote a new check into tc-fitness, never inline here.
+# — then commit only on green. The tc-sdlc migration replaces this sequence with
+# the released preparation and task graph. The fitness catalogue remains in
+# tc-fitness and repository-specific tasks remain in the consumer declaration.
 #
 # Usage:
 #   bash scripts/safe-commit.sh "commit message"            # full gate (the merge bar)

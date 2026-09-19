@@ -1,18 +1,19 @@
-# Three Cubes — Build, Release & Governance Standard (CANONICAL)
+# Three Cubes AI SDLC Standard
 
 > **🛑 Agents & humans: READ THIS before touching CI, the quality gate, fitness functions,
 > coverage, mutation, or merge governance in ANY repo. These standards already exist and are
 > detailed. Do NOT re-derive them. Converge *up* to them; promote improvements *into* the
 > canonical homes below — never fork a parallel standard.**
 
-This is the single referenceable index of the org's build/release/governance intent. It points to
-the authoritative sources; it does not restate them.
+This is the canonical index for the shared development environment, fitness,
+CI, release, deployment and governance product. The product architecture is
+[`standards/ai-sdlc-product-architecture.md`](standards/ai-sdlc-product-architecture.md).
 
 ## 1. Quality + fast-feedback requirements (the OKRs)
 
 **[Build & Release Health initiative](https://linear.app/three-cubes/initiative/build-and-release-health-afb5e313b215)** (Linear) — the requirements, from a 6-agent root-cause diagnosis (2026-06-21):
 
-- **O1 — Trustworthy local loop:** `make check` runs the *literal* CI command; a **<60s smoke tier** exists. (Fast feedback is a first-class requirement, not a nice-to-have.)
+- **O1 — Trustworthy local loop:** local and CI resolve the same released environment, lock and task definitions; a **<60s warm affected tier** exists.
 - **O2 — Honest, enforcing coverage:** whole-product scope, re-captured baseline, **required monotonic ratchet**, no skip-pass.
 - **O3 — Fitness that bites:** ≥1 architecture/layering gate, mutation pilot, de-theatre placement-only rules.
 - **O4 — Self-draining supply chain:** dependency auto-merge, zero high-severity alerts > 7 days.
@@ -25,17 +26,21 @@ KPIs and the **Wave 0/1/2** execution plan live in the initiative.
 
 - the **F-series** fitness functions (~70 ADR/incident-traced rules), a single catalogue, never-renumber discipline;
 - the **tiered, time-budgeted execution model** — pre-commit / safe-commit / CI Stage-0 (**<3s**); diff-scoped mutation (**~2–3 min**); nightly soak (non-blocking). *This is how "harder gate" and "fast feedback" coexist — rigour is diff-scoped and tiered, never brute-forced on the inner loop.*
-- **Phase 4 = org-shared CI** (`uses:` reusables) — the convergence every repo follows.
+- **Phase 4 = org-shared execution** — the released environment, task graph,
+  fitness profiles and hosted workflow entrypoints consumed by every repo.
 
-**kairix is the reference implementation.** Best-of-breed patterns are promoted *into* the canonical
-engine + reusables, then every repo converges up — nobody is down-levelled.
+`tc-agent-zone` is the first complete environment-to-production vertical.
+Kairix remains a reference consumer for fitness behaviour. Proven shared
+patterns move into `tc-pipelines` or `tc-fitness`, then consumers upgrade through
+one coordinated SDLC release.
 
 ## 3. Canonical homes (where the standard lives — improve it HERE)
 
-- **[`tc-fitness`](https://github.com/three-cubes/tc-fitness)** — the runnable gate engine (`uv run tc-fitness run`) + the check catalogue. New checks land here.
-- **[`tc-pipelines`](https://github.com/three-cubes/tc-pipelines)** (this repo) — the reusable `workflow_call` workflows + composite actions + `governance/` templates (rulesets, CODEOWNERS, gate-hardening, dependabot, pre-commit). CI + governance shape land here.
+- **[`tc-pipelines`](https://github.com/three-cubes/tc-pipelines)** (this repo) — the released SDLC environment, task graph, reusable workflows, evidence and deployment protocols, governance library and adoption tooling.
+- **[`tc-fitness`](https://github.com/three-cubes/tc-fitness)** — the runnable fitness engine and shared check catalogue. `tc-pipelines` executes compatible fitness profiles as graph tasks.
+- **Consumer repository** — product source, tests, generated artefacts, qualification journeys, runtime configuration and deployment values.
 - **[`governance/gate-hardening.md`](gate-hardening.md)** — the bar a repo's gate must clear before it runs autonomously (a pointer to the §2 spec, not a parallel definition).
-- **[`governance/standards/improving-fitness-gates.md`](standards/improving-fitness-gates.md)** — the mechanics of changing a gate or a reusable and shipping it (converge-up, tag-release, consumer-repin); the complement to `gate-hardening.md` (the bar).
+- **[`governance/standards/improving-fitness-gates.md`](standards/improving-fitness-gates.md)** — change a shared capability, qualify a coordinated SDLC release and upgrade consumers; the complement to `gate-hardening.md` (the bar).
 
 ## 4. Merge governance (the model)
 
@@ -50,48 +55,37 @@ This model is **safe only because the gate is hard + fast** (§1–§2). Harden 
 
 The **failure-driven auto-dispatch loop** that rides this model — its explicit state machine, the deterministic-glue vs judgment split, and the 5 hard guardrails that must be *proven to fire* before any lights-out flag flips — is specified in [`governance/autonomous-loop.md`](autonomous-loop.md) (decision record: [`governance/decisions/ADR-LOOP-STATE-MACHINE.md`](decisions/ADR-LOOP-STATE-MACHINE.md); validation harness: [`governance/loop/`](loop/)). **No auto-dispatch flag flips until that harness is green** (SP-C-1 / PLA-309).
 
-## 5. The inner-loop contract — replay the gate before you push
+## 5. The inner-loop contract
 
-The merge model (§4) is safe **only if green-locally implies green-in-CI.** Every `main`-break this
-org has had traces to a violation of one of these four rules:
+The stable consumer commands are defined by the AI SDLC product architecture:
 
-1. **Replay the *exact* CI gate locally before every push.** With the full dev env installed
-   (`uv sync --all-extras --all-groups`), run what CI runs — `uv run pre-commit run --all-files`
-   **and** `uv run tc-fitness run` — and get it green. A bare `python3` / `ruff` / single-file run is
-   **not** a replay: it silently skips import-dependent fitness rules (they need the engine installed)
-   and only checks the files you name, while CI runs `--all-files`. Repo-specific hooks that import
-   repo code, `tc-fitness`, or tool dependencies must enter the locked uv environment and use a
-   locked uv environment, resolving ONE cache per machine and ONE venv per project
-   (see `standards/python-dependency-locking.md` §Cache and venv resolution — never a
-   per-repo cache, and never a forced `UV_LINK_MODE`). Bare `python3` is allowed only for
-   stdlib-only hooks. If it is green locally but red in CI, that is an **O1 parity bug in the local
-   loop** (§1, O1) — fix the loop; never paper over it.
+1. `make bootstrap` materialises the released environment and lock.
+2. `make prepare` completes deterministic generators, formatting, lock and
+   manifest maintenance.
+3. `make check` executes the affected graph and selected `tc-fitness` profile.
+4. `make check-all` executes the complete graph before release admission.
 
-2. **Regenerate-and-stage generated artifacts.** When you touch an *input* to a generated file,
-   regenerate it and stage it in the **same** commit. A stale generated artifact reds `main` even when
-   your hand-edit was correct. Known input→artifact pairs: `.github/CODEOWNERS` →
-   `public-interface-inventory.yaml`; catalogue inputs → the catalogue-currency check. The `pre-push`
-   hook (`governance/git-hooks/pre-push`, wired via `pre-commit install --hook-type pre-push`) now
-   enforces this by replaying the full `tc-fitness run` before every push — a stale artifact fails the
-   gate locally. `git push --no-verify` skips it, for a genuine emergency only.
+Local and hosted execution record the same SDLC lock, task definitions and input
+identities. The canonical Linux image provides release evidence. Native execution
+provides the supported platform feedback path.
 
-3. **Reconcile before push — locally, never in the UI.** When your branch is behind trunk, run
-   `git fetch && git merge origin/main` **locally**, replay the gate (rule 1), then push once. Clicking
-   *Update branch* in the GitHub UI merges trunk and launches a fresh ~16-minute CI run you have not
-   replayed — the merge result can red even when your branch was green. Reconcile-and-replay locally so
-   the push you make is the exact state CI signs off.
+Reconcile the feature branch with `origin/main`, rerun preparation and the
+required graph, then push the tested commit. Required checks admit only a green
+result. Generated changes produced by preparation land in the same feature
+change as their inputs.
 
-4. **Never merge over a red gate.** No admin bypass, no "I'll fix it after." A red gate means the
-   change is not done. The autonomous rulesets enforce this (zero bypass actors); **humans must hold
-   the same line** — admin-merging red work is what breaks `main` and forces self-heal churn.
+Repositories still on the compatibility path run their documented `make check`
+entrypoint. Their migration work is tracked through
+[`../docs/MIGRATION.md`](../docs/MIGRATION.md); individual uv, pre-commit and
+workflow commands are implementation details of that entrypoint.
 
 ## 6. For agents (the anti-reinvention rule)
 
 Before you design a quality gate, a fitness function, a coverage/mutation policy, a CI workflow, or a
 governance rule: **it already exists above.** Read it. If it's missing or weak, **propose the change
 into the canonical home** (§3) — open a PR to `tc-fitness`/`tc-pipelines` — do not re-create it in a
-single repo. The mechanics of that change (CORE check → tag-release → consumer-repin; reusable →
-SHA-pin → tag) are in [`standards/improving-fitness-gates.md`](standards/improving-fitness-gates.md).
+single repo. The qualification and coordinated release process is in
+[`standards/improving-fitness-gates.md`](standards/improving-fitness-gates.md).
 Every repo's `AGENTS.md` / `CLAUDE.md` / `.github/copilot-instructions.md` links here for exactly
 this reason.
 
@@ -105,7 +99,8 @@ level — see §3–§4 — and are not duplicated below.)
 
 | Concern | Standard | What it governs |
 |---|---|---|
-| SDLC & workflow | [`development-workflow.md`](standards/development-workflow.md) | Branch, commit, PR, quality-gate, local-first loop conventions. |
+| SDLC & workflow | [`ai-sdlc-product-architecture.md`](standards/ai-sdlc-product-architecture.md) | Shared environment, task graph, fitness integration, evidence and deployment product. |
+| SDLC & workflow | [`development-workflow.md`](standards/development-workflow.md) | Branch, commit, PR and local-first loop conventions. |
 | SDLC & workflow | [`testing-strategy.md`](standards/testing-strategy.md) | The test pyramid (contract/integration/E2E) + quality gates. |
 | SDLC & workflow | [`validation-and-backpressure.md`](standards/validation-and-backpressure.md) | The syntax→unit→contract→integration→BDD ladder + stop conditions. |
 | SDLC & workflow | [`sdlc-release-workflow.md`](standards/sdlc-release-workflow.md) | Trunk-based release: tag from `main`, CHANGELOG-driven notes. |
@@ -116,8 +111,8 @@ level — see §3–§4 — and are not duplicated below.)
 | Quality & fitness | [`quality-ratchet.md`](standards/quality-ratchet.md) | Touched-file coverage ratchet — lift without papering. |
 | Quality & fitness | [`mutation-testing-survival-ratchet.md`](standards/mutation-testing-survival-ratchet.md) | Diff-scoped mutation + survivors ratchet. |
 | Quality & fitness | [`agent-actionable-feedback.md`](standards/agent-actionable-feedback.md) | Every error carries `fix:`/`next:`/`run:`. |
-| Quality & fitness | [`improving-fitness-gates.md`](standards/improving-fitness-gates.md) | Add/improve a CORE check or a reusable and ship it: converge-up, tag-release, consumer-repin. |
-| Quality & fitness | [`supply-chain-pinning.md`](standards/supply-chain-pinning.md) | Why every `uses:` is a literal SHA and repeated, the two-tag self-pin release order, and what a consumer repin actually touches. |
+| Quality & fitness | [`improving-fitness-gates.md`](standards/improving-fitness-gates.md) | Qualify shared capability through a coordinated SDLC release. |
+| Quality & fitness | [`supply-chain-pinning.md`](standards/supply-chain-pinning.md) | Release catalogue, generated locks, literal GitHub SHAs and coordinated consumer upgrades. |
 | Architecture & decisions | [`architecture-decision-method.md`](standards/architecture-decision-method.md) | How a decision is researched + justified (method, not ADR mechanics). |
 | Architecture & decisions | [`engineering-nfr-standard.md`](standards/engineering-nfr-standard.md) | The six-dimension NFR checklist every design must clear. |
 | Language & deps | [`python-dependency-locking.md`](standards/python-dependency-locking.md) | uv workspace + frozen `uv.lock`. |

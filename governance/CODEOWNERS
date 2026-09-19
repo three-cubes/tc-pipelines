@@ -28,6 +28,8 @@
 # ── The gate's definition (what "green" means) ───────────────────────────────
 /pyproject.toml              @OWNER   # [tool.tc_fitness] gate config + dependency pins
 /.tc-fitness.toml            @OWNER
+/sdlc.yaml                   @OWNER
+/tc-sdlc.lock                @OWNER
 /uv.lock                     @OWNER
 /scripts/                    @OWNER   # validators / generators the gate runs
 /sonar-project.properties    @OWNER

@@ -11,6 +11,7 @@ related:
   - governance/decisions/ADR-INDEX.md
   - governance/STANDARDS.md
   - governance/AUTONOMOUS-DELIVERY-STANDARD.md
+  - governance/standards/ai-sdlc-product-architecture.md
   - docs/IMPLEMENTATION.md
 linear:
   - SGO-176
@@ -31,7 +32,8 @@ linear:
 The org's paved-road decisions were made real in code and prose before they were ever written as
 numbered ADRs. Roughly twenty org-wide, cross-cutting decisions are **embedded** across
 `governance/STANDARDS.md`, `governance/gate-hardening.md`, `governance/AUTONOMOUS-DELIVERY-STANDARD.md`,
-the `governance/` templates (rulesets, CODEOWNERS, dependabot, renovate), and `docs/IMPLEMENTATION.md`
+`governance/standards/ai-sdlc-product-architecture.md`, the `governance/`
+templates (rulesets, CODEOWNERS, dependabot, renovate), and `docs/IMPLEMENTATION.md`
 / `docs/COST-OPTIMIZATION.md`. They already carry short, stable,
 **prefixed handles** in that prose — `STD-MERGE`, `STD-IDENTITY`, `RULESET-D1`, `CODEOWNERS-D1`,
 `GATE-HARDEN`, `DEP-D1`, `QG-CONVERGE`, `SONAR-HANDOFF`, `MUT-RATCHET`, `REPO-MERGE`, `WIF-D1..D5`,
@@ -104,16 +106,16 @@ authoritative text — read the source.
 | `RULESET-D1` | The org-level `main` rulesets: block deletion + force-push; PR required with **0 approvals (autonomous)** on product repos (**1** on CORE) + code-owner review; **not strict** (no forced rebase) + **no stale-dismiss** (approvals stick); required checks = Quality gate + no-attribution. | `governance/rulesets/main-product.json` / `main-core.json` / `main-baseline.json`; `governance/README.md` |
 | `CODEOWNERS-D1` | Two-tier review routing: only the control plane (the gate's own definition) is owned — **no `* @OWNER`** — so work merges autonomously while gate-defining changes need a human. | `governance/CODEOWNERS`; `governance/README.md` |
 | `GATE-HARDEN` | Before a repo flips to 0-review its gate must clear the Gate-Hardening bar — a hard bar on new/changed code + monotonic ratchet on legacy debt, determinism non-negotiable. **Harden then flip, never flip first.** | `governance/gate-hardening.md` |
-| `QG-CONVERGE` | The reusable Python gate shrinks to `checkout → setup-uv-cached → uv run tc-fitness run`; every step lives in each repo's `[tool.tc_fitness]`, so `make check == CI` by construction. | `.github/workflows/python-quality-gate.yml`; `STANDARDS.md` §2–3; `CHANGELOG.md` |
+| `QG-CONVERGE` | `tc-pipelines` executes the consumer task graph in the released environment; `tc-fitness` remains the fitness engine inside that graph. Local and hosted runs bind the same SDLC lock and task identity. | `governance/standards/ai-sdlc-product-architecture.md`; `STANDARDS.md` §2–3 |
 | `MUT-RATCHET` | Mutation is diff-scoped and ratcheted: an escaped mutant on a changed line fails; the survivors baseline only ratchets down; Mutation is **not currently a required status check** (deferred until the workflow is wired). | `governance/gate-hardening.md`; `.github/workflows/mutation-gate.yml` |
 | `DEP-D1` | Dependency policy: 3-day-cooldown, grouped dependabot (pip + npm + github-actions, security-toggle-off) + a Renovate customManager pinning the tc-fitness engine version (no silent drift). | `governance/dependabot.yml`; `governance/renovate.json` |
-| `REPO-MERGE` | Two CORE paved-road repos — tc-pipelines (reusable CI + governance templates) and tc-fitness (the gate engine); consumers pin `@v1` / engine `@vX` + lockfile SHA; **promote prior work up into CORE, never fork-and-inline.** | `AUTONOMOUS-DELIVERY-STANDARD.md` (paved road); `STANDARDS.md` §3 |
-| `VERS-D1` | Semantic major pinning for reusables: `@vN` majors, breaking input/output changes cut a new major, **no `latest` tag** (undeclared moving targets break trust). | `docs/IMPLEMENTATION.md` (versioning policy); `README.md` |
-| `WIF-D1` | Azure deploys authenticate via Workload Identity Federation (OIDC): CI mints a short-lived token at runtime — no service-principal secret stored in GitHub. | `docs/IMPLEMENTATION.md` (security model); `README.md` |
-| `WIF-D2` | One WIF identity **per consumer repo** (blast-radius isolation); a leaked identity is an `az deployment` rotation away, not an org-wide SP drill. | `docs/IMPLEMENTATION.md` |
-| `WIF-D3` | The federated-credential subject is pinned to `repo:OWNER/NAME:ref:refs/heads/main` + `:environment:NAME`, so PR-from-fork cannot deploy. | `docs/IMPLEMENTATION.md` |
-| `WIF-D4` | The identity + federated credential + RBAC grants are provisioned as Bicep (`ci-deploy-identity.bicep`) — idempotent, audit-tracked in Azure deployment history. | `docs/IMPLEMENTATION.md` (why Bicep); `infra/bicep/` |
-| `WIF-D5` | tc-pipelines is **public** (workflows + Bicep + docs, no secrets), sidestepping the private-repo Actions plan-tier limit for cross-repo reuse. | `docs/IMPLEMENTATION.md` (why public visibility) |
+| `REPO-MERGE` | Two CORE product repos — tc-pipelines (SDLC environment, orchestration, evidence and governance) and tc-fitness (fitness engine and check catalogue); consumers adopt one coordinated SDLC release and promote reusable behaviour into the CORE home. | `AUTONOMOUS-DELIVERY-STANDARD.md` (paved road); `STANDARDS.md` §3 |
+| `VERS-D1` | One coordinated SDLC release catalogue binds the package version, workflow commit, image digest, schema and compatible fitness engine; the upgrade command materialises immutable consumer references together. | `governance/standards/ai-sdlc-product-architecture.md`; `README.md` |
+| `WIF-D1` | Azure deploys authenticate via Workload Identity Federation (OIDC): CI mints a short-lived token at runtime and stores no service-principal secret in GitHub. | `governance/agent-sdlc-access-and-hitl.md`; `README.md` |
+| `WIF-D2` | One WIF identity per consumer repo limits deployment blast radius. | `governance/agent-sdlc-access-and-hitl.md` |
+| `WIF-D3` | Federated subjects bind the approved repository ref or protected environment. | `governance/agent-sdlc-access-and-hitl.md` |
+| `WIF-D4` | Bicep provisions identity, federated credential and RBAC state idempotently. | `infra/bicep/`; `governance/standards/deployment-verification.md` |
+| `WIF-D5` | tc-pipelines publishes public, secret-free SDLC artefacts for consumption across repositories. | `governance/standards/ai-sdlc-product-architecture.md`; `README.md` |
 | `COST-D1` | Every deploy-snapshotting consumer runs the reusable snapshot-prune action with a **48-hour** recovery window, including one legacy migration run after adoption. | `docs/COST-OPTIMIZATION.md` |
 | `COST-D2` | Right-size / stop-when-idle always-on VMs and prefer ephemeral PR envs or smoke-on-prod over a permanently-paid staging tier. | `docs/COST-OPTIMIZATION.md` |
 

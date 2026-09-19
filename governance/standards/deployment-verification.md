@@ -1,70 +1,71 @@
-# Deployment Verification — recovery point before, proof after
+# Deployment Verification
 
-> Every apply that mutates live state MUST be bracketed: a **recovery point before** the first
-> destructive op, and a **verification probe after** it. "The apply script exited 0" is not proof
-> the system works — drive the real surface and observe it. This generalises the
-> [snapshot-before-apply](snapshot-before-apply.md) pattern beyond any one cloud.
+Deployment completes when the qualified candidate passes product verification
+on the target and the transaction records promotion, rollback and cleanup.
 
-In the org's paved road this bracket is concrete: a merge to `main` triggers the consumer's
-`deploy-on-merge` workflow, which calls the tc-pipelines
-[`azure-vm-deploy.yml`](../../.github/workflows/azure-vm-deploy.yml) reusable — it takes the
-recovery-point snapshot from the pipeline (WIF) identity before the first mutation and runs the
-post-apply smoke probe against the real surface. See [`snapshot-before-apply.md`](snapshot-before-apply.md).
+This standard implements the deployment boundary in
+[`ai-sdlc-product-architecture.md`](ai-sdlc-product-architecture.md).
 
-## Why
+## Transaction
 
-An apply that half-succeeds can leave a service that won't restart, a config that rejects the next
-apply, or a silently-degraded runtime. Without a recovery point, recovery means a rebuild — hours,
-not minutes. Without a post-apply probe, a broken deploy is discovered by a user, not by the
-pipeline. The bracket turns both into a fast, bounded, observable operation.
+1. Verify the candidate digest, SDLC lock and qualification receipt.
+2. Acquire the target deployment lock.
+3. Capture the recovery artefacts required by the changed state.
+4. Converge host prerequisites.
+5. Pull and start the qualified candidate digest.
+6. Run dependency health checks.
+7. Run product verification journeys through the production identity and route.
+8. Promote the candidate or restore the predecessor.
+9. Record cleanup and release the lock.
 
-## Before — take a recovery point
+Every phase has a typed input, bounded execution time and machine-readable
+result. The terminal receipt names the candidate, runtime, probes, recovery
+identity and cleanup result.
 
-Before the first state mutation, capture a revert target:
+## Recovery selection
 
-- **The mechanism is per-substrate** — an OS-disk/volume snapshot for a VM; the prior image tag /
-  previous revision for a container or serverless service; the previous template/plan for
-  infra-as-code; a dump for a stateful store. The **rule is substrate-agnostic**: a fast revert
-  target exists before you mutate.
-- **Take it from the pipeline identity, not the host.** The CI runner holds the narrowly-scoped,
-  short-lived credential (e.g. OIDC/WIF) with exactly the snapshot/rollback right; the runtime
-  identity deliberately does not (granting it would over-grant delete rights on a surface that runs
-  untrusted code). Apply scripts MAY keep a **best-effort** in-script fallback for operator-driven
-  runs — warn loudly and proceed when the identity lacks the right.
-- **Overrides are explicit and visible.** `--dry-run` skips it (nothing is mutated). `--no-snapshot`
-  (or equivalent) is for a throwaway target only and MUST log the override. A production apply omits
-  the override.
-- **Retention is bounded, not inline.** A succeeded apply may still need rollback hours later (a
-  slow-burn leak), so scripts retain recovery points for the configured recovery window and a
-  dedicated prune process removes them after expiry. The paved Azure VM workflow defaults to
-  **48 hours**, matching `snapshot-before-apply.md` and its snapshot action.
+Select recovery artefacts from the state changed by the deployment:
 
-## After — verify against the real surface
+| Changed state | Recovery artefact |
+|---|---|
+| Application container | Qualified predecessor image digest and Compose configuration |
+| Protected application state | Content-addressed archive or store-native backup plus manifest |
+| Host packages, users, filesystem or systemd | Ansible state plus host/disk recovery point appropriate to the change |
+| Infrastructure resource | Reviewed prior template/state and provider recovery mechanism |
+| Database schema or content | Product-defined transactional rollback or backup |
 
-An apply is not done until a probe drives the deployed surface with the **real runtime identity and
-config** and observes healthy behaviour:
+The deployment preflight verifies that the selected recovery set covers every
+mutated state class. Recovery artefacts carry an expiry and remain available
+through the configured rollback window.
 
-- **Probe the configured path, not a repo heuristic.** Hit the actual endpoint / invoke the actual
-  tool / read the actual health signal the way a client would — through the gateway/env/user the
-  runtime uses, not a local approximation that can pass while production fails.
-- **Assert on behaviour, not exit codes.** A 200, a valid tool response, a fresh heartbeat, an
-  expected log line — a concrete signal, checked. Exit 0 is necessary, never sufficient.
-- **Fail loud and actionable.** A failed probe surfaces `fix:` + `next:` and, where progressive
-  delivery is wired, triggers auto-revert to the recovery point.
+## Verification journeys
 
-## Pure-infra changes use a matching shape
+Health checks establish process and dependency readiness. Product verification
+establishes useful behaviour. Journeys execute through the configured endpoint,
+identity, secrets and persistent state used by production.
 
-An infra-as-code apply (e.g. template deploys) verifies with a plan/what-if diff before and a
-resource-state assertion after; its rollback is a redeploy from the prior template, not a disk
-revert. The bracket still holds — recovery target before, proof after — the mechanism just matches
-the substrate.
+The receipt records each probe's input identity, bounded output, duration and
+verdict. Process exit status is diagnostic evidence; the asserted product
+outcome determines the verdict.
 
-## How to apply
+## Failure behaviour
 
-1. Identify the substrate; choose the matching recovery-point mechanism and the matching rollback.
-2. Take the recovery point from the pipeline identity before the first mutation; keep a best-effort
-   in-script fallback for operator runs; make `--dry-run` / `--no-snapshot` explicit and logged.
-3. Wire a bounded-retention prune process; the paved Azure VM workflow uses a 48-hour default.
-4. After apply, run a probe that drives the real surface with the real identity and asserts on
-   behaviour; on failure, surface `fix:`/`next:` and auto-revert where available.
-5. Never call a deploy done on exit code alone; name the verification evidence in the handoff/PR.
+A failure before mutation releases the lock and records no-change. A failure
+after candidate start restores the predecessor and reruns predecessor health.
+An unsuccessful rollback leaves the target held, retains diagnostics and names
+the next recovery operation.
+
+The workflow summary indexes the full retained receipt. Console logs remain
+bounded and secret-safe.
+
+## Acceptance criteria
+
+- the deployed digest equals the qualified digest;
+- required persistent state survives cutover;
+- filesystem and access observations satisfy the runtime contract;
+- dependency health passes;
+- product journeys pass through the production route;
+- a forced failed journey restores the predecessor;
+- rollback health is observed;
+- cleanup retains active and predecessor recovery data and removes expired data;
+- the terminal receipt is retained and linked to the candidate.

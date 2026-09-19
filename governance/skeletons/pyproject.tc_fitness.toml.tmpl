@@ -1,9 +1,9 @@
 # ── tc-fitness gate — MERGE THIS INTO {{REPO}}'s pyproject.toml ───────────────
 # Two fragments below. Merge each into the matching table of your pyproject.toml
-# (a fresh repo can paste them verbatim). The single gate both CI and local run
-# is `uv run tc-fitness run`, which reads the `[tool.tc_fitness]` block here, so
-# local == CI by construction. The reusable `python-quality-gate.yml@{{PIPELINES_SHA}}`
-# caller (see .github/workflows/ci.yml) runs the SAME command.
+# (a fresh repo can paste them verbatim). This is the current compatibility
+# configuration consumed by `uv run tc-fitness run`. The coordinated SDLC
+# release retains this fitness configuration and schedules the selected profile
+# as a task in the shared graph.
 
 # 1. The engine pin. tc-fitness is a dev-group dependency, pinned to an immutable
 #    tag so the gate can never silently drift. The `engine_version_floor` CORE
