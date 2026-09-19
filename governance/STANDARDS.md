@@ -110,6 +110,7 @@ level — see §3–§4 — and are not duplicated below.)
 | SDLC & workflow | [`agent-process-controls.md`](standards/agent-process-controls.md) | The control hierarchy for agent-behaviour risks — push high-value risks from guidance up to structural gates. |
 | Quality & fitness | [`quality-ratchet.md`](standards/quality-ratchet.md) | Touched-file coverage ratchet — lift without papering. |
 | Quality & fitness | [`mutation-testing-survival-ratchet.md`](standards/mutation-testing-survival-ratchet.md) | Diff-scoped mutation + survivors ratchet. |
+| Quality & fitness | [`core-assurance-contract.md`](standards/core-assurance-contract.md) | Behavioural proof for fitness checks, published pipeline surfaces and coordinated SDLC releases. |
 | Quality & fitness | [`agent-actionable-feedback.md`](standards/agent-actionable-feedback.md) | Every error carries `fix:`/`next:`/`run:`. |
 | Quality & fitness | [`improving-fitness-gates.md`](standards/improving-fitness-gates.md) | Qualify shared capability through a coordinated SDLC release. |
 | Quality & fitness | [`supply-chain-pinning.md`](standards/supply-chain-pinning.md) | Release catalogue, generated locks, literal GitHub SHAs and coordinated consumer upgrades. |
