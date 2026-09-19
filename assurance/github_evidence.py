@@ -2,6 +2,7 @@
 
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -14,6 +15,8 @@ except ImportError:  # pragma: no cover - exercised by the workflow entrypoint.
     from receipt import ReceiptError, read
 
 MAX_DOWNLOAD = 16 * 1024 * 1024
+MAX_ATTEMPTS = 4
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
 class SafeRedirect(urllib.request.HTTPRedirectHandler):
@@ -39,24 +42,38 @@ def download(url, destination):
             raise ReceiptError("GitHub evidence download requires an authorised token")
         headers["Authorization"] = "Bearer " + token
     stderr = destination.with_suffix(".stderr")
-    try:
-        request = urllib.request.Request(url, headers=headers)
-        with urllib.request.build_opener(SafeRedirect()).open(request, timeout=30) as response:
-            data = response.read(MAX_DOWNLOAD + 1)
-        if len(data) > MAX_DOWNLOAD:
-            raise ReceiptError("download exceeds evidence size limit")
-        destination.write_bytes(data)
-        stderr.write_text("download completed\n")
-        return data
-    except (OSError, ValueError) as error:
-        # Do not retain exception URLs: a redirect can contain signed credentials.
-        diagnostic = (
-            f"download failed: {type(error).__name__} status={getattr(error, 'code', 'unavailable')}\n"
-        )
-        if isinstance(error, urllib.error.HTTPError):
-            destination.with_suffix(".failure-body").write_bytes(error.read(4096))
-        stderr.write_text(diagnostic)
-        raise ReceiptError(diagnostic.strip()) from error
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            request = urllib.request.Request(url, headers=headers)
+            with urllib.request.build_opener(SafeRedirect()).open(request, timeout=30) as response:
+                data = response.read(MAX_DOWNLOAD + 1)
+            if len(data) > MAX_DOWNLOAD:
+                raise ReceiptError("download exceeds evidence size limit")
+            destination.write_bytes(data)
+            stderr.write_text(f"download completed attempts={attempt}\n")
+            return data
+        except (OSError, ValueError) as error:
+            status = getattr(error, "code", None)
+            retryable = status in RETRYABLE_STATUS and attempt < MAX_ATTEMPTS
+            if retryable:
+                retry_after = (
+                    error.headers.get("Retry-After") if isinstance(error, urllib.error.HTTPError) else None
+                )
+                delay = int(retry_after) if retry_after and retry_after.isdigit() else 2 ** (attempt - 1)
+                if isinstance(error, urllib.error.HTTPError):
+                    error.read(4096)
+                time.sleep(min(delay, 5))
+                continue
+            # Do not retain exception URLs: a redirect can contain signed credentials.
+            diagnostic = (
+                f"download failed: {type(error).__name__} "
+                f"status={status if status is not None else 'unavailable'} attempts={attempt}\n"
+            )
+            if isinstance(error, urllib.error.HTTPError):
+                destination.with_suffix(".failure-body").write_bytes(error.read(4096))
+            stderr.write_text(diagnostic)
+            raise ReceiptError(diagnostic.strip()) from error
+    raise AssertionError("bounded download loop did not terminate")
 
 
 def download_log(url, destination):

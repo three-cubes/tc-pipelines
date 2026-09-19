@@ -331,6 +331,48 @@ def test_raw_job_log_transport_accepts_ansi_and_retains_http_failure(tmp_path):
         server.server_close()
 
 
+def test_raw_job_log_transport_recovers_from_transient_github_egress_failure(tmp_path):
+    module = hosted_module()
+    raw = b"terminal evidence\n"
+
+    class TransientHandler(http.server.BaseHTTPRequestHandler):
+        attempts = 0
+
+        def do_GET(self):
+            type(self).attempts += 1
+            if type(self).attempts < 3:
+                self.send_response(503)
+                self.send_header("Retry-After", "0")
+                self.end_headers()
+                self.wfile.write(b"egress is over the account limit")
+                return
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, _format, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), TransientHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        target = tmp_path / "transient"
+        text = module.download_log(
+            f"http://127.0.0.1:{server.server_port}/job.log",
+            target,
+        )
+        assert text == raw.decode()
+        assert TransientHandler.attempts == 3
+        assert target.with_suffix(".raw").read_bytes() == raw
+        assert "attempts=3" in target.with_suffix(".stderr").read_text()
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
 @pytest.mark.parametrize(
     "defect",
     [
