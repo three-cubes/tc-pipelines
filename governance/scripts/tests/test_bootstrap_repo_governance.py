@@ -148,9 +148,7 @@ def test_dry_run_covers_the_affordance_payload() -> None:
 
     # The hook + the idempotent settings.json merge.
     assert "PostToolUse" in out
-    assert "unique" in out, (
-        "settings.json merge must be idempotent (jq unique), not an append"
-    )
+    assert "unique" in out, "settings.json merge must be idempotent (jq unique), not an append"
 
     # The harness scripts.
     assert "scripts/safe-commit.sh" in out
@@ -158,9 +156,7 @@ def test_dry_run_covers_the_affordance_payload() -> None:
 
     # Placeholders resolved from --repo at render time (no unrendered token, and
     # the repo slug appears in the rendered instructions).
-    assert "{{REPO}}" not in out, (
-        "an affordance skeleton rendered with an unresolved {{REPO}} token"
-    )
+    assert "{{REPO}}" not in out, "an affordance skeleton rendered with an unresolved {{REPO}} token"
     assert "three-cubes/sample" in out
 
 
@@ -194,9 +190,7 @@ def test_dry_run_governance_files_install_gitignore_template() -> None:
 
     assert "contents/governance/gitignore" in out
     assert "> .gitignore" in out
-    assert ".DS_Store" in (REPO_ROOT / "governance/gitignore").read_text(
-        encoding="utf-8"
-    )
+    assert ".DS_Store" in (REPO_ROOT / "governance/gitignore").read_text(encoding="utf-8")
 
 
 # ── quality-gate wiring (the FULL-baseline extension) ────────────────────────
@@ -244,22 +238,15 @@ def test_release_wiring_prepares_and_releases_the_same_reviewed_pr(
     result = _render(out_dir, "--with-release")
     assert result.returncode == 0, result.stderr
 
-    prepare = (out_dir / ".github/workflows/prepare-release.yml").read_text(
-        encoding="utf-8"
-    )
-    release = (out_dir / ".github/workflows/release-on-merge.yml").read_text(
-        encoding="utf-8"
-    )
+    prepare = (out_dir / ".github/workflows/prepare-release.yml").read_text(encoding="utf-8")
+    release = (out_dir / ".github/workflows/release-on-merge.yml").read_text(encoding="utf-8")
     assert "prepare-release-metadata" in prepare
     assert f"@{PIPELINES_SHA}" in prepare
     assert '"$GITHUB_REF_NAME" = "main"' in prepare
     assert "github-app-token" in prepare
     assert "token: ${{ steps.app.outputs.token }}" in prepare
     assert "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b" in prepare
-    assert (
-        "version-file:"
-        not in prepare.split("workflow_dispatch:", 1)[1].split("permissions:", 1)[0]
-    )
+    assert "version-file:" not in prepare.split("workflow_dispatch:", 1)[1].split("permissions:", 1)[0]
     assert "if: inputs.bump" not in prepare
     assert 'version-file: "VERSION"' in prepare
     assert 'git push origin "HEAD:$GITHUB_REF_NAME"' in prepare
@@ -296,15 +283,9 @@ def test_release_version_source_is_declared_once_when_wiring_is_generated(
     )
     assert result.returncode == 0, result.stderr
 
-    prepare = (out_dir / ".github/workflows/prepare-release.yml").read_text(
-        encoding="utf-8"
-    )
-    release = (out_dir / ".github/workflows/release-on-merge.yml").read_text(
-        encoding="utf-8"
-    )
-    dispatch_inputs = prepare.split("workflow_dispatch:", 1)[1].split(
-        "permissions:", 1
-    )[0]
+    prepare = (out_dir / ".github/workflows/prepare-release.yml").read_text(encoding="utf-8")
+    release = (out_dir / ".github/workflows/release-on-merge.yml").read_text(encoding="utf-8")
+    dispatch_inputs = prepare.split("workflow_dispatch:", 1)[1].split("permissions:", 1)[0]
     assert "version-file" not in dispatch_inputs
     assert "if: inputs.bump" not in prepare
     assert 'version-file: ""' in prepare
@@ -339,9 +320,7 @@ def test_wiring_render_resolves_every_token(tmp_path: Path) -> None:
         "harness_canon_reference",
         "ci_consumes_shared_gate",
     ):
-        assert f"core_checks.{binding}" in pyproject, (
-            f"pyproject omits CORE binding {binding}"
-        )
+        assert f"core_checks.{binding}" in pyproject, f"pyproject omits CORE binding {binding}"
 
 
 def test_wiring_makefile_prepares_before_every_local_check(
@@ -351,21 +330,14 @@ def test_wiring_makefile_prepares_before_every_local_check(
     assert _render(out_dir).returncode == 0
     makefile = (out_dir / "Makefile").read_text(encoding="utf-8")
 
-    assert re.search(r"^prepare:", makefile, re.MULTILINE), (
-        "Makefile has no `prepare:` target"
-    )
-    assert re.search(r"^\.PHONY:.*\bprepare\b", makefile, re.MULTILINE), (
-        "`prepare` is not .PHONY"
-    )
+    assert re.search(r"^prepare:", makefile, re.MULTILINE), "Makefile has no `prepare:` target"
+    assert re.search(r"^\.PHONY:.*\bprepare\b", makefile, re.MULTILINE), "`prepare` is not .PHONY"
     assert "uvx --from uv==0.12.5 uv lock" in makefile
     assert (
         "ruff check --force-exclude --select E,F,I,UP,B,S,RUF --target-version py312 "
         "--ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero ."
     ) in makefile
-    assert (
-        "ruff format --force-exclude --line-length 110 --target-version py312 ."
-        in makefile
-    )
+    assert "ruff format --force-exclude --line-length 110 --target-version py312 ." in makefile
     assert re.search(r"^check:\s+prepare$", makefile, re.MULTILINE), (
         "`make check` does not run preparation first"
     )
@@ -420,9 +392,7 @@ def test_queue_less_wiring_promotes_pr_evidence_instead_of_rerunning_the_gate(
     assert f"verify-postmerge-pr-evidence@{PIPELINES_SHA}" in workflow_text
     assert "actions/upload-artifact@" in workflow_text
     assert "actions/artifacts/" in workflow_text
-    assert {"actions", "checks", "contents", "pull-requests"} <= set(
-        workflow["permissions"]
-    )
+    assert {"actions", "checks", "contents", "pull-requests"} <= set(workflow["permissions"])
 
 
 def test_wiring_auto_merge_listens_to_the_rendered_quality_workflow(
@@ -432,12 +402,8 @@ def test_wiring_auto_merge_listens_to_the_rendered_quality_workflow(
     out_dir = tmp_path / "wire"
     assert _render(out_dir).returncode == 0
 
-    ci = yaml.safe_load(
-        (out_dir / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    )
-    auto_merge = yaml.safe_load(
-        (out_dir / ".github/workflows/auto-merge.yml").read_text(encoding="utf-8")
-    )
+    ci = yaml.safe_load((out_dir / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    auto_merge = yaml.safe_load((out_dir / ".github/workflows/auto-merge.yml").read_text(encoding="utf-8"))
     triggers = auto_merge.get(True, auto_merge.get("on"))
     assert triggers["workflow_run"]["workflows"] == [ci["name"]]
 
@@ -461,12 +427,8 @@ def test_verify_catches_a_context_mismatch(tmp_path: Path) -> None:
             rule["parameters"]["required_status_checks"] = [{"context": "CI gate"}]
     ruleset.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-    result = _run(
-        "--repo", "three-cubes/sample", "--verify-only", "--out-dir", str(out_dir)
-    )
-    assert result.returncode != 0, (
-        "verify must fail when a required context has no emitting job"
-    )
+    result = _run("--repo", "three-cubes/sample", "--verify-only", "--out-dir", str(out_dir))
+    assert result.returncode != 0, "verify must fail when a required context has no emitting job"
     assert "CI gate" in result.stderr
     assert "FAIL" in result.stderr
 
