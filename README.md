@@ -9,6 +9,10 @@ The canonical architecture is
 [`governance/standards/ai-sdlc-product-architecture.md`](governance/standards/ai-sdlc-product-architecture.md).
 [`RESOLVER.md`](RESOLVER.md) routes changes to their canonical home.
 
+Run `make assurance` for the [published-surface inventory and disposable consumer
+lab](assurance/README.md). It retains local behavioural evidence separately from
+hosted adapter and release-admission proof.
+
 ## Product model
 
 ```text

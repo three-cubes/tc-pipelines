@@ -1,0 +1,35 @@
+#!/usr/bin/env sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# pre-push — current compatibility replay of the complete fitness profile.
+# The tc-sdlc migration replaces this direct engine invocation with the released
+# task graph while retaining the pre-push evidence point.
+#
+# Coverage-driven checks consume evidence produced by the configured repository
+# gate. The target graph declares that dependency explicitly.
+#
+# Install (one of):
+#   * pre-commit:  pre-commit install --hook-type pre-push   (uses the
+#                  `tc-fitness-replay` hook wired in pre-commit-config.yaml)
+#   * git native:  git config core.hooksPath governance/git-hooks
+#
+# Escape hatch: `git push --no-verify` skips it — for a genuine emergency only;
+# CI still gates the merge (§5 rule 4: never merge over a red gate).
+set -eu
+
+# The gate is the engine's `tc-fitness run` binary. Prefer the repo's own venv
+# (tc-fitness is a paved-road dependency there); fall back to a pinned ephemeral
+# uvx run so the hook also works before the venv is built. Override TC_FITNESS_REF
+# per repo to match the pinned engine.
+: "${TC_FITNESS_REF:=v0.8.0}"
+
+if command -v uv >/dev/null 2>&1 && [ -f uv.lock ]; then
+  uv run tc-fitness run
+elif command -v uvx >/dev/null 2>&1; then
+  uvx --from "git+https://github.com/three-cubes/tc-fitness@${TC_FITNESS_REF}" tc-fitness run
+elif command -v tc-fitness >/dev/null 2>&1; then
+  tc-fitness run
+else
+  echo "pre-push: tc-fitness gate unavailable (no uv/uvx/tc-fitness on PATH); skipping the replay." >&2
+  echo "  fix: install the dev env (uv sync --all-extras --all-groups); next: the gate then runs on every push." >&2
+fi

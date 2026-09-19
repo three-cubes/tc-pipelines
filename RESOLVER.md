@@ -22,6 +22,7 @@ Use this map to place work in the canonical home. The product architecture is
 | Define release and deployment protocols | `governance/standards/ci-release-deployment-architecture.md` | Candidate, evidence, publish, deployment and PVT contracts. |
 | Define shared engineering policy | `governance/standards/` | Canonical standards referenced by every repository. |
 | Define CORE check, pipeline-surface and coordinated-release assurance | `governance/standards/core-assurance-contract.md` | Behavioural contracts, evidence levels, disposable consumers and release receipts. |
+| Execute published-surface and disposable-consumer assurance | `assurance/` | Public workflow/action inventory, required evidence levels, local fixtures and retained terminal evidence. |
 | Define executable fitness behaviour | `three-cubes/tc-fitness` | Check catalogue, evaluation semantics and structured findings. |
 | Define repository adoption | `governance/standards/new-repo-bootstrap.md` and `governance/skeletons/` | Thin declarations, local commands and workflow callers. |
 | Define rollout work | `docs/IMPLEMENTATION.md` | Ordered tranches, status and exit criteria. |

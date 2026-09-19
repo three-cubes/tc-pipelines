@@ -1,0 +1,46 @@
+schema: tc.sdlc/disposable-consumers/v1
+mode: compatibility
+render:
+  repository: three-cubes/assurance-generated
+  fitness_tag: v0.15.2
+  pipelines_sha: 02bc49afcffb7e0d01fc8c2dadc0352791a46046
+consumers:
+  - id: python
+    install: [[uv, lock], [uv, sync, --locked]]
+    prepare: [[make, fix]]
+    evaluate:
+      affected: [uv, run, --no-sync, tc-fitness, run, --changed-files-from, .assurance-changed-files]
+      complete: [uv, run, --no-sync, tc-fitness, run]
+    sabotage:
+      path: src/consumer/__init__.py
+      step: consumer-tests
+      replace: [return left + right, return left - right]
+      diagnostics: ['FAIL [consumer-tests]', consumer-total]
+      output_result: test-failure
+  - id: mixed
+    install: [[uv, lock], [uv, sync, --locked], [pnpm, install, --frozen-lockfile]]
+    prepare: [[make, fix], [pnpm, --filter, consumer-web, run, generate]]
+    evaluate:
+      affected: [uv, run, --no-sync, tc-fitness, run, --changed-files-from, .assurance-changed-files]
+      complete: [uv, run, --no-sync, tc-fitness, run]
+    sabotage:
+      path: packages/web/generated.json
+      step: workspace-tests
+      replace: ['"total": 5', '"total": 9']
+      diagnostics: ['FAIL [workspace-tests]']
+      output_diagnostics:
+        artifacts/workspace.tap: [generated-total, '9 !== 5']
+      output_result: workspace-failure
+  - id: generated
+    catalogue_checks: [no-llm-attribution, canonical-commit-identity, engine-version-floor, harness-canon-reference, ci-consumes-shared-gate]
+    install: [[uv, lock], [uv, sync, --locked]]
+    prepare: [[make, fix]]
+    evaluate:
+      affected: [uv, run, --no-sync, tc-fitness, run, --changed-files-from, .assurance-changed-files]
+      complete: [uv, run, --no-sync, tc-fitness, run]
+    sabotage:
+      path: CLAUDE.md
+      step: core-governance-checks
+      rule: harness-canon-reference
+      diagnostics: ['FAIL', harness-canon-reference, CLAUDE.md]
+      output_result: pass

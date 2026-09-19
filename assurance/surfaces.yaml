@@ -1,0 +1,597 @@
+schema: tc.sdlc/surface-assurance/v1
+# Obligations for every published adapter; references are not execution receipts.
+surfaces:
+  - id: workflow.auto-merge-on-green
+    path: .github/workflows/auto-merge-on-green.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.azure-vm-deploy
+    path: .github/workflows/azure-vm-deploy.yml
+    risk: deployment
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.capability-health-probe
+    path: .github/workflows/capability-health-probe.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.dependabot-automerge
+    path: .github/workflows/dependabot-automerge.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.docker-build-publish
+    path: .github/workflows/docker-build-publish.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.event-dispatch
+    path: .github/workflows/event-dispatch.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-azure-vm-deploy
+    path: .github/workflows/example-azure-vm-deploy.yml
+    risk: deployment
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-capability-health-probe
+    path: .github/workflows/example-capability-health-probe.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-dependabot-automerge
+    path: .github/workflows/example-dependabot-automerge.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-docker-build-publish
+    path: .github/workflows/example-docker-build-publish.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-event-dispatch
+    path: .github/workflows/example-event-dispatch.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-fitness-engine-canary
+    path: .github/workflows/example-fitness-engine-canary.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-fresh-install-smoke
+    path: .github/workflows/example-fresh-install-smoke.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-independent-verifier
+    path: .github/workflows/example-independent-verifier.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-loop-implement
+    path: .github/workflows/example-loop-implement.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-mutation-gate
+    path: .github/workflows/example-mutation-gate.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-publish-pypi
+    path: .github/workflows/example-publish-pypi.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-pytest-durations-refresh
+    path: .github/workflows/example-pytest-durations-refresh.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-python-quality-gate
+    path: .github/workflows/example-python-quality-gate.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-release-on-merge
+    path: .github/workflows/example-release-on-merge.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-release
+    path: .github/workflows/example-release.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-require-work-item
+    path: .github/workflows/example-require-work-item.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-security-scan
+    path: .github/workflows/example-security-scan.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.example-verify-and-close
+    path: .github/workflows/example-verify-and-close.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.fitness-engine-canary
+    path: .github/workflows/fitness-engine-canary.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.fresh-install-smoke
+    path: .github/workflows/fresh-install-smoke.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.independent-verifier
+    path: .github/workflows/independent-verifier.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.loop-implement
+    path: .github/workflows/loop-implement.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.meta-quality-gate
+    path: .github/workflows/meta-quality-gate.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.mutation-gate
+    path: .github/workflows/mutation-gate.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.publish-pypi
+    path: .github/workflows/publish-pypi.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.pytest-durations-refresh
+    path: .github/workflows/pytest-durations-refresh.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.python-quality-gate
+    path: .github/workflows/python-quality-gate.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.release-on-merge
+    path: .github/workflows/release-on-merge.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.release
+    path: .github/workflows/release.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.require-work-item
+    path: .github/workflows/require-work-item.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.security-scan
+    path: .github/workflows/security-scan.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: workflow.verify-and-close
+    path: .github/workflows/verify-and-close.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_internal_call_contracts.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.actions.cloudflare-access-ssh
+    path: actions/cloudflare-access-ssh/action.yml
+    risk: deployment
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.actions.detect-code-changes
+    path: actions/detect-code-changes/action.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.actions.license-present
+    path: actions/license-present/action.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.actions.pre-commit-cached
+    path: actions/pre-commit-cached/action.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.actions.prepare-release-metadata
+    path: actions/prepare-release-metadata/action.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.actions.python-gate-body
+    path: actions/python-gate-body/action.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.actions.setup-cloudflared
+    path: actions/setup-cloudflared/action.yml
+    risk: deployment
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.actions.setup-uv-cached
+    path: actions/setup-uv-cached/action.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.github.actions.apply-on-vm-via-runcommand
+    path: .github/actions/apply-on-vm-via-runcommand/action.yml
+    risk: deployment
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.github.actions.github-app-token
+    path: .github/actions/github-app-token/action.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.github.actions.postmerge-pr-evidence
+    path: .github/actions/postmerge-pr-evidence/action.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.github.actions.prune-azure-vm-snapshots
+    path: .github/actions/prune-azure-vm-snapshots/action.yml
+    risk: deployment
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.github.actions.smoke-systemctl
+    path: .github/actions/smoke-systemctl/action.yml
+    risk: deployment
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.github.actions.snapshot-azure-vm-disk
+    path: .github/actions/snapshot-azure-vm-disk/action.yml
+    risk: deployment
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.github.actions.verify-postmerge-pr-evidence
+    path: .github/actions/verify-postmerge-pr-evidence/action.yml
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]
+  - id: action.github.actions.wif-azure-login
+    path: .github/actions/wif-azure-login/action.yml
+    risk: deployment
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
+      hermetic: []
+      hosted: []
+    sabotage: [missing-required-output]

@@ -44,6 +44,12 @@ The pipeline owns when and where the fitness evaluation runs. `tc-fitness` owns
 how declared checks execute and report findings. A coordinated SDLC release
 records the compatible `tc-fitness` version.
 
+The local published-surface inventory and disposable consumer lab live in
+`assurance/` and run through `make assurance`. Their evidence levels and
+admission boundaries follow the
+[CORE assurance contract](core-assurance-contract.md); local consumer execution
+does not establish hosted adapter or release-admission proof.
+
 ## Released surfaces
 
 One `tc-pipelines` release publishes a coordinated set of surfaces:

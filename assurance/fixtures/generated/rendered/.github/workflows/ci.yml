@@ -1,0 +1,263 @@
+---
+name: "Quality gate"
+
+# three-cubes/assurance-generated's single quality lane. The whole gate is the repo-local
+# `[tool.tc_fitness]` block in pyproject.toml; the org-shared reusable
+# `python-quality-gate.yml@02bc49afcffb7e0d01fc8c2dadc0352791a46046` provisions a pinned/cached uv venv and
+# runs the SAME `uv run tc-fitness run` that `make check` runs locally — local ==
+# CI by construction.
+#
+# Required-status-check contexts (governance/rulesets/main.json gates on these):
+#   * `Quality gate`             — the `check` aggregator below (a reusable call
+#                                   surfaces `<caller> / <reusable job>` checks,
+#                                   never a bare name, so THIS job carries it).
+#   * `no-attribution`           — the `no-attribution` job below (the shared
+#                                   tc-fitness detector over the PR commit range +
+#                                   title/body; bare context, own signal).
+#   * `SonarCloud scan`          — the `sonar` aggregator (only when Sonar is wired).
+#   * `SonarCloud Code Analysis` — posted by the SonarCloud GitHub App itself.
+# Renaming a job means updating governance/rulesets/main.json in lockstep — the
+# bootstrap `--verify` step catches a `Quality gate` vs `CI gate` drift.
+
+on:
+  # Queue-less repositories validate the final main commit. The bootstrap
+  # renderer inserts this trigger by default and removes it only for the
+  # --merge-queue profile, where merge_group validates the synthetic merge.
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "CHANGELOG.md"
+      - "docs/**"
+  pull_request:
+    branches: [main]
+  merge_group:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  pull-requests: read
+
+jobs:
+  # The fitness gate. run-no-attribution is off here because the dedicated
+  # `no-attribution` job below owns that scan as its own required context.
+  gate:
+    name: Python gate (reusable)
+    if: github.event_name != 'push'
+    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@02bc49afcffb7e0d01fc8c2dadc0352791a46046
+    with:
+      python-version: "3.12"
+      sync-args: "--locked --all-extras --group dev"
+      run-no-attribution: false
+      upload-coverage-artifact: true
+    secrets:
+      gh-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # A queue-less main push promotes the already-successful PR run only after the
+  # associated PR, required checks, workflow attempt, artifact and landed tree
+  # all agree. Any ambiguity or direct push fails closed without rerunning the
+  # expensive language/evaluator matrix.
+  postmerge-evidence:
+    name: Verify post-merge PR evidence
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout landed merge
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - id: source
+        name: Select one trusted PR workflow artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          BEFORE_SHA: ${{ github.event.before }}
+          MERGE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$RUNNER_TEMP/postmerge-pr-evidence"
+          mkdir -p "$root"
+
+          gh api "repos/${REPOSITORY}/commits/${MERGE_SHA}/pulls" > "$root/pulls.json"
+          read -r pr head < <(jq -er --arg before "$BEFORE_SHA" --arg merge "$MERGE_SHA" '
+            [ .[] | select(.state == "closed" and .merged_at != null and .merge_commit_sha == $merge and .base.sha == $before) ]
+            | if length == 1 then .[0] | [.number, .head.sha] | @tsv
+              else error("one exact merged pull request is required") end
+          ' "$root/pulls.json")
+
+          gh api "repos/${REPOSITORY}/commits/${head}/check-runs?filter=latest&per_page=100" > "$root/check-runs.json"
+          mapfile -t details < <(jq -er --arg head "$head" '
+            [.check_runs[] | select(.name == "Quality gate" or .name == "no-attribution")]
+            | if length == 2 and ([.[].name] | unique | length) == 2
+                 and all(.[]; .conclusion == "success" and .head_sha == $head and .app.slug == "github-actions")
+              then .[].details_url else error("one successful current result for each required check is required") end
+          ' "$root/check-runs.json")
+          run_id=""
+          details_pattern="^https://github.com/${REPOSITORY}/actions/runs/([1-9][0-9]*)/job/[1-9][0-9]*$"
+          for url in "${details[@]}"; do
+            [[ "$url" =~ $details_pattern ]] || { echo "::error::required check is not a GitHub Actions job in this repository"; exit 1; }
+            candidate="${BASH_REMATCH[1]}"
+            [[ -z "$run_id" || "$run_id" == "$candidate" ]] || { echo "::error::required checks came from different workflow runs"; exit 1; }
+            run_id="$candidate"
+          done
+
+          gh api "repos/${REPOSITORY}/actions/runs/${run_id}" > "$root/workflow-run.json"
+          attempt="$(jq -er --argjson id "$run_id" --arg head "$head" '
+            if .id == $id and .event == "pull_request" and .head_sha == $head
+               and .path == ".github/workflows/ci.yml" and (.run_attempt | type == "number" and . >= 1)
+            then .run_attempt else error("required checks are not from the trusted PR workflow") end
+          ' "$root/workflow-run.json")"
+
+          artifact_name="postmerge-pr-evidence-pr${pr}-run${run_id}-attempt${attempt}"
+          gh api "repos/${REPOSITORY}/actions/runs/${run_id}/artifacts?name=${artifact_name}&per_page=100" > "$root/artifacts.json"
+          artifact_id="$(jq -er --arg name "$artifact_name" --argjson run "$run_id" --arg head "$head" '
+            [.artifacts[] | select(.name == $name and .expired == false
+              and .workflow_run.id == $run and .workflow_run.head_sha == $head
+              and (.digest | type == "string" and startswith("sha256:")))]
+            | if length == 1 then .[0].id else error("one current trusted PR evidence artifact is required") end
+          ' "$root/artifacts.json")"
+          gh api "repos/${REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "$root/evidence.zip"
+          unzip -p "$root/evidence.zip" postmerge-pr-evidence.json > "$root/postmerge-pr-evidence.json"
+
+          {
+            echo "pull_request_number=$pr"
+            echo "head_sha=$head"
+            echo "workflow_run_id=$run_id"
+            echo "workflow_run_attempt=$attempt"
+            echo "document=$root/postmerge-pr-evidence.json"
+          } >> "$GITHUB_OUTPUT"
+      - name: Verify the exact landed tree
+        uses: three-cubes/tc-pipelines/.github/actions/verify-postmerge-pr-evidence@02bc49afcffb7e0d01fc8c2dadc0352791a46046
+        with:
+          repository: ${{ github.repository }}
+          before-sha: ${{ github.event.before }}
+          merge-sha: ${{ github.sha }}
+          pull-request-number: ${{ steps.source.outputs.pull_request_number }}
+          head-sha: ${{ steps.source.outputs.head_sha }}
+          workflow-run-id: ${{ steps.source.outputs.workflow_run_id }}
+          workflow-run-attempt: ${{ steps.source.outputs.workflow_run_attempt }}
+          document: ${{ steps.source.outputs.document }}
+
+  # Quality gate aggregator — the required branch-protection context. A reusable
+  # call surfaces `<caller> / <reusable job>` checks, never a bare `Quality gate`,
+  # so THIS job carries that exact name and gates iff the reusable passed.
+  check:
+    name: Quality gate
+    needs: [gate, postmerge-evidence]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Gate on the reusable result
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          R_GATE: ${{ needs.gate.result }}
+          R_POSTMERGE: ${{ needs.postmerge-evidence.result }}
+        run: |
+          set -euo pipefail
+          echo "gate=$R_GATE postmerge=$R_POSTMERGE"
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            [[ "$R_POSTMERGE" == "success" ]] || { echo "::error::Quality gate failed — exact-tree PR evidence was not promoted ($R_POSTMERGE)."; exit 1; }
+          else
+            [[ "$R_GATE" == "success" ]] || { echo "::error::Quality gate failed — the reusable python-quality-gate did not pass ($R_GATE)."; exit 1; }
+          fi
+          echo "Quality gate: PASS."
+      - name: Checkout tested PR merge
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: Capture tested PR tree
+        if: github.event_name == 'pull_request'
+        uses: three-cubes/tc-pipelines/.github/actions/postmerge-pr-evidence@02bc49afcffb7e0d01fc8c2dadc0352791a46046
+        with:
+          repository: ${{ github.repository }}
+          pull-request-number: ${{ github.event.pull_request.number }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          workflow-run-id: ${{ github.run_id }}
+          workflow-run-attempt: ${{ github.run_attempt }}
+          output: ${{ runner.temp }}/postmerge-pr-evidence.json
+      - name: Upload tested PR tree evidence
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: postmerge-pr-evidence-pr${{ github.event.pull_request.number }}-run${{ github.run_id }}-attempt${{ github.run_attempt }}
+          path: ${{ runner.temp }}/postmerge-pr-evidence.json
+          retention-days: 1
+          if-no-files-found: error
+
+  # no-attribution — reject AI/LLM self-attribution residue in the PR commit range
+  # and the PR title/body (Autonomous Delivery Platform D1). ONE detector: the
+  # shared tc-fitness `no_llm_attribution` scan the local commit-msg strip hook and
+  # the fitness gate also use, so the hook, this leg, and the gate never drift.
+  # `--scan-file` is READ-ONLY (CI never rewrites history); the PR title/body reach
+  # the script only as env values, never interpolated into the run body.
+  no-attribution:
+    name: no-attribution
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8
+      - name: Reject AI/LLM self-attribution in commits + PR title/body
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          module="tc_fitness.core_checks.no_llm_attribution"
+          from="git+https://github.com/three-cubes/tc-fitness@v0.15.2"
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+          rc=0
+          scan() {
+            if ! uvx --from "$from" python -m "$module" --scan-file "$2"; then
+              echo "::error::no-attribution: AI/LLM self-attribution residue in $1." >&2
+              rc=1
+            fi
+          }
+          scan_advisory() {
+            if ! uvx --from "$from" python -m "$module" --scan-file "$2"; then
+              echo "::warning::no-attribution: possible residue in $1 (advisory — confirm it is documentation)." >&2
+            fi
+          }
+          shas="$(git rev-list "${PR_BASE_SHA}..${PR_HEAD_SHA}")"
+          while IFS= read -r sha; do
+            [[ -z "$sha" ]] && continue
+            git log -1 --format=%B "$sha" > "$workdir/commit-${sha}.txt"
+            scan "commit ${sha} message" "$workdir/commit-${sha}.txt"
+          done <<< "$shas"
+          printf '%s' "$PR_TITLE" > "$workdir/pr-title.txt"
+          scan "PR title" "$workdir/pr-title.txt"
+          printf '%s' "$PR_BODY" > "$workdir/pr-body.txt"
+          scan_advisory "PR body" "$workdir/pr-body.txt"
+          if [[ "$rc" -ne 0 ]]; then
+            echo "::error::no-attribution: remove the AI/LLM self-attribution flagged above. Install the local commit-msg strip hook to catch it before push." >&2
+          fi
+          exit "$rc"
