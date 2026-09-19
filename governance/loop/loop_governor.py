@@ -125,9 +125,7 @@ class Outcome(str, Enum):
 
 
 #: Outcomes that end the driver loop (only ``NEEDS_FIX`` re-dispatches).
-_TERMINAL_OUTCOMES = frozenset(
-    {Outcome.DONE, Outcome.ESCALATED, Outcome.HALTED, Outcome.REFUSED}
-)
+_TERMINAL_OUTCOMES = frozenset({Outcome.DONE, Outcome.ESCALATED, Outcome.HALTED, Outcome.REFUSED})
 
 
 @dataclass(frozen=True)
@@ -344,16 +342,13 @@ class JsonFileStateStore:
             ) from exc
         if not isinstance(doc, dict):
             raise StateStoreError(
-                f"loop-state at {self.path} is not a JSON object — refusing to "
-                "reset the ledger"
+                f"loop-state at {self.path} is not a JSON object — refusing to reset the ledger"
             )
         return GovernorState.from_dict(doc)
 
     def save(self, state: GovernorState) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(
-            dir=str(self.path.parent), prefix=".loop-state.", suffix=".tmp"
-        )
+        fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), prefix=".loop-state.", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(state.to_dict(), fh, indent=2, sort_keys=True)
@@ -417,9 +412,7 @@ class Governor:
     ) -> None:
         self.config = config or GuardrailConfig()
         self.engine = engine or LoopEngine(self.config, clock=clock)
-        self.sink: EscalationSink = (
-            sink if sink is not None else RecordingEscalationSink()
-        )
+        self.sink: EscalationSink = sink if sink is not None else RecordingEscalationSink()
         self._clock = clock
         self.circuit_breaker_threshold = circuit_breaker_threshold
         self.escalation_assignee = escalation_assignee
@@ -541,9 +534,7 @@ class Governor:
         led.attempts += 1
         return led
 
-    def record_cost(
-        self, issue_id: str, cost: float = 0.0, *, tokens: int = 0
-    ) -> IssueLedger:
+    def record_cost(self, issue_id: str, cost: float = 0.0, *, tokens: int = 0) -> IssueLedger:
         """Accumulate measured spend (from the token-logger — SGO-44) per issue and
         fleet-wide. Recorded spend can overshoot the pre-dispatch projection, so if
         it crosses the global cap this opens the fleet breaker (defense in depth)."""
@@ -593,9 +584,7 @@ class Governor:
         acts on :attr:`Continuation.action` (escalate this item, halt the fleet, or
         proceed)."""
         if not self.armed:
-            return Continuation(
-                False, ContinueAction.REFUSE, "auto-dispatch is not armed", "lights_out"
-            )
+            return Continuation(False, ContinueAction.REFUSE, "auto-dispatch is not armed", "lights_out")
         if self._halted:
             return Continuation(
                 False,
@@ -605,13 +594,9 @@ class Governor:
             )
         led = self.ledger(issue_id)
         if led.escalated:
-            return Continuation(
-                False, ContinueAction.ESCALATE, "issue already escalated", "guardrail"
-            )
+            return Continuation(False, ContinueAction.ESCALATE, "issue already escalated", "guardrail")
         if led.done:
-            return Continuation(
-                False, ContinueAction.DONE, "issue already done (terminal)", "guardrail"
-            )
+            return Continuation(False, ContinueAction.DONE, "issue already done (terminal)", "guardrail")
         if led.attempts >= self.config.retry_ceiling:
             return Continuation(
                 False,
@@ -656,9 +641,7 @@ class Governor:
         raise BudgetExceeded(cont.reason, scope="global")
 
     # -- escalation (idempotent — emitted to the human exactly once) -------- #
-    def escalate(
-        self, issue_id: str, reason: str, *, scope: str = "guardrail"
-    ) -> Escalation:
+    def escalate(self, issue_id: str, reason: str, *, scope: str = "guardrail") -> Escalation:
         """Hand ``issue_id`` to the human-accountable assignee. Idempotent: the
         escalation is emitted to the sink **exactly once**; a repeat call returns
         the same :class:`Escalation` without re-emitting."""
@@ -787,9 +770,7 @@ class Governor:
         ceiling, which must fire first."""
         result: CycleResult | None = None
         for _ in range(max_cycles):
-            result = self.run_cycle(
-                issue_id, dispatch=dispatch, verify=verify, close=close, cost=cost
-            )
+            result = self.run_cycle(issue_id, dispatch=dispatch, verify=verify, close=close, cost=cost)
             if result.outcome in _TERMINAL_OUTCOMES:
                 return result
         raise loop.LoopError(

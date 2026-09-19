@@ -94,9 +94,7 @@ def _pin_ref_of(consumer: Path) -> str:
 
 
 @pytest.mark.parametrize("gate_exit", [0, 1, 2, 42])
-def test_canary_exit_code_equals_consumer_gate_exit_code(
-    tmp_path: Path, gate_exit: int
-) -> None:
+def test_canary_exit_code_equals_consumer_gate_exit_code(tmp_path: Path, gate_exit: int) -> None:
     consumer = _make_consumer(tmp_path / "consumer")
     result = _run(
         "--consumer-dir",

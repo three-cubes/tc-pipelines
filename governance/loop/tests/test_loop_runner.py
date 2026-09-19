@@ -84,9 +84,7 @@ def _issue(
 
 def _runner(issues, *, config=None, validator=lambda: True):
     """A runner + its governor over a static source, harness proof stubbed."""
-    dispatcher = Dispatcher(
-        StaticIssueSource(issues), config=config, guardrails_validator=validator
-    )
+    dispatcher = Dispatcher(StaticIssueSource(issues), config=config, guardrails_validator=validator)
     governor = Governor(config)
     runner = Runner(dispatcher, governor, guardrails_validator=validator)
     return runner, governor
@@ -106,9 +104,7 @@ class _CountingSink:
 
     def dispatch(self, contract) -> DispatchResult:
         self.calls.append(contract.issue_id)
-        return DispatchResult(
-            spawned=True, sink="counting", issue_id=contract.issue_id, ref="spawn-1"
-        )
+        return DispatchResult(spawned=True, sink="counting", issue_id=contract.issue_id, ref="spawn-1")
 
 
 # --------------------------------------------------------------------------- #
@@ -200,9 +196,7 @@ class BudgetGateTest(unittest.TestCase):
         runner, _ = _armed_runner([_issue(id="PLA-1")], config=cfg)
         sink = LoggingDispatchSink()
         for _ in range(3):
-            self.assertEqual(
-                runner.run_once(sink, dry_run=False).decision, RunDecision.DISPATCHED
-            )
+            self.assertEqual(runner.run_once(sink, dry_run=False).decision, RunDecision.DISPATCHED)
         # 4th tick: attempts have hit the ceiling -> escalate/skip -> no dispatch.
         res = runner.run_once(sink, dry_run=False)
         self.assertEqual(res.decision, RunDecision.IDLE)
@@ -291,18 +285,14 @@ class IdleTest(unittest.TestCase):
 class SinkTest(unittest.TestCase):
     def test_logging_sink_records_and_reports_no_spawn(self):
         sink = LoggingDispatchSink()
-        contract = _armed_runner([_issue(id="PLA-1")])[0]._dispatcher.contract_for(
-            _issue(id="PLA-1")
-        )
+        contract = _armed_runner([_issue(id="PLA-1")])[0]._dispatcher.contract_for(_issue(id="PLA-1"))
         result = sink.dispatch(contract)
         self.assertFalse(result.spawned)
         self.assertEqual(result.sink, "logging")
         self.assertEqual(sink.records, [contract])
 
     def test_stub_sinks_are_not_implemented(self):
-        contract = _armed_runner([_issue(id="PLA-1")])[0]._dispatcher.contract_for(
-            _issue(id="PLA-1")
-        )
+        contract = _armed_runner([_issue(id="PLA-1")])[0]._dispatcher.contract_for(_issue(id="PLA-1"))
         for sink in (
             GitHubActionsHeadlessSink(),
             AgentPlatformSink(),
@@ -341,9 +331,7 @@ class RunResultTest(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 class CliTest(unittest.TestCase):
     def _snapshot(self, items) -> str:
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".json", delete=False, encoding="utf-8"
-        ) as fh:
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
             json.dump({"issues": items}, fh)
             return fh.name
 
@@ -501,9 +489,7 @@ def _gha_sink(transport, *, token="tok-abc", repo="three-cubes/tc-pipelines"):
 
 def _contract_for(issue):
     """Build a real DispatchContract for an issue via a throwaway dispatcher."""
-    dispatcher = Dispatcher(
-        StaticIssueSource([issue]), guardrails_validator=lambda: True
-    )
+    dispatcher = Dispatcher(StaticIssueSource([issue]), guardrails_validator=lambda: True)
     return dispatcher.contract_for(issue)
 
 
@@ -511,9 +497,7 @@ class GitHubActionsDispatchSinkTest(unittest.TestCase):
     def test_dispatch_posts_workflow_dispatch_payload(self):
         fake = _FakeTransport(status=204)
         sink = _gha_sink(fake)
-        contract = _contract_for(
-            _issue(id="SGO-76", description="**Repos:** tc-fitness")
-        )
+        contract = _contract_for(_issue(id="SGO-76", description="**Repos:** tc-fitness"))
         result = sink.dispatch(contract)
 
         self.assertTrue(result.spawned)
@@ -549,9 +533,7 @@ class GitHubActionsDispatchSinkTest(unittest.TestCase):
         # the executor opens a review PR and never auto-merges.
         fake = _FakeTransport()
         sink = _gha_sink(fake)  # default enable_auto_merge=False
-        sink.dispatch(
-            _contract_for(_issue(id="SGO-76", description="**Repos:** kairix"))
-        )
+        sink.dispatch(_contract_for(_issue(id="SGO-76", description="**Repos:** kairix")))
         inputs = json.loads(fake.calls[0]["body"].decode())["inputs"]
         self.assertEqual(inputs["enable-auto-merge"], "false")
 
@@ -568,9 +550,7 @@ class GitHubActionsDispatchSinkTest(unittest.TestCase):
             transport=fake,
             enable_auto_merge=True,
         )
-        sink.dispatch(
-            _contract_for(_issue(id="SGO-76", description="**Repos:** kairix"))
-        )
+        sink.dispatch(_contract_for(_issue(id="SGO-76", description="**Repos:** kairix")))
         inputs = json.loads(fake.calls[0]["body"].decode())["inputs"]
         self.assertEqual(inputs["enable-auto-merge"], "true")
 
@@ -594,9 +574,7 @@ class GitHubActionsDispatchSinkTest(unittest.TestCase):
         sink = _gha_sink(fake)
         contract = _contract_for(_issue(id="SGO-76"))
         # A branch carrying shell/HTTP metacharacters must never reach a request.
-        poisoned = contract.__class__(
-            **{**contract.to_dict(), "branch": "main;rm -rf /"}
-        )
+        poisoned = contract.__class__(**{**contract.to_dict(), "branch": "main;rm -rf /"})
         with self.assertRaises(ValueError):
             sink.dispatch(poisoned)
         self.assertEqual(fake.calls, [])  # transport never touched
@@ -605,9 +583,7 @@ class GitHubActionsDispatchSinkTest(unittest.TestCase):
         fake = _FakeTransport()
         sink = _gha_sink(fake)
         contract = _contract_for(_issue(id="SGO-76"))
-        poisoned = contract.__class__(
-            **{**contract.to_dict(), "issue_id": "SGO 76 && curl evil"}
-        )
+        poisoned = contract.__class__(**{**contract.to_dict(), "issue_id": "SGO 76 && curl evil"})
         with self.assertRaises(ValueError):
             sink.dispatch(poisoned)
         self.assertEqual(fake.calls, [])
@@ -706,9 +682,7 @@ def _real_sink_runner(issues, *, soak_ticks=0, validator=lambda: True, armed=Tru
     governor = Governor(None)
     if armed and validator():
         governor.arm(guardrails_validated=True)
-    runner = Runner(
-        dispatcher, governor, guardrails_validator=validator, soak_ticks=soak_ticks
-    )
+    runner = Runner(dispatcher, governor, guardrails_validator=validator, soak_ticks=soak_ticks)
     fake = _FakeTransport(status=204)
     sink = _gha_sink(fake)
     return runner, sink, fake
@@ -729,9 +703,7 @@ class RealSinkGatingTest(unittest.TestCase):
         self.assertEqual(fake.calls, [])
 
     def test_red_harness_refuses_before_real_sink(self):
-        runner, sink, fake = _real_sink_runner(
-            [_issue(id="SGO-76")], validator=lambda: False, armed=False
-        )
+        runner, sink, fake = _real_sink_runner([_issue(id="SGO-76")], validator=lambda: False, armed=False)
         res = runner.run_once(sink, dry_run=False)
         self.assertEqual(res.decision, RunDecision.REFUSED)
         self.assertEqual(fake.calls, [])
@@ -739,12 +711,8 @@ class RealSinkGatingTest(unittest.TestCase):
     def test_soak_holds_real_sink_until_window_elapses(self):
         runner, sink, fake = _real_sink_runner([_issue(id="SGO-76")], soak_ticks=2)
         # First two armed+live ticks stay record-only (the soak).
-        self.assertEqual(
-            runner.run_once(sink, dry_run=False).decision, RunDecision.RECORDED
-        )
-        self.assertEqual(
-            runner.run_once(sink, dry_run=False).decision, RunDecision.RECORDED
-        )
+        self.assertEqual(runner.run_once(sink, dry_run=False).decision, RunDecision.RECORDED)
+        self.assertEqual(runner.run_once(sink, dry_run=False).decision, RunDecision.RECORDED)
         self.assertEqual(fake.calls, [])  # nothing dispatched during soak
         # Tick N+1 finally reaches the real sink.
         res = runner.run_once(sink, dry_run=False)

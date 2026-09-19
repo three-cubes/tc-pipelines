@@ -20,9 +20,7 @@ import unittest
 from pathlib import Path
 
 # Repo root: governance/loop/tests -> parents[3].
-_WORKFLOW = (
-    Path(__file__).resolve().parents[3] / ".github" / "workflows" / "loop-implement.yml"
-)
+_WORKFLOW = Path(__file__).resolve().parents[3] / ".github" / "workflows" / "loop-implement.yml"
 _DEFAULT_ALLOWED = "kairix kata tc-agent-zone tc-pipelines data-visualisation"
 
 
@@ -37,9 +35,7 @@ def _extract_run_block(text: str, name_substr: str) -> str:
             start = idx
             break
     if start is None:
-        raise AssertionError(
-            f"step containing {name_substr!r} not found in {_WORKFLOW}"
-        )
+        raise AssertionError(f"step containing {name_substr!r} not found in {_WORKFLOW}")
 
     run_idx = None
     for idx in range(start + 1, len(lines)):
@@ -70,9 +66,7 @@ def _extract_run_block(text: str, name_substr: str) -> str:
 class ValidateStepAllowlistTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.script = _extract_run_block(
-            _WORKFLOW.read_text(encoding="utf-8"), "Validate inputs"
-        )
+        cls.script = _extract_run_block(_WORKFLOW.read_text(encoding="utf-8"), "Validate inputs")
 
     def _run(
         self,

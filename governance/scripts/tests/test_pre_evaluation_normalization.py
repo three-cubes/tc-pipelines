@@ -60,36 +60,19 @@ def test_reusable_prepares_once_and_proves_a_fixed_point_before_evaluation() -> 
     names = [step.get("name") for step in steps]
 
     first = next(step for step in steps if step.get("name") == "Prepare candidate")
-    second = next(
-        step
-        for step in steps
-        if step.get("name") == "Prove preparation is a fixed point"
-    )
+    second = next(step for step in steps if step.get("name") == "Prove preparation is a fixed point")
     assert first["run"] == second["run"]
     assert "ruff check --force-exclude" in first["run"]
     assert "--no-unsafe-fixes --exit-zero" in first["run"]
-    assert (
-        "ruff format --force-exclude --line-length 110 --target-version py312"
-        in first["run"]
-    )
-    assert names.index("Install trusted uv for formatter preparation") < names.index(
-        "Prepare candidate"
-    )
-    assert names.index("Capture committed candidate state") < names.index(
-        "Prepare candidate"
-    )
-    assert names.index("Prepare candidate") < names.index(
-        "Capture first prepared state"
-    )
-    assert names.index("Capture first prepared state") < names.index(
-        "Produce bounded preparation evidence"
-    )
+    assert "ruff format --force-exclude --line-length 110 --target-version py312" in first["run"]
+    assert names.index("Install trusted uv for formatter preparation") < names.index("Prepare candidate")
+    assert names.index("Capture committed candidate state") < names.index("Prepare candidate")
+    assert names.index("Prepare candidate") < names.index("Capture first prepared state")
+    assert names.index("Capture first prepared state") < names.index("Produce bounded preparation evidence")
     assert names.index("Produce bounded preparation evidence") < names.index(
         "Prove preparation is a fixed point"
     )
-    assert names.index("Prove preparation is a fixed point") < names.index(
-        "Capture second prepared state"
-    )
+    assert names.index("Prove preparation is a fixed point") < names.index("Capture second prepared state")
     assert names.index("Capture second prepared state") < names.index(
         "Admit clean candidate or request exact writeback"
     )

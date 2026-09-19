@@ -86,9 +86,7 @@ TRANSITIONS: dict[tuple[State, Event], State] = {
 
 #: Events that require JUDGMENT (an instantiated agent), not deterministic glue.
 #: Documented here so callers/readers can see the split at a glance (ADR §3).
-JUDGMENT_EVENTS: frozenset[Event] = frozenset(
-    {Event.VERIFIED_PASS, Event.VERIFIED_FAIL}
-)
+JUDGMENT_EVENTS: frozenset[Event] = frozenset({Event.VERIFIED_PASS, Event.VERIFIED_FAIL})
 
 
 # --------------------------------------------------------------------------- #
@@ -222,8 +220,7 @@ class WorkItem:
         key = (self.state, event)
         if key not in TRANSITIONS:
             raise IllegalTransition(
-                f"{self.id}: event {event.value!r} illegal from state "
-                f"{self.state.value!r}"
+                f"{self.id}: event {event.value!r} illegal from state {self.state.value!r}"
             )
         new_state = TRANSITIONS[key]
         self.history.append((self.state, event, new_state))
@@ -300,13 +297,9 @@ class LoopEngine:
                 scope="global",
             )
         if item.state in TERMINAL:
-            raise IllegalTransition(
-                f"{item.id}: cannot dispatch a terminal item ({item.state.value})"
-            )
+            raise IllegalTransition(f"{item.id}: cannot dispatch a terminal item ({item.state.value})")
         if item.state not in (State.READY, State.NEEDS_FIX):
-            raise IllegalTransition(
-                f"{item.id}: cannot dispatch from {item.state.value}"
-            )
+            raise IllegalTransition(f"{item.id}: cannot dispatch from {item.state.value}")
 
         is_retry = item.state == State.NEEDS_FIX
 
@@ -381,14 +374,12 @@ class LoopEngine:
             )
         if run.network_accessed and not self.config.allow_network_in_verify:
             raise DeterminismViolation(
-                "verification accessed the network — non-deterministic; "
-                "inadmissible in the loop",
+                "verification accessed the network — non-deterministic; inadmissible in the loop",
                 scope="determinism",
             )
         if self.config.require_pinned_seed and not run.seed_pinned:
             raise DeterminismViolation(
-                "verification ran with an unpinned seed — non-deterministic; "
-                "inadmissible in the loop",
+                "verification ran with an unpinned seed — non-deterministic; inadmissible in the loop",
                 scope="determinism",
             )
 
@@ -402,8 +393,7 @@ class LoopEngine:
         """
         if item.state != State.VERIFYING:
             raise IllegalTransition(
-                f"{item.id}: verification only valid from 'verifying', not "
-                f"{item.state.value!r}"
+                f"{item.id}: verification only valid from 'verifying', not {item.state.value!r}"
             )
 
         # Determinism first — a tainted run cannot advance to done; escalate.
@@ -421,8 +411,7 @@ class LoopEngine:
         # AMBIGUOUS — do not guess; escalate to a human.
         item._escalate()
         raise AmbiguousVerification(
-            f"{item.id}: verifier returned an ambiguous verdict — escalating "
-            "rather than guessing",
+            f"{item.id}: verifier returned an ambiguous verdict — escalating rather than guessing",
             scope="ambiguous",
         )
 

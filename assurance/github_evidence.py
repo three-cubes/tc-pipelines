@@ -19,10 +19,7 @@ MAX_DOWNLOAD = 16 * 1024 * 1024
 class SafeRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
-        if (
-            urllib.parse.urlsplit(req.full_url).netloc
-            != urllib.parse.urlsplit(newurl).netloc
-        ):
+        if urllib.parse.urlsplit(req.full_url).netloc != urllib.parse.urlsplit(newurl).netloc:
             redirected.remove_header("Authorization")
         return redirected
 
@@ -30,7 +27,7 @@ class SafeRedirect(urllib.request.HTTPRedirectHandler):
 def sanitise(value):
     value = re.sub(r"\x1b\][^\x07]*(?:\x07|\x1b\\)", "", value)
     value = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value)
-    return "".join(c for c in value if c in "\n\t" or ord(c) >= 32 and ord(c) != 127)
+    return "".join(c for c in value if c in "\n\t" or (ord(c) >= 32 and ord(c) != 127))
 
 
 def download(url, destination):
@@ -44,9 +41,7 @@ def download(url, destination):
     stderr = destination.with_suffix(".stderr")
     try:
         request = urllib.request.Request(url, headers=headers)
-        with urllib.request.build_opener(SafeRedirect()).open(
-            request, timeout=30
-        ) as response:
+        with urllib.request.build_opener(SafeRedirect()).open(request, timeout=30) as response:
             data = response.read(MAX_DOWNLOAD + 1)
         if len(data) > MAX_DOWNLOAD:
             raise ReceiptError("download exceeds evidence size limit")
@@ -55,7 +50,9 @@ def download(url, destination):
         return data
     except (OSError, ValueError) as error:
         # Do not retain exception URLs: a redirect can contain signed credentials.
-        diagnostic = f"download failed: {type(error).__name__} status={getattr(error, 'code', 'unavailable')}\n"
+        diagnostic = (
+            f"download failed: {type(error).__name__} status={getattr(error, 'code', 'unavailable')}\n"
+        )
         if isinstance(error, urllib.error.HTTPError):
             destination.with_suffix(".failure-body").write_bytes(error.read(4096))
         stderr.write_text(diagnostic)
@@ -72,9 +69,7 @@ def archive_member(archive, name):
         with zipfile.ZipFile(archive) as source:
             members = [item for item in source.infolist() if item.filename == name]
             if len(members) != 1 or members[0].file_size > MAX_DOWNLOAD:
-                raise ReceiptError(
-                    "missing, duplicate or oversized native artifact member"
-                )
+                raise ReceiptError("missing, duplicate or oversized native artifact member")
             return source.read(members[0])
     except (zipfile.BadZipFile, RuntimeError, NotImplementedError) as error:
         raise ReceiptError("invalid native artifact archive") from error

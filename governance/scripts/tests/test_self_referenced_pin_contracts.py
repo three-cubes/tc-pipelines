@@ -209,8 +209,7 @@ def test_the_scan_found_resolvable_self_references() -> None:
     unresolved = sorted(
         f"{site['source']}:{site['label']} -> {site['ref']}"
         for site in SITES
-        if not site["commit"]
-        and f"{site['source']}:{site['label']}" not in DELIBERATE_UNRESOLVABLE_REF
+        if not site["commit"] and f"{site['source']}:{site['label']}" not in DELIBERATE_UNRESOLVABLE_REF
     )
     assert not unresolved, (
         f"{len(unresolved)} of {len(SITES)} refs cannot be resolved in this "
@@ -282,9 +281,7 @@ def test_read_outputs_are_declared_at_the_loaded_ref(site: dict) -> None:
 
 def test_every_deliberate_entry_names_an_unresolvable_call_site() -> None:
     """A stale exemption would drop a call site from the resolvability floor."""
-    unresolvable = {
-        f"{site['source']}:{site['label']}" for site in SITES if not site["commit"]
-    }
+    unresolvable = {f"{site['source']}:{site['label']}" for site in SITES if not site["commit"]}
     stale = sorted(set(DELIBERATE_UNRESOLVABLE_REF) - unresolvable)
     assert not stale, (
         f"DELIBERATE_UNRESOLVABLE_REF names call sites that are gone or whose "

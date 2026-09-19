@@ -19,9 +19,7 @@ from receipt import ReceiptError, digest, read, validate, write
 
 
 def command(root, *args):
-    return subprocess.run(
-        args, cwd=root, text=True, capture_output=True, check=True
-    ).stdout
+    return subprocess.run(args, cwd=root, text=True, capture_output=True, check=True).stdout
 
 
 def git(root, *args):
@@ -39,17 +37,11 @@ def select(root, base, head, *, complete=False, candidate_head=None):
         if parents != [base, candidate_head]:
             raise ReceiptError("tested PR merge does not bind base and candidate head")
     data = yaml.safe_load(git(root, "show", f"{head}:assurance/surfaces.yaml"))
-    cases = yaml.safe_load(git(root, "show", f"{head}:assurance/hosted-cases.yaml"))[
-        "cases"
-    ]
+    cases = yaml.safe_load(git(root, "show", f"{head}:assurance/hosted-cases.yaml"))["cases"]
     declared_cases = [
-        row["hosted"]["case"]
-        for row in data["surfaces"]
-        if row["hosted"]["boundary"] == "safe-hosted"
+        row["hosted"]["case"] for row in data["surfaces"] if row["hosted"]["boundary"] == "safe-hosted"
     ]
-    if len(set(declared_cases)) != len(declared_cases) or set(declared_cases) != set(
-        cases
-    ):
+    if len(set(declared_cases)) != len(declared_cases) or set(declared_cases) != set(cases):
         raise ReceiptError("missing, duplicate or orphan executable case")
     changed = git(root, "diff", "--name-only", "--no-renames", base, head).splitlines()
     paths = set(git(root, "ls-tree", "-r", "--name-only", head).splitlines())
@@ -76,9 +68,7 @@ def select(root, base, head, *, complete=False, candidate_head=None):
             raise ReceiptError(f"missing approved release probe: {row['id']}")
         affected = complete or any(
             path == row["path"]
-            or any(
-                fnmatch.fnmatchcase(path, pattern) for pattern in hosted["dependencies"]
-            )
+            or any(fnmatch.fnmatchcase(path, pattern) for pattern in hosted["dependencies"])
             for path in changed
         )
         if not affected or boundary in {"structural-example", "assurance-harness"}:
@@ -100,15 +90,10 @@ def select(root, base, head, *, complete=False, candidate_head=None):
 
 
 def plan(root, base, head, destination, complete=False, *, candidate_head=None):
-    selection = select(
-        root, base, head, complete=complete, candidate_head=candidate_head
-    )
+    selection = select(root, base, head, complete=complete, candidate_head=candidate_head)
     if git(root, "rev-parse", "HEAD") != head:
         raise ReceiptError("checkout is not the selected exact candidate")
-    if (
-        os.environ.get("GITHUB_ACTIONS") == "true"
-        and os.environ.get("GITHUB_SHA") != head
-    ):
+    if os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("GITHUB_SHA") != head:
         raise ReceiptError("tested commit does not match the Actions event")
     selection.update(
         execution_id=str(uuid.uuid4()),
@@ -160,9 +145,7 @@ def plan(root, base, head, destination, complete=False, *, candidate_head=None):
             stream.write("safe=" + json.dumps(selection["safe"]) + "\n")
             stream.write(
                 "actions="
-                + json.dumps(
-                    [case for case in selection["safe"] if case.startswith("action-")]
-                )
+                + json.dumps([case for case in selection["safe"] if case.startswith("action-")])
                 + "\n"
             )
     return selection
@@ -194,14 +177,10 @@ def expectation_for(root, selection, row, case):
             "sdlc_lock_digest": None,
         },
         "execution": {
-            "execution_id": str(
-                uuid.uuid5(uuid.UUID(selection["execution_id"]), identity)
-            ),
+            "execution_id": str(uuid.uuid5(uuid.UUID(selection["execution_id"]), identity)),
             "workflow_run_id": None if protected else selection["workflow_run_id"],
             "attempt": selection["attempt"],
-            "command": ["status", row["id"]]
-            if protected
-            else ["workflow_call", row["path"]],
+            "command": ["status", row["id"]] if protected else ["workflow_call", row["path"]],
             "tasks": [
                 {
                     "id": identity,
@@ -213,11 +192,7 @@ def expectation_for(root, selection, row, case):
         "output_ids": ["execution-log", "runtime-receipt", "status-result"]
         if protected
         else ["execution-log", "github-terminal"]
-        + (
-            ["native-artifact", "mutation-result"]
-            if case.get("native_artifact")
-            else []
-        ),
+        + (["native-artifact", "mutation-result"] if case.get("native_artifact") else []),
         "finding": None,
         "not_before": selection["started_at"],
     }
@@ -272,12 +247,7 @@ def download_native(root, selection, name, archive):
             f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100",
         )
     )
-    artifacts = [
-        a
-        for page in pages
-        for a in page["artifacts"]
-        if a["name"] == name and not a["expired"]
-    ]
+    artifacts = [a for page in pages for a in page["artifacts"] if a["name"] == name and not a["expired"]]
     if len(artifacts) != 1:
         raise ReceiptError("missing or duplicate native artifact")
     artifact = artifacts[0]
@@ -302,9 +272,7 @@ def collect_mutation(root, selection, directory, *, verify=False):
             data != (directory / "native.zip").read_bytes()
             or result != (directory / "mutation.json").read_bytes()
         ):
-            raise ReceiptError(
-                "retained native mutation evidence does not match GitHub"
-            )
+            raise ReceiptError("retained native mutation evidence does not match GitHub")
     else:
         (directory / "mutation.json").write_bytes(result)
     validate_mutation(directory / "mutation.json")
@@ -347,8 +315,7 @@ def collect(root, directory):
             jobs = [
                 job
                 for job in all_jobs
-                if case_id in job["name"].split(" / ")
-                and job["name"].rsplit(" / ", 1)[-1] in case["jobs"]
+                if case_id in job["name"].split(" / ") and job["name"].rsplit(" / ", 1)[-1] in case["jobs"]
             ]
             (case_dir / "terminal.json").write_text(json.dumps(jobs, indent=2) + "\n")
             logs = []
@@ -360,12 +327,8 @@ def collect(root, directory):
                     )
                 )
             (case_dir / "execution.log").write_text("\n".join(logs))
-            validate_jobs(
-                jobs, case["steps"], run_id, attempt, selection["candidate_head"]
-            )
-            if sorted(job["name"].rsplit(" / ", 1)[-1] for job in jobs) != sorted(
-                case["jobs"]
-            ):
+            validate_jobs(jobs, case["steps"], run_id, attempt, selection["candidate_head"])
+            if sorted(job["name"].rsplit(" / ", 1)[-1] for job in jobs) != sorted(case["jobs"]):
                 raise ReceiptError("missing or duplicate required case job")
             expectation = expectation_for(root, selection, row, case)
             native_outputs = []
@@ -387,12 +350,8 @@ def collect(root, directory):
                 + native_outputs,
                 "finding": None,
             }
-            (case_dir / "expectation.json").write_text(
-                json.dumps(expectation, indent=2) + "\n"
-            )
-            receipt = write(
-                expectation, observation, case_dir, case_dir / "receipt.json"
-            )
+            (case_dir / "expectation.json").write_text(json.dumps(expectation, indent=2) + "\n")
+            receipt = write(expectation, observation, case_dir, case_dir / "receipt.json")
             validate(receipt, expectation, case_dir)
             receipts.append(
                 {
@@ -438,9 +397,7 @@ def collect(root, directory):
                     ],
                     "finding": None,
                 }
-                (case_dir / "expectation.json").write_text(
-                    json.dumps(expectation, indent=2) + "\n"
-                )
+                (case_dir / "expectation.json").write_text(json.dumps(expectation, indent=2) + "\n")
                 try:
                     write(expectation, observation, case_dir, case_dir / "receipt.json")
                 except ReceiptError:
@@ -461,9 +418,7 @@ def collect(root, directory):
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as stream:
             for receipt in receipts:
-                stream.write(
-                    f"- `{receipt['case_id']}`: {receipt['actual']} `{receipt['digest']}`\n"
-                )
+                stream.write(f"- `{receipt['case_id']}`: {receipt['actual']} `{receipt['digest']}`\n")
             for case_id in failures:
                 stream.write(f"- `{case_id}`: FAIL; retained diagnostics\n")
     if failures:
@@ -483,9 +438,7 @@ def admit(root, directory, protected_policy=None):
     for key in ("safe", "protected", "surfaces"):
         if current[key] != selection[key]:
             raise ReceiptError("selection does not bind the exact candidate inventory")
-    required = set(selection["safe"]) | {
-        identity + ":status" for identity in selection["protected"]
-    }
+    required = set(selection["safe"]) | {identity + ":status" for identity in selection["protected"]}
     receipts = {}
     executions = set()
     for path in directory.rglob("receipt.json"):
@@ -496,15 +449,11 @@ def admit(root, directory, protected_policy=None):
         executions.add(receipt["execution"]["execution_id"])
         receipts[identity] = (path, receipt)
     if required - receipts.keys():
-        raise ReceiptError(
-            f"missing required receipt: {sorted(required - receipts.keys())}"
-        )
+        raise ReceiptError(f"missing required receipt: {sorted(required - receipts.keys())}")
     if receipts.keys() - required:
         raise ReceiptError("unexpected receipt outside selected cases")
     cases = (
-        yaml.safe_load(
-            git(root, "show", f"{selection['head']}:assurance/hosted-cases.yaml")
-        )["cases"]
+        yaml.safe_load(git(root, "show", f"{selection['head']}:assurance/hosted-cases.yaml"))["cases"]
         if receipts
         else {}
     )
@@ -527,16 +476,9 @@ def admit(root, directory, protected_policy=None):
         )
         validate_run(run, selection)
         plan_archive = directory / "selection-provenance.zip"
-        download_native(
-            root, selection, f"assurance-plan-{run_id}-{attempt}", plan_archive
-        )
-        if (
-            archive_member(plan_archive, "selection.json")
-            != (directory / "selection.json").read_bytes()
-        ):
-            raise ReceiptError(
-                "selection identities differ from the actual GitHub plan artifact"
-            )
+        download_native(root, selection, f"assurance-plan-{run_id}-{attempt}", plan_archive)
+        if archive_member(plan_archive, "selection.json") != (directory / "selection.json").read_bytes():
+            raise ReceiptError("selection identities differ from the actual GitHub plan artifact")
         pages = json.loads(
             command(
                 root,
@@ -563,22 +505,16 @@ def admit(root, directory, protected_policy=None):
             or execution["attempt"] != selection["attempt"]
         ):
             raise ReceiptError("wrong candidate or attempt at admission")
-        if execution["execution_id"] != str(
-            uuid.uuid5(uuid.UUID(selection["execution_id"]), identity)
-        ):
+        if execution["execution_id"] != str(uuid.uuid5(uuid.UUID(selection["execution_id"]), identity)):
             raise ReceiptError("receipt was not produced for this selection")
         if identity in selection["safe"]:
             if (
                 execution["executor"] != "github-actions"
                 or execution["workflow_run_id"] != selection["workflow_run_id"]
             ):
-                raise ReceiptError(
-                    "local or wrong-run evidence cannot satisfy hosted admission"
-                )
+                raise ReceiptError("local or wrong-run evidence cannot satisfy hosted admission")
             terminal = next(
-                item
-                for item in receipt["evidence"]["outputs"]
-                if item["id"] == "github-terminal"
+                item for item in receipt["evidence"]["outputs"] if item["id"] == "github-terminal"
             )
             validate_jobs(
                 read(path.parent / terminal["path"]),
@@ -601,23 +537,14 @@ def admit(root, directory, protected_policy=None):
                         "steps",
                     )
                 ):
-                    raise ReceiptError(
-                        "retained terminal evidence does not match GitHub"
-                    )
+                    raise ReceiptError("retained terminal evidence does not match GitHub")
             if case.get("native_artifact"):
                 collect_mutation(root, selection, path.parent, verify=True)
         else:
-            if (
-                execution["executor"] != "live-boundary"
-                or not receipt["evidence"]["runtime_receipt_digest"]
-            ):
-                raise ReceiptError(
-                    "protected admission requires a bound runtime receipt"
-                )
+            if execution["executor"] != "live-boundary" or not receipt["evidence"]["runtime_receipt_digest"]:
+                raise ReceiptError("protected admission requires a bound runtime receipt")
             if execution["command"] != ["status", identity.removesuffix(":status")]:
-                raise ReceiptError(
-                    "protected admission permits only the declared status operation"
-                )
+                raise ReceiptError("protected admission permits only the declared status operation")
             validate_protected(
                 root,
                 path.parent,
@@ -639,9 +566,7 @@ def admit(root, directory, protected_policy=None):
             {
                 "candidate_commit": selection["head"],
                 "candidate_head": selection["candidate_head"],
-                "protected_policy_digest": digest(
-                    json.dumps(protected_policy, sort_keys=True).encode()
-                )
+                "protected_policy_digest": digest(json.dumps(protected_policy, sort_keys=True).encode())
                 if protected_policy
                 else None,
                 "receipts": index,
@@ -656,9 +581,7 @@ def admit(root, directory, protected_policy=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=["select", "plan", "collect", "admit"])
-    parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[1]
-    )
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--base")
     parser.add_argument("--head")
     parser.add_argument("--candidate-head")

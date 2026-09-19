@@ -5,8 +5,8 @@
 prepare:
 	uv lock
 	uv sync --locked
-	uv run --no-sync ruff check --fix .
-	uv run --no-sync ruff format .
+	uv run --no-sync ruff check --force-exclude --select E,F,I,UP,B,S,RUF --target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero .
+	uv run --no-sync ruff format --force-exclude --line-length 110 --target-version py312 .
 	uv run --no-sync python assurance/run.py prepare
 
 check: prepare

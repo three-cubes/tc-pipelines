@@ -48,9 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         nargs="?",
         help="File containing az vm run-command value[0].message output",
     )
-    parser.add_argument(
-        "--label", default="run-command", help="Human-readable label for error output"
-    )
+    parser.add_argument("--label", default="run-command", help="Human-readable label for error output")
     args = parser.parse_args(argv)
 
     result = classify_run_command_message(_read_message(args.message_file))

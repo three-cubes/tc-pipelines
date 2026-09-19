@@ -14,7 +14,9 @@ from receipt import ReceiptError, digest, output_path, read
 
 # Released v0.16.1 adds the public runtime verifier; do not fork its validator or
 # change the repository's independently pinned compatibility-engine baseline.
-RUNTIME_VERIFIER = "git+https://github.com/three-cubes/tc-fitness.git@8d39d7e2f5b5d9daae778ec8195e344b0e7cc396"
+RUNTIME_VERIFIER = (
+    "git+https://github.com/three-cubes/tc-fitness.git@8d39d7e2f5b5d9daae778ec8195e344b0e7cc396"
+)
 
 
 def verify_runtime(directory, evidence, policy, head):
@@ -54,9 +56,7 @@ def verify_runtime(directory, evidence, policy, head):
         args.extend(["--expected-" + key.replace("_", "-"), str(policy[key])])
     for check in policy["required_checks"]:
         args.extend(["--required-check", check])
-    result = subprocess.run(
-        args, capture_output=True, text=True, check=False, timeout=120
-    )
+    result = subprocess.run(args, capture_output=True, text=True, check=False, timeout=120)
     (directory / "canonical-verifier.stdout").write_text(result.stdout)
     (directory / "canonical-verifier.stderr").write_text(result.stderr)
     if result.returncode or read(output) != {"valid": True, "findings": []}:
@@ -83,18 +83,10 @@ def verify_provenance(root, directory, receipt, selection, policy, api):
     repo, run_id, attempt = policy["repository"], policy["run_id"], policy["attempt_id"]
     run = api(root, f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}")
     validate_provenance(run, selection, policy)
-    artifacts = api(root, f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100")[
-        "artifacts"
-    ]
-    selected = [
-        a
-        for a in artifacts
-        if a["name"] == policy["artifact_name"] and not a["expired"]
-    ]
+    artifacts = api(root, f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100")["artifacts"]
+    selected = [a for a in artifacts if a["name"] == policy["artifact_name"] and not a["expired"]]
     if len(selected) != 1 or selected[0]["digest"] != policy["artifact_digest"]:
-        raise ReceiptError(
-            "protected artifact is missing or not authorised by release policy"
-        )
+        raise ReceiptError("protected artifact is missing or not authorised by release policy")
     archive = directory / "protected-provenance.zip"
     data = download(
         f"https://api.github.com/repos/{repo}/actions/artifacts/{selected[0]['id']}/zip",
@@ -109,9 +101,7 @@ def verify_provenance(root, directory, receipt, selection, policy, api):
             "execution-log": "execution.log",
         }[row["id"]]
         if digest(archive_member(archive, member)) != row["digest"]:
-            raise ReceiptError(
-                "protected evidence differs from authorised producer artifact"
-            )
+            raise ReceiptError("protected evidence differs from authorised producer artifact")
     (directory / "protected-provenance.json").write_text(
         json.dumps({"run": run, "artifact": selected[0]}, indent=2)
     )
@@ -119,16 +109,9 @@ def verify_provenance(root, directory, receipt, selection, policy, api):
 
 def validate_protected(root, directory, receipt, selection, policy, api):
     if policy is None:
-        raise ReceiptError(
-            "protected admission requires explicit release-authority policy"
-        )
-    outputs = {
-        row["id"]: output_path(directory, row["path"])
-        for row in receipt["evidence"]["outputs"]
-    }
+        raise ReceiptError("protected admission requires explicit release-authority policy")
+    outputs = {row["id"]: output_path(directory, row["path"]) for row in receipt["evidence"]["outputs"]}
     verify_runtime(directory, outputs["runtime-receipt"], policy, selection["head"])
     if read(outputs["status-result"]) != {"valid": True, "findings": []}:
-        raise ReceiptError(
-            "protected status result is not the canonical terminal success"
-        )
+        raise ReceiptError("protected status result is not the canonical terminal success")
     verify_provenance(root, directory, receipt, selection, policy, api)

@@ -27,10 +27,7 @@ def parse_args() -> argparse.Namespace:
 
 def source_files(root: Path) -> list[Path]:
     return sorted(
-        path
-        for target in TARGETS
-        if (root / target).is_dir()
-        for path in (root / target).rglob("*.yml")
+        path for target in TARGETS if (root / target).is_dir() for path in (root / target).rglob("*.yml")
     )
 
 
@@ -54,9 +51,7 @@ def main() -> int:
             if match.group("sha") != args.sha
         )
         updated = SELF_PIN.sub(
-            lambda match: (
-                f"{match.group('prefix')}{args.sha}{match.group('comment')}{args.version}"
-            ),
+            lambda match: f"{match.group('prefix')}{args.sha}{match.group('comment')}{args.version}",
             text,
         )
         if not args.check and updated != text:

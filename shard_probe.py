@@ -18,9 +18,7 @@ argv = sys.argv[1:]
 joined = " ".join(argv)
 cov_file = os.environ.get("COVERAGE_FILE", "")
 expect_shard = os.environ.get("EXPECT_SHARD", "") == "1"
-print(
-    f"SHARD-PROBE argv={argv!r} COVERAGE_FILE={cov_file!r} expect_shard={expect_shard}"
-)
+print(f"SHARD-PROBE argv={argv!r} COVERAGE_FILE={cov_file!r} expect_shard={expect_shard}")
 
 if expect_shard:
     if "--split" not in argv or "of" not in argv:
@@ -31,9 +29,7 @@ else:
     if argv:
         sys.exit(f"FAIL: expected no shard args when unsharded, got {joined!r}")
     if cov_file:
-        sys.exit(
-            f"FAIL: expected no COVERAGE_FILE override when unsharded, got {cov_file!r}"
-        )
+        sys.exit(f"FAIL: expected no COVERAGE_FILE override when unsharded, got {cov_file!r}")
 
 # Write real (branch) coverage data to the shard-scoped file so coverage-combine
 # has genuine data to merge (empty files make `coverage combine` error).
@@ -47,7 +43,7 @@ if cov_file:
         cov.stop()
         cov.save()
         print(f"SHARD-PROBE wrote coverage data to {cov_file}")
-    except Exception as exc:  # noqa: BLE001 - probe is best-effort on coverage
+    except Exception as exc:
         print(f"SHARD-PROBE coverage skipped: {exc}")
 
 print("SHARD-PROBE OK")

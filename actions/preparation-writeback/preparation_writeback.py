@@ -39,7 +39,8 @@ RUFF_VERSION = "0.16.8"
 def permitted_policy_path(path: str) -> bool:
     return bool(
         re.fullmatch(
-            r"(?:[A-Za-z0-9][A-Za-z0-9_.-]*/)*[A-Za-z0-9][A-Za-z0-9_.-]*\.pyi?", path
+            r"(?:\.?[A-Za-z0-9][A-Za-z0-9_.-]*/)*[A-Za-z0-9][A-Za-z0-9_.-]*\.pyi?",
+            path,
         )
     )
 
@@ -48,9 +49,7 @@ def replay_trusted_policy(root: Path) -> tuple[list[dict[str, Any]], str]:
     """Replay pinned Ruff over tracked Python without executing candidate code."""
     paths = [
         os.fsdecode(path)
-        for path in run_git_bytes(root, "ls-files", "-z", "--", "*.py", "*.pyi").split(
-            b"\0"
-        )
+        for path in run_git_bytes(root, "ls-files", "-z", "--", "*.py", "*.pyi").split(b"\0")
         if path
     ]
     if not paths:
@@ -109,22 +108,16 @@ def fail(message: str) -> None:
 
 
 def run_git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(
-        ["git", *arguments], cwd=root, text=True, capture_output=True, check=False
-    )
+    result = subprocess.run(["git", *arguments], cwd=root, text=True, capture_output=True, check=False)
     if result.returncode:
         fail(f"git {' '.join(arguments)} failed: {result.stderr.strip()}")
     return result.stdout.strip()
 
 
 def run_git_bytes(root: Path, *arguments: str) -> bytes:
-    result = subprocess.run(
-        ["git", *arguments], cwd=root, capture_output=True, check=False
-    )
+    result = subprocess.run(["git", *arguments], cwd=root, capture_output=True, check=False)
     if result.returncode:
-        fail(
-            f"git {' '.join(arguments)} failed: {result.stderr.decode(errors='replace').strip()}"
-        )
+        fail(f"git {' '.join(arguments)} failed: {result.stderr.decode(errors='replace').strip()}")
     return result.stdout
 
 
@@ -133,9 +126,7 @@ def sha256(data: bytes) -> str:
 
 
 def canonical_json(value: Any) -> bytes:
-    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode(
-        "utf-8"
-    )
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
 
 def positive_integer(value: str) -> int:
@@ -180,9 +171,7 @@ def checked_file(root: Path, relative: str) -> Path:
 
 def visible_paths(root: Path) -> list[str]:
     tracked = run_git_bytes(root, "ls-files", "-z").split(b"\0")
-    untracked = run_git_bytes(
-        root, "ls-files", "--others", "--exclude-standard", "-z"
-    ).split(b"\0")
+    untracked = run_git_bytes(root, "ls-files", "--others", "--exclude-standard", "-z").split(b"\0")
     paths = {os.fsdecode(piece) for piece in tracked + untracked if piece}
     return sorted(paths)
 
@@ -209,18 +198,13 @@ def manifest(root: Path, *, include_content: bool) -> tuple[list[dict[str, Any]]
         entries.append(entry)
     state = sha256(
         canonical_json(
-            [
-                {key: value for key, value in entry.items() if key != "content_base64"}
-                for entry in entries
-            ]
+            [{key: value for key, value in entry.items() if key != "content_base64"} for entry in entries]
         )
     )
     return entries, state
 
 
-def read_document(
-    path: Path, *, limit: int | None = MAX_RECEIPT_BYTES
-) -> dict[str, Any]:
+def read_document(path: Path, *, limit: int | None = MAX_RECEIPT_BYTES) -> dict[str, Any]:
     try:
         raw = path.read_bytes()
     except OSError as error:
@@ -311,7 +295,7 @@ def produce(arguments: argparse.Namespace) -> None:
             fail("trusted policy cannot add or delete paths")
         if old["digest"] != new["digest"] or old["mode"] != new["mode"]:
             if not permitted_policy_path(path):
-                fail("trusted policy does not permit this path")
+                fail(f"trusted policy does not permit path: {path}")
             if old["mode"] != new["mode"]:
                 fail("trusted policy cannot change file modes")
             patch_entries.append(
@@ -395,9 +379,7 @@ def validate_receipt(
         fail("temporary checkout does not match expected pull-request head")
     if run_git(root, "rev-parse", "HEAD^{tree}") != document["head_tree"]:
         fail("receipt head tree does not match temporary checkout")
-    if not isinstance(document["patch_bytes"], int) or document["patch_bytes"] != len(
-        patch_bytes
-    ):
+    if not isinstance(document["patch_bytes"], int) or document["patch_bytes"] != len(patch_bytes):
         fail("receipt patch size does not match patch artifact")
     if len(patch_bytes) > MAX_PATCH_BYTES:
         fail("preparation patch exceeds bounded size")
@@ -410,9 +392,9 @@ def validate_receipt(
     if issued_at.tzinfo is None:
         fail("receipt issued_at must include a timezone")
     now = datetime.now(UTC)
-    if issued_at.astimezone(UTC) < now - MAX_RECEIPT_AGE or issued_at.astimezone(
-        UTC
-    ) > now + timedelta(minutes=1):
+    if issued_at.astimezone(UTC) < now - MAX_RECEIPT_AGE or issued_at.astimezone(UTC) > now + timedelta(
+        minutes=1
+    ):
         fail("receipt is stale or from the future")
     for field in ("head_sha", "head_tree"):
         if (
@@ -422,9 +404,7 @@ def validate_receipt(
         ):
             fail(f"receipt {field} is malformed")
     for field in ("pre_tree", "post_tree", "patch_digest"):
-        if not isinstance(document[field], str) or not document[field].startswith(
-            "sha256:"
-        ):
+        if not isinstance(document[field], str) or not document[field].startswith("sha256:"):
             fail(f"receipt {field} is malformed")
     if not isinstance(document["pull_request"], int) or document["pull_request"] < 1:
         fail("receipt pull request is invalid")
@@ -439,11 +419,7 @@ def validate_patch(patch_bytes: bytes) -> list[dict[str, Any]]:
         patch = json.loads(patch_bytes)
     except json.JSONDecodeError as error:
         raise PreparationError(f"invalid patch JSON: {error}") from error
-    if (
-        not isinstance(patch, dict)
-        or set(patch) != {"schema", "entries"}
-        or patch["schema"] != PATCH_SCHEMA
-    ):
+    if not isinstance(patch, dict) or set(patch) != {"schema", "entries"} or patch["schema"] != PATCH_SCHEMA:
         fail("unsupported patch schema")
     entries = patch["entries"]
     if not isinstance(entries, list):
@@ -561,9 +537,7 @@ def apply(arguments: argparse.Namespace) -> None:
 
 def changed(arguments: argparse.Namespace) -> None:
     """Report Git-visible changes, including additions and deletions."""
-    status = run_git(
-        arguments.root.resolve(), "status", "--porcelain=v1", "--untracked-files=all"
-    )
+    status = run_git(arguments.root.resolve(), "status", "--porcelain=v1", "--untracked-files=all")
     print("true" if status else "false")
 
 
@@ -658,25 +632,17 @@ def artifact(arguments: argparse.Namespace) -> None:
                 "preparation-patch.json": MAX_PATCH_BYTES,
             }
             names = [member.filename for member in members]
-            if len(members) != len(expected_limits) or set(names) != set(
-                expected_limits
-            ):
+            if len(members) != len(expected_limits) or set(names) != set(expected_limits):
                 fail("receipt artifact must contain exactly the receipt and patch")
             if len(set(names)) != len(names):
                 fail("receipt artifact contains duplicate members")
             extracted: dict[str, bytes] = {}
             for member in members:
-                if (
-                    member.is_dir()
-                    or member.file_size > expected_limits[member.filename]
-                ):
+                if member.is_dir() or member.file_size > expected_limits[member.filename]:
                     fail("receipt artifact member exceeds bounded extracted size")
                 with archive_file.open(member) as stream:
                     content = stream.read(expected_limits[member.filename] + 1)
-                if (
-                    len(content) != member.file_size
-                    or len(content) > expected_limits[member.filename]
-                ):
+                if len(content) != member.file_size or len(content) > expected_limits[member.filename]:
                     fail("receipt artifact member exceeds bounded extracted size")
                 extracted[member.filename] = content
     except (OSError, zipfile.BadZipFile) as error:
@@ -695,12 +661,8 @@ def parser() -> argparse.ArgumentParser:
     snapshot_parser.add_argument("--head-sha", required=True)
     snapshot_parser.add_argument("--head-repository", required=True)
     snapshot_parser.add_argument("--head-ref", required=True)
-    snapshot_parser.add_argument(
-        "--workflow-run-id", type=positive_integer, required=True
-    )
-    snapshot_parser.add_argument(
-        "--workflow-run-attempt", type=positive_integer, required=True
-    )
+    snapshot_parser.add_argument("--workflow-run-id", type=positive_integer, required=True)
+    snapshot_parser.add_argument("--workflow-run-attempt", type=positive_integer, required=True)
     snapshot_parser.add_argument("--output", type=Path, required=True)
     snapshot_parser.add_argument("--root", type=Path, required=True)
     snapshot_parser.set_defaults(handler=snapshot)
@@ -719,9 +681,7 @@ def parser() -> argparse.ArgumentParser:
     apply_parser.add_argument("--expected-policy", required=True)
     apply_parser.add_argument("--expected-head-ref", required=True)
     apply_parser.add_argument("--workflow-run-id", type=positive_integer, required=True)
-    apply_parser.add_argument(
-        "--workflow-run-attempt", type=positive_integer, required=True
-    )
+    apply_parser.add_argument("--workflow-run-attempt", type=positive_integer, required=True)
     apply_parser.add_argument("--root", type=Path, required=True)
     apply_parser.set_defaults(handler=apply)
     changed_parser = subparsers.add_parser("changed")

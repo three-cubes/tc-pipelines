@@ -140,9 +140,7 @@ class DispatchResult:
     sink: str
     issue_id: str
     detail: str = ""
-    ref: str | None = (
-        None  # a run URL / spawn id / delegate id, when a real sink sets one
-    )
+    ref: str | None = None  # a run URL / spawn id / delegate id, when a real sink sets one
 
     def to_dict(self) -> dict:
         return {
@@ -222,12 +220,8 @@ DispatchTransport = Callable[[str, bytes, dict], tuple[int, str]]
 # the JSON body. Anything outside the pattern raises — nothing is ever spliced
 # into a request raw.
 _ISSUE_ID_RE = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")  # e.g. SGO-76
-_BRANCH_RE = re.compile(
-    r"^[A-Za-z0-9._/-]+$"
-)  # a Linear gitBranchName, e.g. dan/sgo-76-slug
-_REPO_RE = re.compile(
-    r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
-)  # owner/name (the orchestrator repo)
+_BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")  # a Linear gitBranchName, e.g. dan/sgo-76-slug
+_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")  # owner/name (the orchestrator repo)
 # The TARGET repo the executor runs against: the dispatcher infers a BARE name
 # (e.g. ``kairix``) or an ``owner/name``; loop-implement.yml qualifies a bare name
 # with the org owner. Either shape is accepted; ``unknown`` (the dispatcher's
@@ -236,9 +230,7 @@ _TARGET_REPO_RE = re.compile(r"^(?:[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+$")
 _WORKFLOW_RE = re.compile(r"^[A-Za-z0-9._-]+\.ya?ml$")  # a workflow file name
 
 
-def _default_dispatch_transport(
-    url: str, body: bytes, headers: dict
-) -> tuple[int, str]:
+def _default_dispatch_transport(url: str, body: bytes, headers: dict) -> tuple[int, str]:
     """POST ``body`` to ``url`` via stdlib ``urllib`` (no third-party deps).
 
     Returns ``(status, text)``. An ``HTTPError`` is caught and surfaced as its
@@ -287,31 +279,19 @@ class GitHubActionsDispatchSink:
         """Reject anything outside the strict allowlist BEFORE it reaches a
         request — the contract fields AND this sink's own repo/workflow config."""
         if not _ISSUE_ID_RE.match(contract.issue_id or ""):
-            raise ValueError(
-                f"GitHubActionsDispatchSink: refusing unsafe issue id {contract.issue_id!r}"
-            )
+            raise ValueError(f"GitHubActionsDispatchSink: refusing unsafe issue id {contract.issue_id!r}")
         if not _BRANCH_RE.match(contract.branch or ""):
-            raise ValueError(
-                f"GitHubActionsDispatchSink: refusing unsafe branch {contract.branch!r}"
-            )
-        if (contract.repo or "") == "unknown" or not _TARGET_REPO_RE.match(
-            contract.repo or ""
-        ):
+            raise ValueError(f"GitHubActionsDispatchSink: refusing unsafe branch {contract.branch!r}")
+        if (contract.repo or "") == "unknown" or not _TARGET_REPO_RE.match(contract.repo or ""):
             raise ValueError(
                 f"GitHubActionsDispatchSink: refusing unresolved/unsafe target repo {contract.repo!r}"
             )
         if not _REPO_RE.match(self.repo or ""):
-            raise ValueError(
-                f"GitHubActionsDispatchSink: refusing unsafe orchestrator repo {self.repo!r}"
-            )
+            raise ValueError(f"GitHubActionsDispatchSink: refusing unsafe orchestrator repo {self.repo!r}")
         if not _WORKFLOW_RE.match(self.workflow or ""):
-            raise ValueError(
-                f"GitHubActionsDispatchSink: refusing unsafe workflow {self.workflow!r}"
-            )
+            raise ValueError(f"GitHubActionsDispatchSink: refusing unsafe workflow {self.workflow!r}")
         if not self.token:
-            raise ValueError(
-                "GitHubActionsDispatchSink: no dispatch token (fail-closed)"
-            )
+            raise ValueError("GitHubActionsDispatchSink: no dispatch token (fail-closed)")
 
     def dispatch(self, contract: DispatchContract) -> DispatchResult:
         self._validate(contract)
@@ -464,9 +444,7 @@ class RunDecision(str, Enum):
 
 
 #: Decisions in which the spawn seam (``sink.dispatch``) was definitely NOT reached.
-_NO_SEAM = frozenset(
-    {RunDecision.REFUSED, RunDecision.HALTED, RunDecision.IDLE, RunDecision.RECORDED}
-)
+_NO_SEAM = frozenset({RunDecision.REFUSED, RunDecision.HALTED, RunDecision.IDLE, RunDecision.RECORDED})
 
 
 @dataclass(frozen=True)
@@ -509,9 +487,7 @@ class RunResult:
             "spawned": self.spawned,
             "initiative": self.initiative,
             "contract": self.contract.to_dict() if self.contract else None,
-            "dispatch_result": (
-                self.dispatch_result.to_dict() if self.dispatch_result else None
-            ),
+            "dispatch_result": (self.dispatch_result.to_dict() if self.dispatch_result else None),
             "ready": list(self.ready),
             "skipped": [{"id": i, "reason": r} for i, r in self.skipped],
         }
@@ -551,9 +527,7 @@ class Runner:
         # Default to the dispatcher's proof so the two never diverge; an explicit
         # override is honoured (the tests inject a stub, the CLI a memoised one).
         self._validator: Callable[[], bool] = (
-            guardrails_validator
-            if guardrails_validator is not None
-            else dispatcher.guardrails_validator
+            guardrails_validator if guardrails_validator is not None else dispatcher.guardrails_validator
         )
         self._initiative = initiative
         self._cost = cost_per_issue
@@ -561,9 +535,7 @@ class Runner:
         # (in-process only) — fine for a single long-lived Governor and for unit
         # tests, but an armed + live tick requires a durable store (the CLI
         # refuses the non-durable combination). See FIX 1 / ARMING.md.
-        self._state_store: StateStore = (
-            state_store if state_store is not None else NullStateStore()
-        )
+        self._state_store: StateStore = state_store if state_store is not None else NullStateStore()
         # Soak gate (FIX 3): the first ``soak_ticks`` armed ticks stay record-only
         # even when live is requested, so a cold armed tick never dispatches.
         self._soak_required = max(0, int(soak_ticks))
@@ -657,8 +629,7 @@ class Runner:
         if self._governor.halted:
             return self._result(
                 RunDecision.HALTED,
-                "fleet-wide breaker is open (global budget / cross-issue "
-                "circuit) — all dispatch halted",
+                "fleet-wide breaker is open (global budget / cross-issue circuit) — all dispatch halted",
                 armed=armed,
                 harness_ok=True,
                 dry_run=dry_run,
@@ -970,8 +941,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dispatch-ref",
         default=os.environ.get("LOOP_DISPATCH_REF", "main"),
-        help="Git ref the dispatched workflow runs on. Env: LOOP_DISPATCH_REF "
-        "(default main).",
+        help="Git ref the dispatched workflow runs on. Env: LOOP_DISPATCH_REF (default main).",
     )
     parser.add_argument(
         "--dispatch-api-url",
@@ -1073,22 +1043,15 @@ def _build_sink(args: argparse.Namespace) -> DispatchSink:
 def render_result(result: RunResult) -> str:
     """A human-readable render of one tick — the safe operator view."""
     lines: list[str] = []
+    lines.append(f"loop-runner tick — Autonomous Delivery Platform ({result.initiative})")
     lines.append(
-        f"loop-runner tick — Autonomous Delivery Platform ({result.initiative})"
-    )
-    lines.append(
-        f"  armed={result.armed}  harness_validated={result.harness_validated}  "
-        f"dry_run={result.dry_run}"
+        f"  armed={result.armed}  harness_validated={result.harness_validated}  dry_run={result.dry_run}"
     )
     lines.append(f"  decision: {result.decision.value.upper()}  —  {result.reason}")
-    lines.append(
-        f"  READY ({len(result.ready)}): {', '.join(result.ready) or '(none)'}"
-    )
+    lines.append(f"  READY ({len(result.ready)}): {', '.join(result.ready) or '(none)'}")
     if result.contract:
         c = result.contract
-        verb = (
-            "DISPATCHED" if result.dispatched else "SELECTED (recorded, not dispatched)"
-        )
+        verb = "DISPATCHED" if result.dispatched else "SELECTED (recorded, not dispatched)"
         lines.append(f"  {verb}: {c.issue_id}  repo={c.repo}  branch={c.branch}")
         lines.append(f"      acceptance-criteria: {c.acceptance_criteria}")
     if result.dispatch_result:
@@ -1099,9 +1062,7 @@ def render_result(result: RunResult) -> str:
         for issue_id, reason in result.skipped:
             lines.append(f"    - {issue_id}: {reason}")
     if not result.dispatched:
-        lines.append(
-            "  [no dispatch] no agent spawned, no Linear writes, no side effects."
-        )
+        lines.append("  [no dispatch] no agent spawned, no Linear writes, no side effects.")
     return "\n".join(lines)
 
 
@@ -1122,11 +1083,7 @@ def main(argv: list[str] | None = None) -> int:
             "breaker guardrails never accumulate (fail-open). Nothing dispatched."
         )
         if args.json:
-            print(
-                json.dumps(
-                    {"decision": "refused", "reason": msg, "armed": True}, indent=2
-                )
-            )
+            print(json.dumps({"decision": "refused", "reason": msg, "armed": True}, indent=2))
         else:
             print(msg)
         return 3
@@ -1142,11 +1099,7 @@ def main(argv: list[str] | None = None) -> int:
             "Nothing selected, nothing dispatched."
         )
         if args.json:
-            print(
-                json.dumps(
-                    {"decision": "idle", "reason": msg, "armed": args.armed}, indent=2
-                )
-            )
+            print(json.dumps({"decision": "idle", "reason": msg, "armed": args.armed}, indent=2))
         else:
             print(msg)
         return 3 if (args.armed and args.live) else 0

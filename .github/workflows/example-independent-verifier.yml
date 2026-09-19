@@ -23,6 +23,9 @@ on:
 
 permissions:
   contents: read
+  checks: write
+  id-token: write
+  pull-requests: read
 
 jobs:
   # The WIF identity triple plus the two credential shapes the verifier reads

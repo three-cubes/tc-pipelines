@@ -146,18 +146,12 @@ LANES = sorted(set(_jobs(_load(GATE))) - {FAN_IN})
 @pytest.mark.parametrize("name", ("main-core.json", "main-product.json"))
 def test_queue_less_profiles_require_current_base_status_checks(name: str) -> None:
     """A queue-less repository validates the current main tip before merge."""
-    rules = (
-        json.loads((RULESET_DIR / name).read_text(encoding="utf-8")).get("rules") or []
-    )
-    required = next(
-        rule for rule in rules if rule.get("type") == "required_status_checks"
-    )
+    rules = json.loads((RULESET_DIR / name).read_text(encoding="utf-8")).get("rules") or []
+    required = next(rule for rule in rules if rule.get("type") == "required_status_checks")
     assert required["parameters"]["strict_required_status_checks_policy"] is True
 
 
-def test_self_check_is_ready_for_queue_validation_and_cancels_superseded_pr_runs() -> (
-    None
-):
+def test_self_check_is_ready_for_queue_validation_and_cancels_superseded_pr_runs() -> None:
     """Validate PR/integration candidates without repeating full work after merge."""
     triggers = _triggers(SELF_CHECK)
     assert {"pull_request", "merge_group"} <= set(triggers)
@@ -178,9 +172,7 @@ def test_loop_dispatch_has_no_idle_hosted_runner_schedule() -> None:
 
 def test_release_tags_are_immutable() -> None:
     """Release identity remains bound to a tag after candidate allocation."""
-    payload = json.loads(
-        (RULESET_DIR / "release-tags.json").read_text(encoding="utf-8")
-    )
+    payload = json.loads((RULESET_DIR / "release-tags.json").read_text(encoding="utf-8"))
     assert payload["target"] == "tag"
     assert "refs/tags/v*" in payload["conditions"]["ref_name"]["include"]
     assert {rule["type"] for rule in payload["rules"]} >= {"deletion", "update"}
@@ -229,9 +221,7 @@ def test_a_bare_required_context_has_a_top_level_publisher(context: str) -> None
         f"fix: name a top-level job of {SELF_CHECK.name} exactly `{context}`, "
         f"or drop the context from {RULESET_DIR.name}/."
     )
-    delegated = sorted(
-        job_id for job_id in publishers if SELF_CHECK_JOBS[job_id].get("uses")
-    )
+    delegated = sorted(job_id for job_id in publishers if SELF_CHECK_JOBS[job_id].get("uses"))
     assert not delegated, (
         f"{SELF_CHECK.name}: job(s) {delegated} publish the required context "
         f"`{context}` through a reusable `uses:`. A delegated leg reports as "
@@ -292,9 +282,7 @@ def test_every_lane_is_wired_into_the_fan_in(job: str) -> None:
 @pytest.mark.parametrize("job", NEEDS)
 def test_a_skipped_quality_lane_cannot_report_pass(job: str) -> None:
     body = str(_fan_in_step().get("run", ""))
-    results = [
-        var for var, expr in _bindings(job).items() if f"needs.{job}.result" in expr
-    ]
+    results = [var for var, expr in _bindings(job).items() if f"needs.{job}.result" in expr]
     checked = any(_tests_for_skipped(var, body) for var in results)
 
     if job in SKIP_IS_LEGITIMATE:

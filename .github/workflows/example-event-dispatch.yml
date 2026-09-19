@@ -65,6 +65,7 @@ jobs:
     uses: ./.github/workflows/event-dispatch.yml
     permissions:
       contents: read
+      id-token: write
       pull-requests: read
     with:
       # kairix-shaped, fallback secret path, REVIEW-COMMENT: an `issue_comment`
@@ -83,6 +84,7 @@ jobs:
     uses: ./.github/workflows/event-dispatch.yml
     permissions:
       contents: read
+      id-token: write
       pull-requests: read
     with:
       # taz-shaped, fallback secret path, CI-failure with an explicit issue-id

@@ -58,9 +58,7 @@ def test_jwt_claims_window():
 
 def test_git_config_always_uses_canonical_metadata(monkeypatch):
     commands: list[list[str]] = []
-    monkeypatch.setattr(
-        at.subprocess, "run", lambda command, **_: commands.append(command)
-    )
+    monkeypatch.setattr(at.subprocess, "run", lambda command, **_: commands.append(command))
 
     at.apply_git_config()
 
@@ -81,9 +79,7 @@ def test_parse_args_defaults_and_choices():
     assert args.agent is None and args.git_config is False
     assert args.repo == "three-cubes/tc-pipelines"
 
-    args = at.parse_args(
-        ["--agent", "shape", "--git-config", "--repo", "three-cubes/kairix"]
-    )
+    args = at.parse_args(["--agent", "shape", "--git-config", "--repo", "three-cubes/kairix"])
     assert args.agent == "shape" and args.git_config is True
     assert args.repo == "three-cubes/kairix"
 
@@ -113,9 +109,7 @@ def test_parse_args_rejects_repo_outside_trusted_org(repo):
 
 
 @pytest.mark.parametrize("selector", [None, "builder"])
-def test_main_scopes_token_exchange_to_requested_repository(
-    monkeypatch, capsys, selector
-):
+def test_main_scopes_token_exchange_to_requested_repository(monkeypatch, capsys, selector):
     posts: list[tuple[str, str, dict[str, list[str]]]] = []
     api_calls: list[str] = []
 
@@ -143,16 +137,12 @@ def test_main_scopes_token_exchange_to_requested_repository(
     assert capsys.readouterr().out == "scoped-token\n"
     assert posts == [
         (
-            "/app/installations/9876/access_tokens"
-            if selector
-            else "/app/installations/4242/access_tokens",
+            "/app/installations/9876/access_tokens" if selector else "/app/installations/4242/access_tokens",
             "assertion",
             {"repositories": ["tc-pipelines"]},
         )
     ]
-    assert api_calls == (
-        ["/repos/three-cubes/tc-pipelines/installation"] if selector else []
-    )
+    assert api_calls == (["/repos/three-cubes/tc-pipelines/installation"] if selector else [])
 
 
 def test_post_serializes_repository_scope_in_token_exchange(monkeypatch):

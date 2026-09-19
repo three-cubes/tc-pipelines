@@ -100,21 +100,13 @@ def test_the_scan_found_the_lane_that_runs_the_floor() -> None:
 
 
 def test_the_floor_lane_checks_out_full_history() -> None:
-    checkouts = [
-        step
-        for step in STEPS
-        if str(step.get("uses", "")).startswith("actions/checkout@")
-    ]
+    checkouts = [step for step in STEPS if str(step.get("uses", "")).startswith("actions/checkout@")]
     assert checkouts, (
         f"{GATE.name}: the lane running the floor has no `actions/checkout` "
         f"step, so the diff it scores has no repository to resolve against. "
         f"fix: check the repository out in that lane."
     )
-    shallow = [
-        step
-        for step in checkouts
-        if str((step.get("with") or {}).get("fetch-depth")) != "0"
-    ]
+    shallow = [step for step in checkouts if str((step.get("with") or {}).get("fetch-depth")) != "0"]
     assert not shallow, (
         f"{GATE.name}: the lane running the floor checks out at "
         f"fetch-depth={[(s.get('with') or {}).get('fetch-depth') for s in shallow]}. "
@@ -130,10 +122,7 @@ def test_the_trunk_ref_is_fetched_before_the_floor_runs() -> None:
     floor = _index_of(STEPS, lambda s: FLOOR_INVOCATION in str(s.get("run", "")))
     fetch = _index_of(
         STEPS,
-        lambda s: (
-            "git fetch" in str(s.get("run", ""))
-            and "new-code-base-ref" in str(s.get("env", ""))
-        ),
+        lambda s: "git fetch" in str(s.get("run", "")) and "new-code-base-ref" in str(s.get("env", "")),
     )
     assert fetch != -1, (
         f"{GATE.name}: nothing in the floor's lane fetches `new-code-base-ref`. "
@@ -185,9 +174,7 @@ def _uploading_gate_callers(path: Path) -> list[tuple[str, dict, str]]:
     jobs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("jobs") or {}
     found = []
     for job_id, job in jobs.items():
-        if not isinstance(job, dict) or "python-quality-gate.yml" not in str(
-            job.get("uses", "")
-        ):
+        if not isinstance(job, dict) or "python-quality-gate.yml" not in str(job.get("uses", "")):
             continue
         params = job.get("with") or {}
         # `upload-coverage-artifact` defaults to true, so only an explicit false
@@ -223,10 +210,7 @@ def test_the_assumed_input_defaults_match_the_reusable() -> None:
         f"which treats omission as uploading, now flags callers that cannot "
         f"collide. fix: reconcile _uploading_gate_callers with the new default."
     )
-    assert (
-        inputs.get("coverage-artifact-name", {}).get("default")
-        == DEFAULT_COVERAGE_ARTIFACT
-    ), (
+    assert inputs.get("coverage-artifact-name", {}).get("default") == DEFAULT_COVERAGE_ARTIFACT, (
         f"{GATE.name}: `coverage-artifact-name` defaults to "
         f"{inputs.get('coverage-artifact-name', {}).get('default')!r}, not "
         f"{DEFAULT_COVERAGE_ARTIFACT!r}. Callers that name none take the real "
@@ -305,13 +289,8 @@ def repo_with_uncovered_new_code(tmp_path: Path) -> Path:
     _git(repo, "add", "-A")
     _git(repo, "commit", "--quiet", "-m", "add uncovered code")
 
-    lines = "\n".join(
-        f'            <line number="{n}" hits="0"/>'
-        for n in range(1, added.count("\n") + 1)
-    )
-    (repo / "coverage.xml").write_text(
-        COVERAGE_XML_TEMPLATE.format(lines=lines), encoding="utf-8"
-    )
+    lines = "\n".join(f'            <line number="{n}" hits="0"/>' for n in range(1, added.count("\n") + 1))
+    (repo / "coverage.xml").write_text(COVERAGE_XML_TEMPLATE.format(lines=lines), encoding="utf-8")
     return repo
 
 

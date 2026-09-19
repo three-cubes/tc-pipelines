@@ -23,9 +23,7 @@ PYPROJECT = REPO_ROOT / "pyproject.toml"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 META_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "meta-quality-gate.yml"
 
-YAMLLINT_CONFIG = (
-    "{extends: relaxed, rules: {line-length: disable, document-start: disable}}"
-)
+YAMLLINT_CONFIG = "{extends: relaxed, rules: {line-length: disable, document-start: disable}}"
 ACTIONLINT_VERSION = "1.7.12"
 YAMLLINT_VERSION = "1.38.0"
 LOCAL_META_STEPS = {
@@ -117,12 +115,8 @@ def test_each_ci_meta_leg_has_one_local_gate_equivalent() -> None:
     enabled_jobs = set()
     for job_id, job in meta_jobs.items():
         condition = str(job.get("if", ""))
-        match = re.fullmatch(
-            r"(?:\$\{\{\s*)?inputs\.([a-z0-9-]+)(?:\s*\}\})?", condition
-        )
-        assert match, (
-            f"{META_WORKFLOW.name}: {job_id} must use a direct input toggle, got {condition!r}"
-        )
+        match = re.fullmatch(r"(?:\$\{\{\s*)?inputs\.([a-z0-9-]+)(?:\s*\}\})?", condition)
+        assert match, f"{META_WORKFLOW.name}: {job_id} must use a direct input toggle, got {condition!r}"
         if effective_inputs[match.group(1)] is True:
             enabled_jobs.add(job_id)
     assert enabled_jobs == set(LOCAL_META_STEPS), (
@@ -142,20 +136,14 @@ def test_ci_meta_tools_are_pinned_to_the_local_tool_versions() -> None:
     assert caller_inputs.get("actionlint-version") == ACTIONLINT_VERSION
     assert caller_inputs.get("yamllint-version") == YAMLLINT_VERSION
     assert caller_inputs.get("yamllint-config") == YAMLLINT_CONFIG
-    assert (
-        caller_inputs.get("yamllint-paths")
-        == ".github/workflows actions .github/actions"
-    )
+    assert caller_inputs.get("yamllint-paths") == ".github/workflows actions .github/actions"
 
     actionlint_job = meta["jobs"]["actionlint"]
     actionlint_body = _run_body(actionlint_job)
     assert (actionlint_job.get("steps") or [])[-1].get("env", {}).get(
         "ACTIONLINT_VERSION"
     ) == "${{ inputs.actionlint-version }}"
-    assert (
-        "raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/"
-        in actionlint_body
-    )
+    assert "raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/" in actionlint_body
     assert '"$ACTIONLINT_VERSION" .' in actionlint_body
     assert "/main/" not in actionlint_body
 
@@ -182,16 +170,11 @@ def test_ci_meta_lint_bodies_execute_the_configured_local_argv() -> None:
     )
 
     yamllint_body = _run_body(meta["jobs"]["yamllint"])
-    assert (
-        'yamllint -d "$YAMLLINT_CONFIG" $YAMLLINT_PATHS' in yamllint_body.splitlines()
-    ), (
+    assert 'yamllint -d "$YAMLLINT_CONFIG" $YAMLLINT_PATHS' in yamllint_body.splitlines(), (
         f"{META_WORKFLOW.name}: yamllint must execute its env-bound config and path argv."
     )
     assert caller_inputs["yamllint-config"] == YAMLLINT_CONFIG
-    assert (
-        caller_inputs["yamllint-paths"].split()
-        == LOCAL_META_STEPS["yamllint"]["run"][3:]
-    )
+    assert caller_inputs["yamllint-paths"].split() == LOCAL_META_STEPS["yamllint"]["run"][3:]
 
 
 def test_branch_ci_body_uses_the_exact_canonical_automation_exemptions() -> None:
@@ -202,15 +185,11 @@ def test_branch_ci_body_uses_the_exact_canonical_automation_exemptions() -> None
 
 
 @pytest.mark.parametrize("step_id", sorted(LOCAL_META_STEPS))
-def test_each_local_meta_equivalent_rejects_a_bad_input(
-    tmp_path: Path, step_id: str
-) -> None:
+def test_each_local_meta_equivalent_rejects_a_bad_input(tmp_path: Path, step_id: str) -> None:
     """Each meta validator must reject the same class of broken input locally."""
     steps = _assert_local_meta_steps()
     step = steps[step_id]
-    env = os.environ | {
-        str(key): str(value) for key, value in (step.get("env") or {}).items()
-    }
+    env = os.environ | {str(key): str(value) for key, value in (step.get("env") or {}).items()}
 
     if step_id == "actionlint":
         broken = tmp_path / "broken-workflow.yml"
@@ -228,12 +207,9 @@ def test_each_local_meta_equivalent_rejects_a_bad_input(
     else:
         command = [*step["run"], "--branch", "not-a-permitted-branch"]
 
-    result = subprocess.run(
-        command, cwd=REPO_ROOT, env=env, check=False, capture_output=True, text=True
-    )
+    result = subprocess.run(command, cwd=REPO_ROOT, env=env, check=False, capture_output=True, text=True)
     assert result.returncode != 0, (
-        f"local `{step_id}` accepted its sabotaged input. stdout: {result.stdout}\n"
-        f"stderr: {result.stderr}"
+        f"local `{step_id}` accepted its sabotaged input. stdout: {result.stdout}\nstderr: {result.stderr}"
     )
 
 
@@ -297,9 +273,7 @@ def test_license_ci_body_matches_the_local_canonical_command(
         ("Dan/not-lowercase", 1),
     ],
 )
-def test_branch_ci_body_matches_the_local_canonical_adapter(
-    branch: str, expected: int
-) -> None:
+def test_branch_ci_body_matches_the_local_canonical_adapter(branch: str, expected: int) -> None:
     """Run the reusable's exact shell body against pass and fail branch inputs."""
     meta, _, inputs = _meta_and_caller()
     env = os.environ | {

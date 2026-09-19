@@ -36,11 +36,7 @@ def read(path):
 def output_path(root, path):
     value = Path(path)
     target = (root / value).resolve()
-    if (
-        value.is_absolute()
-        or ".." in value.parts
-        or not target.is_relative_to(root.resolve())
-    ):
+    if value.is_absolute() or ".." in value.parts or not target.is_relative_to(root.resolve()):
         raise ReceiptError(f"unsafe output path: {path}")
     if not target.is_file() or target.stat().st_size == 0:
         raise ReceiptError(f"missing or empty output: {path}")
@@ -49,11 +45,7 @@ def output_path(root, path):
 
 def validate(receipt, expectation, root):
     schema = read(Path(__file__).with_name("receipt.schema.json"))
-    errors = list(
-        Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(
-            receipt
-        )
-    )
+    errors = list(Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(receipt))
     if errors:
         raise ReceiptError(f"schema: {errors[0].message}")
     for key in ("subject", "case_id", "expected", "candidate", "consumer"):
@@ -65,22 +57,15 @@ def validate(receipt, expectation, root):
             raise ReceiptError(f"execution identity mismatch: {key}")
     if execution["executor"] == "local" and execution["workflow_run_id"] is not None:
         raise ReceiptError("local execution cannot claim a GitHub run")
-    if (
-        execution["executor"] == "github-actions"
-        and execution["workflow_run_id"] is None
-    ):
+    if execution["executor"] == "github-actions" and execution["workflow_run_id"] is None:
         raise ReceiptError("GitHub execution requires workflow identity")
     tasks = execution["tasks"]
     if len({row["id"] for row in tasks}) != len(tasks):
         raise ReceiptError("duplicate task")
-    start, finish = [
-        datetime.fromisoformat(execution[key]) for key in ("started_at", "finished_at")
-    ]
+    start, finish = [datetime.fromisoformat(execution[key]) for key in ("started_at", "finished_at")]
     if finish < start or finish > datetime.now(UTC):
         raise ReceiptError("stale or nonterminal execution time")
-    if expectation.get("not_before") and start < datetime.fromisoformat(
-        expectation["not_before"]
-    ):
+    if expectation.get("not_before") and start < datetime.fromisoformat(expectation["not_before"]):
         raise ReceiptError("execution predates the selected attempt")
     if receipt["actual"] != receipt["expected"] or (execution["exit_code"] == 0) != (
         receipt["actual"] == "pass"
@@ -88,9 +73,7 @@ def validate(receipt, expectation, root):
         raise ReceiptError("unexpected terminal outcome or exit classification")
     outputs = receipt["evidence"]["outputs"]
     ids = [row["id"] for row in outputs]
-    if len(set(ids)) != len(ids) or len({row["path"] for row in outputs}) != len(
-        outputs
-    ):
+    if len(set(ids)) != len(ids) or len({row["path"] for row in outputs}) != len(outputs):
         raise ReceiptError("duplicate output")
     if sorted(ids) != sorted(expectation["output_ids"]) or "execution-log" not in ids:
         raise ReceiptError("missing or unexpected named output")
@@ -101,9 +84,7 @@ def validate(receipt, expectation, root):
         ("fitness_ledger_digest", "fitness-ledger"),
         ("runtime_receipt_digest", "runtime-receipt"),
     ):
-        expected_digest = next(
-            (row["digest"] for row in outputs if row["id"] == identity), None
-        )
+        expected_digest = next((row["digest"] for row in outputs if row["id"] == identity), None)
         if receipt["evidence"][key] != expected_digest:
             raise ReceiptError(f"unbound {key}")
     finding = receipt["evidence"]["finding"]
@@ -128,30 +109,20 @@ def write(expectation, observation, root, destination):
         or os.environ.get("GITHUB_RUN_ID") != execution["workflow_run_id"]
         or os.environ.get("GITHUB_RUN_ATTEMPT") != str(execution["attempt"])
     ):
-        raise ReceiptError(
-            "GitHub receipt requires the current Actions run and attempt"
-        )
+        raise ReceiptError("GitHub receipt requires the current Actions run and attempt")
     if execution["executor"] == "live-boundary":
-        raise ReceiptError(
-            "live-boundary receipts require the protected admission writer"
-        )
+        raise ReceiptError("live-boundary receipts require the protected admission writer")
     outputs = [
         {**row, "digest": digest(output_path(root, row["path"]).read_bytes())}
         for row in observation["outputs"]
     ]
     receipt = {
         "schema": "tc.sdlc/assurance/v1",
-        **{
-            key: expectation[key]
-            for key in ("subject", "case_id", "expected", "candidate", "consumer")
-        },
+        **{key: expectation[key] for key in ("subject", "case_id", "expected", "candidate", "consumer")},
         "actual": observation["actual"],
         "execution": {
             **execution,
-            **{
-                key: observation[key]
-                for key in ("started_at", "finished_at", "exit_code")
-            },
+            **{key: observation[key] for key in ("started_at", "finished_at", "exit_code")},
         },
         "evidence": {
             "outputs": outputs,
@@ -164,9 +135,7 @@ def write(expectation, observation, root, destination):
         ("fitness_ledger_digest", "fitness-ledger"),
         ("runtime_receipt_digest", "runtime-receipt"),
     ):
-        receipt["evidence"][key] = next(
-            (row["digest"] for row in outputs if row["id"] == identity), None
-        )
+        receipt["evidence"][key] = next((row["digest"] for row in outputs if row["id"] == identity), None)
     with destination.open("x") as stream:
         stream.write(json.dumps(receipt, indent=2) + "\n")
     validate(receipt, expectation, root)
@@ -189,9 +158,7 @@ def main():
             else read(args.receipt)
         )
         validate(receipt, expectation, args.root)
-        print(
-            f"{digest(args.receipt.read_bytes())} {receipt['case_id']}: {receipt['actual']}"
-        )
+        print(f"{digest(args.receipt.read_bytes())} {receipt['case_id']}: {receipt['actual']}")
     except (ReceiptError, OSError, ValueError, KeyError, TypeError) as error:
         print(f"assurance: {error}", file=sys.stderr)
         return 1

@@ -83,9 +83,7 @@ def _read_catalogue(path: Path, platform_key: str) -> tuple[str, dict[str, objec
         or VERSION.fullmatch(version) is None
     ):
         raise InstallError("release catalogue version is invalid")
-    expected_source = (
-        f"https://github.com/cloudflare/cloudflared/releases/tag/{version}"
-    )
+    expected_source = f"https://github.com/cloudflare/cloudflared/releases/tag/{version}"
     if document["source"] != expected_source:
         raise InstallError("release catalogue source does not bind the version")
     assets = document["assets"]
@@ -126,9 +124,7 @@ def _binary_bytes(download: bytes, archived: bool) -> bytes:
                 and not member.islnk()
             ]
             if len(members) != 1:
-                raise InstallError(
-                    "cloudflared archive must contain one regular binary"
-                )
+                raise InstallError("cloudflared archive must contain one regular binary")
             handle = archive.extractfile(members[0])
             if handle is None:
                 raise InstallError("cloudflared archive binary cannot be read")
@@ -156,8 +152,7 @@ def _verify_version(binary: Path, version: str) -> None:
     first_line = result.stdout.splitlines()[0] if result.stdout.splitlines() else ""
     if (
         result.returncode != 0
-        or re.match(rf"^cloudflared version {re.escape(version)}(?:\s|$)", first_line)
-        is None
+        or re.match(rf"^cloudflared version {re.escape(version)}(?:\s|$)", first_line) is None
     ):
         raise InstallError(f"cloudflared reported version does not match {version}")
 
@@ -206,9 +201,7 @@ def install(args: argparse.Namespace) -> tuple[str, str, str, Path]:
             handle.write(binary_bytes)
             handle.flush()
             os.fsync(handle.fileno())
-        temporary.chmod(
-            stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH
-        )
+        temporary.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
         _verify_version(temporary, version)
         temporary.replace(destination)
     finally:
@@ -235,9 +228,7 @@ def main() -> int:
             output.write(
                 f"version={version}\nasset-digest=sha256:{asset_digest}\nexecutable-digest=sha256:{executable_digest}\npath={binary}\n"
             )
-        print(
-            f"Installed cloudflared {version} (executable sha256:{executable_digest})"
-        )
+        print(f"Installed cloudflared {version} (executable sha256:{executable_digest})")
         return 0
     except (InstallError, HTTPError, URLError, OSError, ValueError) as exc:
         print(f"setup-cloudflared: {exc}", file=sys.stderr)

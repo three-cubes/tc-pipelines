@@ -84,9 +84,7 @@ def _fresh_runner(
     given (possibly shared, on-disk) state store. Arming is re-decided here every
     call — exactly as the workflow re-arms from LOOP_ARMED each tick — so nothing
     but the durable store carries state between ticks."""
-    dispatcher = Dispatcher(
-        StaticIssueSource(issues), config=config, guardrails_validator=validator
-    )
+    dispatcher = Dispatcher(StaticIssueSource(issues), config=config, guardrails_validator=validator)
     governor = Governor(config)
     if armed:
         governor.arm(guardrails_validated=True)
@@ -162,9 +160,7 @@ class RetryCeilingCrossTickTest(_HardeningCase):
 # --------------------------------------------------------------------------- #
 class BudgetCrossTickTest(_HardeningCase):
     def test_per_issue_budget_accumulates_across_fresh_processes(self):
-        cfg = GuardrailConfig(
-            per_issue_budget=2.5, retry_ceiling=100, global_budget=1e9
-        )
+        cfg = GuardrailConfig(per_issue_budget=2.5, retry_ceiling=100, global_budget=1e9)
         store = JsonFileStateStore(self._state_file())
         issues = [_issue("PLA-1")]
 
@@ -185,9 +181,7 @@ class BudgetCrossTickTest(_HardeningCase):
     def test_global_budget_accumulates_across_fresh_processes(self):
         # DISTINCT issue each tick so ONLY the fleet-wide global counter accrues
         # (no per-issue / retry interference).
-        cfg = GuardrailConfig(
-            global_budget=2.5, per_issue_budget=1e9, retry_ceiling=100
-        )
+        cfg = GuardrailConfig(global_budget=2.5, per_issue_budget=1e9, retry_ceiling=100)
         store = JsonFileStateStore(self._state_file())
 
         for iid in ("PLA-A", "PLA-B"):
@@ -209,9 +203,7 @@ class BudgetCrossTickTest(_HardeningCase):
 # --------------------------------------------------------------------------- #
 class CircuitBreakerCrossTickTest(_HardeningCase):
     def test_circuit_breaker_opens_across_fresh_processes(self):
-        cfg = GuardrailConfig(
-            per_issue_budget=1e9, global_budget=1e9, retry_ceiling=100
-        )
+        cfg = GuardrailConfig(per_issue_budget=1e9, global_budget=1e9, retry_ceiling=100)
         store = JsonFileStateStore(self._state_file())
 
         # Simulate the verify/close side recording a verified-FAIL each tick, each
@@ -256,9 +248,7 @@ class JsonFileStateStoreTest(_HardeningCase):
         self.assertEqual(JsonFileStateStore(path).load().global_cost, 0.0)
 
     def test_round_trips_the_full_ledger(self):
-        cfg = GuardrailConfig(
-            per_issue_budget=1e9, global_budget=1e9, retry_ceiling=100
-        )
+        cfg = GuardrailConfig(per_issue_budget=1e9, global_budget=1e9, retry_ceiling=100)
         gov = Governor(cfg)
         gov.record_attempt("PLA-1")
         gov.record_attempt("PLA-1")
@@ -308,9 +298,7 @@ class JsonFileStateStoreTest(_HardeningCase):
         path = self._state_file()
         path.write_text("{ corrupt", encoding="utf-8")
         cfg = GuardrailConfig()
-        runner, _ = _fresh_runner(
-            [_issue("PLA-1")], JsonFileStateStore(path), config=cfg
-        )
+        runner, _ = _fresh_runner([_issue("PLA-1")], JsonFileStateStore(path), config=cfg)
         res = runner.run_once(LoggingDispatchSink(), dry_run=False)
         self.assertEqual(res.decision, RunDecision.REFUSED)
         self.assertFalse(res.dispatched)
@@ -321,9 +309,7 @@ class JsonFileStateStoreTest(_HardeningCase):
 # --------------------------------------------------------------------------- #
 class SoakBeforeLiveTest(_HardeningCase):
     def test_first_armed_ticks_record_only_then_go_live(self):
-        cfg = GuardrailConfig(
-            retry_ceiling=100, per_issue_budget=1e9, global_budget=1e9
-        )
+        cfg = GuardrailConfig(retry_ceiling=100, per_issue_budget=1e9, global_budget=1e9)
         store = JsonFileStateStore(self._state_file())
         issues = [_issue("PLA-1")]
 
@@ -350,9 +336,7 @@ class SoakBeforeLiveTest(_HardeningCase):
         self.assertTrue(res.dispatched)
 
     def test_zero_soak_dispatches_immediately(self):
-        cfg = GuardrailConfig(
-            retry_ceiling=100, per_issue_budget=1e9, global_budget=1e9
-        )
+        cfg = GuardrailConfig(retry_ceiling=100, per_issue_budget=1e9, global_budget=1e9)
         store = JsonFileStateStore(self._state_file())
         runner, _ = _fresh_runner([_issue("PLA-1")], store, config=cfg, soak_ticks=0)
         res = runner.run_once(LoggingDispatchSink(), dry_run=False)
@@ -362,9 +346,7 @@ class SoakBeforeLiveTest(_HardeningCase):
         # A disarmed tick is a pure preview: it must not burn a soak tick.
         cfg = GuardrailConfig()
         store = JsonFileStateStore(self._state_file())
-        runner, _ = _fresh_runner(
-            [_issue("PLA-1")], store, config=cfg, soak_ticks=2, armed=False
-        )
+        runner, _ = _fresh_runner([_issue("PLA-1")], store, config=cfg, soak_ticks=2, armed=False)
         res = runner.run_once(LoggingDispatchSink(), dry_run=False)
         self.assertEqual(res.decision, RunDecision.RECORDED)
         self.assertEqual(store.load().soak_ticks, 0)  # unchanged — disarmed preview
@@ -397,8 +379,7 @@ class GuardrailsValidatedFailClosedTest(_HardeningCase):
         # -> empty discovery -> must fail closed (renaming defeats the gate).
         d = self._tmpdir()
         body = "import unittest\n\n\nclass Many(unittest.TestCase):\n" + "".join(
-            f"    def test_{i}(self):\n        self.assertTrue(True)\n"
-            for i in range(30)
+            f"    def test_{i}(self):\n        self.assertTrue(True)\n" for i in range(30)
         )
         (d / "test_renamed_guardrails.py").write_text(body, encoding="utf-8")
         self.assertFalse(guardrails_validated(test_dir=d))
@@ -407,9 +388,7 @@ class GuardrailsValidatedFailClosedTest(_HardeningCase):
         # A truncated harness (green, but fewer than the known-minimum) fails closed.
         d = self._tmpdir()
         (d / "test_stub_guardrails.py").write_text(_STUB_FEWER_TESTS, encoding="utf-8")
-        self.assertFalse(
-            guardrails_validated(test_dir=d, pattern="test_stub_guardrails.py")
-        )
+        self.assertFalse(guardrails_validated(test_dir=d, pattern="test_stub_guardrails.py"))
 
     def test_real_harness_validates(self):
         # The real 25-test stop-condition harness IS green and above the floor.
@@ -427,9 +406,7 @@ class GuardrailsValidatedFailClosedTest(_HardeningCase):
         with self.assertRaises(GuardrailTripped):
             gov.arm(guardrails_validated=validator())
         # ...and the runner REFUSES the tick (nothing selected, nothing dispatched).
-        dispatcher = Dispatcher(
-            StaticIssueSource([_issue("PLA-1")]), guardrails_validator=validator
-        )
+        dispatcher = Dispatcher(StaticIssueSource([_issue("PLA-1")]), guardrails_validator=validator)
         runner = Runner(
             dispatcher,
             gov,

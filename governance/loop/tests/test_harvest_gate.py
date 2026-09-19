@@ -42,9 +42,7 @@ def _harvest_comment(issue_id: str) -> str:
 # --------------------------------------------------------------------------- #
 class HarvestPredicateTest(unittest.TestCase):
     def test_marker_is_provenance_stamped_with_the_issue_id(self):
-        self.assertEqual(
-            harvest_marker("PLA-314"), "<!-- adp-harvest issue=PLA-314 -->"
-        )
+        self.assertEqual(harvest_marker("PLA-314"), "<!-- adp-harvest issue=PLA-314 -->")
 
     def test_present_when_a_matching_harvest_exists(self):
         self.assertTrue(has_harvest([_harvest_comment("PLA-314")], "PLA-314"))
@@ -53,11 +51,7 @@ class HarvestPredicateTest(unittest.TestCase):
         self.assertFalse(has_harvest([], "PLA-314"))
 
     def test_a_plain_comment_is_not_a_harvest(self):
-        self.assertFalse(
-            has_harvest(
-                ["lgtm, merging", "verification-confirmed on abc123"], "PLA-314"
-            )
-        )
+        self.assertFalse(has_harvest(["lgtm, merging", "verification-confirmed on abc123"], "PLA-314"))
 
     def test_provenance_checked_a_harvest_for_another_issue_does_not_satisfy(self):
         # A harvest stamped for a DIFFERENT issue must never count for this one.
@@ -74,9 +68,7 @@ class HarvestPredicateTest(unittest.TestCase):
         self.assertFalse(has_harvest([None, ""], "PLA-314"))  # type: ignore[list-item]
 
     def test_marker_tolerates_inner_whitespace(self):
-        self.assertTrue(
-            has_harvest(["<!--   adp-harvest   issue=PLA-314   -->"], "PLA-314")
-        )
+        self.assertTrue(has_harvest(["<!--   adp-harvest   issue=PLA-314   -->"], "PLA-314"))
 
 
 # --------------------------------------------------------------------------- #

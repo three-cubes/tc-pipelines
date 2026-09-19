@@ -47,18 +47,11 @@ def resolve_latest() -> dict[str, object]:
         or document.get("prerelease") is not False
     ):
         raise InstallError("latest release is not a stable semantic version")
-    release_assets = {
-        item.get("name"): item
-        for item in document.get("assets", [])
-        if isinstance(item, dict)
-    }
+    release_assets = {item.get("name"): item for item in document.get("assets", []) if isinstance(item, dict)}
     result_assets: dict[str, object] = {}
     for platform_key, (name, archived) in ASSETS.items():
         item = release_assets.get(name)
-        if (
-            not isinstance(item, dict)
-            or DIGEST.fullmatch(str(item.get("digest", ""))) is None
-        ):
+        if not isinstance(item, dict) or DIGEST.fullmatch(str(item.get("digest", ""))) is None:
             raise InstallError(f"latest release has no published digest for {name}")
         url = f"https://github.com/cloudflare/cloudflared/releases/download/{version}/{name}"
         if item.get("browser_download_url") != url:

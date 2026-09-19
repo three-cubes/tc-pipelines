@@ -52,8 +52,7 @@ def receipt(root: Path) -> dict[str, object]:
     rule_path, rule_digest = _write(
         root,
         "rule-db.json",
-        json.dumps({"policy": "CKV_AWS_20", "policy_tree_digest": rule_identity})
-        + "\n",
+        json.dumps({"policy": "CKV_AWS_20", "policy_tree_digest": rule_identity}) + "\n",
     )
     log_path, log_digest = _write(root, "execution.log", "checkov completed\n")
     now = datetime.now(UTC)
@@ -122,24 +121,20 @@ def test_live_scanner_receipt_binds_repo_fixture_and_separate_retained_outputs(
         "protocol-ledger",
     ],
 )
-def test_live_scanner_receipt_rejects_missing_stale_or_non_native_evidence(
-    tmp_path, defect
-):
+def test_live_scanner_receipt_rejects_missing_stale_or_non_native_evidence(tmp_path, defect):
     value = receipt(tmp_path)
     if defect == "missing":
         value["evidence"]["outputs"] = value["evidence"]["outputs"][:-1]
     elif defect == "stale":
-        value["execution"]["finished_at"] = (
-            datetime.now(UTC) - timedelta(days=2)
-        ).isoformat()
+        value["execution"]["finished_at"] = (datetime.now(UTC) - timedelta(days=2)).isoformat()
     elif defect == "wrong-tool":
         value["tool"]["version"] = "3.2.530"
     elif defect == "wrong-rule-db":
         value["rule_database"]["kind"] = "osv-scanner-remote-response"
     elif defect == "fixture-sabotage":
-        (
-            tmp_path / "assurance/fixtures/live-scanners/checkov/compliant/main.tf"
-        ).write_text('acl = "public-read"\n')
+        (tmp_path / "assurance/fixtures/live-scanners/checkov/compliant/main.tf").write_text(
+            'acl = "public-read"\n'
+        )
     elif defect == "protocol-ledger":
         value["evidence"] = {
             "kind": "tc-fitness-protocol-unit",
@@ -166,9 +161,7 @@ def test_receipt_rejects_an_unlisted_tc_fitness_ledger_even_with_matching_hashes
 def test_live_workflow_uses_the_one_pinned_scanner_provisioner_and_retains_receipts():
     workflow = yaml.safe_load((ROOT / WORKFLOW_PATH).read_text())
     steps = workflow["jobs"]["qualify"]["steps"]
-    provision = next(
-        step for step in steps if step.get("name") == "Provision pinned native scanners"
-    )
+    provision = next(step for step in steps if step.get("name") == "Provision pinned native scanners")
     assert provision["run"] == "bash actions/python-gate-body/provision-scanners.sh"
     assert provision["env"] == {
         "INSTALL_OSV_SCANNER": "true",
@@ -177,15 +170,11 @@ def test_live_workflow_uses_the_one_pinned_scanner_provisioner_and_retains_recei
         "CHECKOV_VERSION": "3.2.531",
     }
     execute = next(
-        step
-        for step in steps
-        if step.get("name") == "Execute compliant and violation scanner fixtures"
+        step for step in steps if step.get("name") == "Execute compliant and violation scanner fixtures"
     )
     assert "live_scanners.py qualify" in execute["run"]
     retained = next(
-        step
-        for step in steps
-        if step.get("name") == "Retain native scanner qualification evidence"
+        step for step in steps if step.get("name") == "Retain native scanner qualification evidence"
     )
     assert retained["with"]["path"] == ".assurance-live-scanners/"
 

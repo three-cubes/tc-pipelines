@@ -51,9 +51,7 @@ def test_shard_jobs_prefer_shard_tier_and_fall_back_to_tier() -> None:
     assert "inputs.tier" in expr, "an empty shard-tier must fall back to tier"
     # Guarded on != '' with a non-empty true branch: a GitHub `A && '' || B`
     # ternary returns B even when A is true, because '' is falsy.
-    assert "inputs.shard-tier != ''" in expr, (
-        "the fallback must test for empty, not truthiness"
-    )
+    assert "inputs.shard-tier != ''" in expr, "the fallback must test for empty, not truthiness"
 
 
 def test_the_unsharded_job_is_untouched() -> None:
@@ -74,12 +72,8 @@ def test_the_non_shard_lane_is_gated_by_the_fan_in() -> None:
     """
     wf = _workflow()
 
-    assert "quality-non-shard" in wf["jobs"], (
-        "the workflow must own the complement lane"
-    )
-    assert "quality-non-shard" in wf["jobs"]["gate"]["needs"], (
-        "the fan-in must require it"
-    )
+    assert "quality-non-shard" in wf["jobs"], "the workflow must own the complement lane"
+    assert "quality-non-shard" in wf["jobs"]["gate"]["needs"], "the fan-in must require it"
 
     step = wf["jobs"]["gate"]["steps"][0]
     assert "R_NONSHARD" in step["env"], "its result must be read"

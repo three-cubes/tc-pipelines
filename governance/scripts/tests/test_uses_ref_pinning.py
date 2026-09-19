@@ -135,16 +135,13 @@ def _actions_surfaces_on_disk() -> set[Path]:
     unnoticed under any floor loose enough to survive a legitimate deletion.
     """
     found = set((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
-    found.update(
-        path for path in REPO_ROOT.rglob("action.yml") if ".git" not in path.parts
-    )
+    found.update(path for path in REPO_ROOT.rglob("action.yml") if ".git" not in path.parts)
     return found
 
 
 def test_the_scan_reads_every_actions_surface_on_disk() -> None:
     missed = sorted(
-        str(path.relative_to(REPO_ROOT))
-        for path in _actions_surfaces_on_disk() - set(_source_files())
+        str(path.relative_to(REPO_ROOT)) for path in _actions_surfaces_on_disk() - set(_source_files())
     )
     assert not missed, (
         f"{missed} declare Actions surfaces that SOURCE_GLOBS does not reach, so "
@@ -161,8 +158,7 @@ def test_the_walk_reaches_every_file_that_declares_uses() -> None:
     silent = sorted(
         str(path.relative_to(REPO_ROOT))
         for path in _source_files()
-        if DECLARES_USES.search(path.read_text(encoding="utf-8"))
-        and not _uses_sites(path)
+        if DECLARES_USES.search(path.read_text(encoding="utf-8")) and not _uses_sites(path)
     )
     assert not silent, (
         f"{silent} contain a `uses:` key that the structural walk did not reach. "
@@ -234,9 +230,7 @@ CLASSIFIER_CASES = (
 
 
 @pytest.mark.parametrize(("ref", "accepted"), CLASSIFIER_CASES)
-def test_the_classifier_separates_a_moving_ref_from_a_pinned_one(
-    ref: str, accepted: bool
-) -> None:
+def test_the_classifier_separates_a_moving_ref_from_a_pinned_one(ref: str, accepted: bool) -> None:
     assert _is_acceptably_pinned(ref) is accepted, (
         f"the pinning rule now judges {ref!r} "
         f"{'unpinned' if accepted else 'pinned'}, which is backwards. A rule "
@@ -249,9 +243,7 @@ def test_the_classifier_separates_a_moving_ref_from_a_pinned_one(
 
 
 @pytest.mark.parametrize(("path", "line", "ref"), SITES, ids=SITE_IDS)
-def test_uses_ref_is_pinned_the_way_the_canon_requires(
-    path: str, line: int, ref: str
-) -> None:
+def test_uses_ref_is_pinned_the_way_the_canon_requires(path: str, line: int, ref: str) -> None:
     key = f"{path}:{ref}"
     if key in FLOATING_BY_DESIGN:
         return

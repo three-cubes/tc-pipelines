@@ -40,13 +40,9 @@ def execution(tmp_path, negative=False):
         + str(int(negative))
         + ")",
     ]
-    result = subprocess.run(
-        command, cwd=tmp_path, capture_output=True, text=True, check=False
-    )
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, check=False)
     (tmp_path / "execution.log").write_text(
-        f"command={command!r}\nexit={result.returncode}\n"
-        + result.stdout
-        + result.stderr
+        f"command={command!r}\nexit={result.returncode}\n" + result.stdout + result.stderr
     )
     candidate = {
         "fitness_digest": None,
@@ -129,9 +125,7 @@ def test_real_local_execution_round_trip(tmp_path, negative):
     receipt = write(tmp_path)
     assert receipt["schema"] == "tc.sdlc/assurance/v1"
     assert receipt["execution"]["executor"] == "local"
-    assert receipt["evidence"]["outputs"][1]["digest"] == digest(
-        (tmp_path / "result.txt").read_bytes()
-    )
+    assert receipt["evidence"]["outputs"][1]["digest"] == digest((tmp_path / "result.txt").read_bytes())
     assert validate(tmp_path).returncode == 0
     assert (
         call(
@@ -193,9 +187,7 @@ def test_receipt_rejects_false_pass(tmp_path, defect):
     elif defect == "output-free":
         receipt["evidence"]["outputs"] = []
     elif defect == "duplicate-output":
-        receipt["evidence"]["outputs"].append(
-            copy.deepcopy(receipt["evidence"]["outputs"][0])
-        )
+        receipt["evidence"]["outputs"].append(copy.deepcopy(receipt["evidence"]["outputs"][0]))
     elif defect == "wrong-output":
         receipt["evidence"]["outputs"][1]["id"] = "other"
     elif defect == "wrong-digest":

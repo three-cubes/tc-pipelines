@@ -116,9 +116,7 @@ class GlueTransitionTest(unittest.TestCase):
 
     def test_judgment_events_are_the_verifier_verdicts(self):
         # The split the ADR draws: only the verdict transitions are judgment.
-        self.assertEqual(
-            loop.JUDGMENT_EVENTS, frozenset({Event.VERIFIED_PASS, Event.VERIFIED_FAIL})
-        )
+        self.assertEqual(loop.JUDGMENT_EVENTS, frozenset({Event.VERIFIED_PASS, Event.VERIFIED_FAIL}))
         self.assertEqual(loop.TERMINAL, frozenset({State.DONE, State.ESCALATED}))
 
 
@@ -133,13 +131,9 @@ class RetryCeilingTest(unittest.TestCase):
         final = run_item(engine, item, lambda _i: _clean_fail(), max_cycles=50)
         self.assertEqual(final, State.ESCALATED)
         self.assertEqual(item.retries, 3)
-        dispatches = [
-            ev for _, ev, _ in item.history if ev in (Event.DISPATCH, Event.RETRY)
-        ]
+        dispatches = [ev for _, ev, _ in item.history if ev in (Event.DISPATCH, Event.RETRY)]
         # 1 initial dispatch + exactly N retries, then escalation.
-        self.assertEqual(
-            dispatches, [Event.DISPATCH, Event.RETRY, Event.RETRY, Event.RETRY]
-        )
+        self.assertEqual(dispatches, [Event.DISPATCH, Event.RETRY, Event.RETRY, Event.RETRY])
 
     def test_ceiling_plus_one_retry_raises(self):
         engine = LoopEngine(GuardrailConfig(retry_ceiling=2, per_issue_budget=1e9))
@@ -159,9 +153,7 @@ class RetryCeilingTest(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 class BudgetCapTest(unittest.TestCase):
     def test_per_issue_budget_stops_dispatch_and_escalates(self):
-        engine = LoopEngine(
-            GuardrailConfig(per_issue_budget=2.0, retry_ceiling=99, global_budget=1e9)
-        )
+        engine = LoopEngine(GuardrailConfig(per_issue_budget=2.0, retry_ceiling=99, global_budget=1e9))
         item = WorkItem(id="PLA-20")
         final = run_item(engine, item, lambda _i: _clean_fail(), cost_per_cycle=1.0)
         self.assertEqual(final, State.ESCALATED)
@@ -182,9 +174,7 @@ class BudgetCapTest(unittest.TestCase):
         self.assertEqual(item.cost_spent, 2.0)
 
     def test_global_budget_circuit_breaker_halts_fleet(self):
-        engine = LoopEngine(
-            GuardrailConfig(global_budget=2.0, per_issue_budget=1e9, retry_ceiling=99)
-        )
+        engine = LoopEngine(GuardrailConfig(global_budget=2.0, per_issue_budget=1e9, retry_ceiling=99))
         a, b, c, d = (WorkItem(id=x) for x in ("A", "B", "C", "D"))
         engine.dispatch(a, cost=1.0)  # global_spent 1
         engine.dispatch(b, cost=1.0)  # global_spent 2 (at cap)
@@ -193,9 +183,7 @@ class BudgetCapTest(unittest.TestCase):
         self.assertEqual(ctx.exception.scope, "global")
         self.assertTrue(engine.halted)
         # The breaker halts the FLEET: even an untouched item is refused now.
-        self.assertEqual(
-            c.state, State.READY
-        )  # global breaker does not escalate the item
+        self.assertEqual(c.state, State.READY)  # global breaker does not escalate the item
         with self.assertRaises(BudgetExceeded):
             engine.dispatch(d, cost=0.1)
         ok, _reason = engine.can_dispatch(d, cost=0.1)
@@ -258,9 +246,7 @@ class DispatchRateLimitTest(unittest.TestCase):
     def test_rate_limit_blocks_then_recovers_after_window(self):
         clock = FakeClock()
         engine = LoopEngine(
-            GuardrailConfig(
-                dispatch_rate_max=2, dispatch_rate_window=60.0, per_issue_budget=1e9
-            ),
+            GuardrailConfig(dispatch_rate_max=2, dispatch_rate_window=60.0, per_issue_budget=1e9),
             clock=clock,
         )
         a, b, c = (WorkItem(id=x) for x in ("A", "B", "C"))
@@ -284,9 +270,7 @@ class DispatchRateLimitTest(unittest.TestCase):
 
     def test_can_dispatch_reports_rate_limit(self):
         clock = FakeClock()
-        engine = LoopEngine(
-            GuardrailConfig(dispatch_rate_max=1, dispatch_rate_window=60.0), clock=clock
-        )
+        engine = LoopEngine(GuardrailConfig(dispatch_rate_max=1, dispatch_rate_window=60.0), clock=clock)
         engine.dispatch(WorkItem(id="A"))
         ok, reason = engine.can_dispatch(WorkItem(id="B"), cost=1.0)
         self.assertFalse(ok)

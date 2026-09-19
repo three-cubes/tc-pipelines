@@ -156,8 +156,7 @@ def _transport_env(tmp_path: Path) -> dict[str, str]:
             "CAPTURE_DIR": str(capture),
             "CLOUDFLARED_PATH": str(cloudflared),
             "CLOUDFLARED_VERSION": "2026.8.3",
-            "CLOUDFLARED_SHA256": "sha256:"
-            + hashlib.sha256(cloudflared.read_bytes()).hexdigest(),
+            "CLOUDFLARED_SHA256": "sha256:" + hashlib.sha256(cloudflared.read_bytes()).hexdigest(),
             "SSH_HOST": "ssh.threecubes.ai",
             "SSH_USER": "tc-deploy",
             "SSH_PRIVATE_KEY": key_file.read_text(),
@@ -213,10 +212,7 @@ def test_streams_canonical_envelope_without_sending_a_remote_command(
     assert json.loads((capture / "stdin.json").read_text()) == json.loads(_request())
     assert argv[:2] == ["-F", "/dev/null"]
     assert '"schema_version": "tc.deploy.response.v1"' in result.stdout
-    outputs = dict(
-        line.split("=", 1)
-        for line in (tmp_path / "transport-output").read_text().splitlines()
-    )
+    outputs = dict(line.split("=", 1) for line in (tmp_path / "transport-output").read_text().splitlines())
     expected_receipt = _expected_receipt("gha-34178531045-1", "canary", "a" * 40)
     assert outputs["receipt-id"] == expected_receipt
     assert outputs["cloudflared-version"] == "2026.8.3"
@@ -237,9 +233,7 @@ def test_streams_canonical_envelope_without_sending_a_remote_command(
 
 
 @pytest.mark.parametrize("forbidden", ["command", "script", "argv", "parameters"])
-def test_rejects_envelope_fields_that_can_carry_remote_commands(
-    tmp_path: Path, forbidden: str
-) -> None:
+def test_rejects_envelope_fields_that_can_carry_remote_commands(tmp_path: Path, forbidden: str) -> None:
     env = _transport_env(tmp_path)
     env["REQUEST_ENVELOPE"] = _request(**{forbidden: "id"})
 
@@ -491,10 +485,7 @@ def test_action_binds_service_credentials_to_environment_not_command_line() -> N
         "response-path",
     }
     assert step["env"]["TUNNEL_SERVICE_TOKEN_ID"] == "${{ inputs.service-token-id }}"
-    assert (
-        step["env"]["TUNNEL_SERVICE_TOKEN_SECRET"]
-        == "${{ inputs.service-token-secret }}"
-    )
+    assert step["env"]["TUNNEL_SERVICE_TOKEN_SECRET"] == "${{ inputs.service-token-secret }}"
     assert "service-token-id" not in step["run"]
     assert "service-token-secret" not in step["run"]
     assert "transport.py" in step["run"]
@@ -659,11 +650,7 @@ def test_remote_workflow_commands_are_bracketed_and_cannot_control_actions(
     stop = next(line for line in lines if line.startswith("::stop-commands::"))
     token = stop.split("::", 2)[2]
     assert f"::{token}::" in lines
-    assert (
-        lines.index(stop)
-        < lines.index("::error::remote text")
-        < lines.index(f"::{token}::")
-    )
+    assert lines.index(stop) < lines.index("::error::remote text") < lines.index(f"::{token}::")
 
 
 def test_supervisor_enforces_deadline_and_terminates_process_group(
@@ -692,9 +679,7 @@ def test_supervisor_enforces_deadline_and_terminates_process_group(
     )
     request = tmp_path / "request"
     request.write_bytes(b"{}")
-    result = module._run_streamed(
-        [str(helper)], os.environ.copy(), request, timeout_seconds=3
-    )
+    result = module._run_streamed([str(helper)], os.environ.copy(), request, timeout_seconds=3)
     assert result.reason_code == "operation_timeout"
     assert parent_marker.read_text().strip().isdigit()
     assert child_marker.read_text().strip().isdigit()
@@ -713,9 +698,7 @@ def test_supervisor_enforces_deadline_after_output_pipes_close(
     request.write_bytes(b"{}")
 
     started = time.monotonic()
-    result = module._run_streamed(
-        [str(helper)], os.environ.copy(), request, timeout_seconds=0.2
-    )
+    result = module._run_streamed([str(helper)], os.environ.copy(), request, timeout_seconds=0.2)
     elapsed = time.monotonic() - started
 
     assert result.reason_code == "operation_timeout"
@@ -738,9 +721,7 @@ def test_supervisor_kills_descendant_after_process_leader_exits(tmp_path: Path) 
     )
     request = tmp_path / "request"
     request.write_bytes(b"{}")
-    result = module._run_streamed(
-        [str(helper)], os.environ.copy(), request, timeout_seconds=5
-    )
+    result = module._run_streamed([str(helper)], os.environ.copy(), request, timeout_seconds=5)
     assert result.reason_code == "operation_timeout"
     child_pid = ready.read_text().strip()
     status = subprocess.run(
@@ -756,9 +737,7 @@ def test_supervisor_kills_descendant_after_process_leader_exits(tmp_path: Path) 
 def test_supervisor_bounds_remote_output(tmp_path: Path, mode: str) -> None:
     module = _transport_module()
     helper = tmp_path / "flood.py"
-    amount = (
-        module.MAX_LINE_BYTES + 1 if mode == "line" else module.MAX_STDOUT_BYTES + 1
-    )
+    amount = module.MAX_LINE_BYTES + 1 if mode == "line" else module.MAX_STDOUT_BYTES + 1
     separator = "" if mode == "line" else "\\n"
     _write_python_executable(
         helper,
@@ -766,22 +745,16 @@ def test_supervisor_bounds_remote_output(tmp_path: Path, mode: str) -> None:
     )
     request = tmp_path / "request"
     request.write_bytes(b"{}")
-    result = module._run_streamed(
-        [str(helper)], os.environ.copy(), request, timeout_seconds=5
-    )
+    result = module._run_streamed([str(helper)], os.environ.copy(), request, timeout_seconds=5)
     assert result.reason_code == f"stdout_{mode}_limit"
     assert result.stdout_bytes <= module.MAX_STDOUT_BYTES + 8192
 
 
 @pytest.mark.parametrize("mode", ["line", "total"])
-def test_supervisor_bounds_stderr_and_retains_only_a_tail(
-    tmp_path: Path, mode: str
-) -> None:
+def test_supervisor_bounds_stderr_and_retains_only_a_tail(tmp_path: Path, mode: str) -> None:
     module = _transport_module()
     helper = tmp_path / "stderr-flood.py"
-    amount = (
-        module.MAX_LINE_BYTES + 1 if mode == "line" else module.MAX_STDERR_BYTES + 1
-    )
+    amount = module.MAX_LINE_BYTES + 1 if mode == "line" else module.MAX_STDERR_BYTES + 1
     separator = "" if mode == "line" else "\\n"
     _write_python_executable(
         helper,
@@ -789,8 +762,6 @@ def test_supervisor_bounds_stderr_and_retains_only_a_tail(
     )
     request = tmp_path / "request"
     request.write_bytes(b"{}")
-    result = module._run_streamed(
-        [str(helper)], os.environ.copy(), request, timeout_seconds=5
-    )
+    result = module._run_streamed([str(helper)], os.environ.copy(), request, timeout_seconds=5)
     assert result.reason_code == f"stderr_{mode}_limit"
     assert len(result.stderr_tail.encode()) <= module.MAX_STDERR_TAIL_BYTES

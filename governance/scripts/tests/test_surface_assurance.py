@@ -160,9 +160,7 @@ def test_lab_executes_all_variants_and_retains_actual_outputs(tmp_path):
         for run in row["evaluations"]:
             assert run["exit_code"] == (0 if row["variant"] == "compliant" else 1)
             assert run["outputs"]
-            assert all(
-                (tmp_path / "evidence" / output).is_file() for output in run["outputs"]
-            )
+            assert all((tmp_path / "evidence" / output).is_file() for output in run["outputs"])
 
 
 def test_fresh_render_rejects_stale_checked_in_consumer(tmp_path):
@@ -170,9 +168,7 @@ def test_fresh_render_rejects_stale_checked_in_consumer(tmp_path):
 
     root = tmp_path / "pipeline"
     for name in ("governance", "assurance"):
-        shutil.copytree(
-            ROOT / name, root / name, ignore=shutil.ignore_patterns("__pycache__")
-        )
+        shutil.copytree(ROOT / name, root / name, ignore=shutil.ignore_patterns("__pycache__"))
     (root / "assurance/fixtures/generated/rendered/Makefile").write_text("stale\n")
     result = invoke("lab", "--root", root, "--output", tmp_path / "evidence")
     assert result.returncode == 1
@@ -184,9 +180,7 @@ def test_prepare_refreshes_generated_consumer_and_reaches_a_fixed_point(tmp_path
 
     root = tmp_path / "pipeline"
     for name in ("governance", "assurance"):
-        shutil.copytree(
-            ROOT / name, root / name, ignore=shutil.ignore_patterns("__pycache__")
-        )
+        shutil.copytree(ROOT / name, root / name, ignore=shutil.ignore_patterns("__pycache__"))
     generated = root / "assurance/fixtures/generated/rendered"
     (generated / "Makefile").write_text("stale\n")
 
@@ -216,16 +210,12 @@ def test_prepare_refreshes_generated_consumer_and_reaches_a_fixed_point(tmp_path
         ("unrelated", "unexpected-exit"),
     ],
 )
-def test_lab_rejects_actual_preparation_output_and_execution_defects(
-    tmp_path, defect, diagnostic
-):
+def test_lab_rejects_actual_preparation_output_and_execution_defects(tmp_path, defect, diagnostic):
     import shutil
 
     root = tmp_path / "pipeline"
     for name in ("governance", "assurance"):
-        shutil.copytree(
-            ROOT / name, root / name, ignore=shutil.ignore_patterns("__pycache__")
-        )
+        shutil.copytree(ROOT / name, root / name, ignore=shutil.ignore_patterns("__pycache__"))
     if defect == "preparation":
         manifest_path = root / "assurance/consumers.yaml"
         manifest = yaml.safe_load(manifest_path.read_text())
@@ -271,9 +261,7 @@ def test_consumer_manifest_cannot_omit_required_cases(tmp_path):
 
     root = tmp_path / "pipeline"
     for name in ("governance", "assurance"):
-        shutil.copytree(
-            ROOT / name, root / name, ignore=shutil.ignore_patterns("__pycache__")
-        )
+        shutil.copytree(ROOT / name, root / name, ignore=shutil.ignore_patterns("__pycache__"))
     manifest_path = root / "assurance/consumers.yaml"
     manifest = yaml.safe_load(manifest_path.read_text())
     manifest["consumers"] = []
@@ -310,21 +298,12 @@ def test_bootstrap_render_only_runs_without_remote_configuration(tmp_path):
         assert result.returncode == 0, result.stderr
         # Execution trace, not source inspection: neither credential/API CLI
         # nor the optional scanner was executed by the real shell process.
-        assert not re.search(
-            r"^\++ (?:gh|az|detect-secrets) ", result.stderr, re.MULTILINE
-        )
+        assert not re.search(r"^\++ (?:gh|az|detect-secrets) ", result.stderr, re.MULTILINE)
         snapshots.append(
-            {
-                p.relative_to(destination): p.read_bytes()
-                for p in destination.rglob("*")
-                if p.is_file()
-            }
+            {p.relative_to(destination): p.read_bytes() for p in destination.rglob("*") if p.is_file()}
         )
     assert snapshots[0] == snapshots[1]
-    assert (
-        json.loads((tmp_path / "rendered/.secrets.baseline").read_text())["results"]
-        == {}
-    )
+    assert json.loads((tmp_path / "rendered/.secrets.baseline").read_text())["results"] == {}
     assert (tmp_path / "rendered/Makefile").is_file()
 
 
@@ -335,9 +314,7 @@ def test_bootstrap_render_only_runs_without_remote_configuration(tmp_path):
 def test_workspace_validator_rejects_real_incorrect_tap(tmp_path, defect):
     import shutil
 
-    shutil.copytree(
-        ROOT / "assurance/fixtures/python/project", tmp_path, dirs_exist_ok=True
-    )
+    shutil.copytree(ROOT / "assurance/fixtures/python/project", tmp_path, dirs_exist_ok=True)
     env = {**os.environ, "PYTHONPATH": str(tmp_path / "src")}
     for argv in (
         [
@@ -354,9 +331,7 @@ def test_workspace_validator_rejects_real_incorrect_tap(tmp_path, defect):
         ],
         [sys.executable, "-m", "coverage", "xml", "-o", "artifacts/coverage.xml"],
     ):
-        result = subprocess.run(
-            argv, cwd=tmp_path, env=env, text=True, capture_output=True, check=False
-        )
+        result = subprocess.run(argv, cwd=tmp_path, env=env, text=True, capture_output=True, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
     cases = {
         "ten-failures": "for (let i = 0; i < 10; i++) test('generated-total', () => assert.equal(9, 5));",
@@ -366,8 +341,7 @@ def test_workspace_validator_rejects_real_incorrect_tap(tmp_path, defect):
         "wrong-identity": "test('not-generated-total', () => assert.equal(5, 5));",
     }
     (tmp_path / "negative.mjs").write_text(
-        "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\n"
-        + cases[defect]
+        "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\n" + cases[defect]
     )
     node = subprocess.run(
         [
@@ -402,16 +376,12 @@ def test_generated_terminal_validator_rejects_real_altered_result(tmp_path, defe
 
     root = tmp_path / "pipeline"
     for name in ("governance", "assurance"):
-        shutil.copytree(
-            ROOT / name, root / name, ignore=shutil.ignore_patterns("__pycache__")
-        )
+        shutil.copytree(ROOT / name, root / name, ignore=shutil.ignore_patterns("__pycache__"))
     path = root / "assurance/consumers.yaml"
     manifest = yaml.safe_load(path.read_text())
     generated = next(row for row in manifest["consumers"] if row["id"] == "generated")
     original = generated["evaluate"]["affected"]
-    terminal_pattern = (
-        r"^(?:PASS \[[^]\n]+\].*|FAIL \[[^]\n]+\].* \(exit [1-9][0-9]*\))$"
-    )
+    terminal_pattern = r"^(?:PASS \[[^]\n]+\].*|FAIL \[[^]\n]+\].* \(exit [1-9][0-9]*\))$"
     alteration = {
         "skip": "text = text.replace('FAIL [harness-canon-reference]', 'SKIP [harness-canon-reference]')",
         "duplicate": "text += '\\nPASS [consumer-tests] consumer-tests\\n'",

@@ -535,8 +535,7 @@ def reconcile(
                     issue_id=i.id,
                     reason="no-link",
                     detail=(
-                        f"{i.id} is {i.status_name or 'in-flight'} but has no linked "
-                        "PR/branch behind it"
+                        f"{i.id} is {i.status_name or 'in-flight'} but has no linked PR/branch behind it"
                     ),
                 )
             )
@@ -597,10 +596,7 @@ def reconcile(
                     branch=b.name,
                     issue_id=linked,
                     reason="unknown-issue",
-                    detail=(
-                        f"branch/PR {b.name!r} points at {linked}, which is not in "
-                        "the reconciled tree"
-                    ),
+                    detail=(f"branch/PR {b.name!r} points at {linked}, which is not in the reconciled tree"),
                 )
             )
 
@@ -621,9 +617,7 @@ def load_snapshot(data: dict) -> ReconcilerInput:
     """Build a :class:`ReconcilerInput` from a combined ``{issues, delegations,
     branches}`` snapshot (the shape the dry-run reads and the tests fixture)."""
     issues = tuple(TreeIssue.from_linear(i) for i in data.get("issues", ()) or ())
-    delegations = tuple(
-        Delegation.from_dict(d) for d in data.get("delegations", ()) or ()
-    )
+    delegations = tuple(Delegation.from_dict(d) for d in data.get("delegations", ()) or ())
     branches = tuple(AgentBranch.from_dict(b) for b in data.get("branches", ()) or ())
     return ReconcilerInput(issues=issues, delegations=delegations, branches=branches)
 
@@ -752,9 +746,7 @@ def _load_input(args: argparse.Namespace) -> ReconcilerInput:
             "export) to reconcile the Linear tree against."
         )
     issues = tuple(HttpTreeSource(api_key).fetch(args.initiative))
-    delegations = tuple(
-        Delegation.from_dict(d) for d in _read_json_list(args.delegations_file)
-    )
+    delegations = tuple(Delegation.from_dict(d) for d in _read_json_list(args.delegations_file))
     branches = (
         tuple(AgentBranch.from_dict(b) for b in _read_json_list(args.branches_file))
         if args.branches_file
@@ -767,9 +759,7 @@ def render_report(report: ReconciliationReport, *, dry_run: bool) -> str:
     """Human-readable render of the reconciliation report."""
     lines: list[str] = []
     c = report
-    lines.append(
-        f"Reconciliation report — Autonomous Delivery Platform ({c.initiative})"
-    )
+    lines.append(f"Reconciliation report — Autonomous Delivery Platform ({c.initiative})")
     lines.append(
         f"  {c.issue_count} issue(s), {c.delegation_count} delegation(s), "
         f"{c.branch_count} branch(es) reconciled"
@@ -817,8 +807,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--delegations-file",
-        help="Delegation-ledger export (JSON list or {'delegations': [...]}). "
-        "Required on the live path.",
+        help="Delegation-ledger export (JSON list or {'delegations': [...]}). Required on the live path.",
     )
     parser.add_argument(
         "--branches-file",

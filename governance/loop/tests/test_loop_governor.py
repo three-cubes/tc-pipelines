@@ -86,9 +86,7 @@ class Cycle:
         return {"dispatch": self.dispatch, "verify": self.verify, "close": self.close}
 
 
-def _armed(
-    config: GuardrailConfig | None = None, **kw
-) -> tuple[Governor, RecordingEscalationSink]:
+def _armed(config: GuardrailConfig | None = None, **kw) -> tuple[Governor, RecordingEscalationSink]:
     """An armed governor + its recording escalation sink (the human seam)."""
     sink = RecordingEscalationSink()
     gov = Governor(config, sink=sink, **kw)

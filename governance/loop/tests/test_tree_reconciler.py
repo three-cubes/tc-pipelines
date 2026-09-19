@@ -69,9 +69,7 @@ def _issue(
     )
 
 
-def _deleg(
-    id, issue_id, *, parent_id=None, agent="agent-x", live=True, branch=None, pr=None
-):
+def _deleg(id, issue_id, *, parent_id=None, agent="agent-x", live=True, branch=None, pr=None):
     return Delegation(
         id=id,
         issue_id=issue_id,
@@ -96,14 +94,10 @@ def _for(report, kind):
 # --------------------------------------------------------------------------- #
 class BranchParseTest(unittest.TestCase):
     def test_org_convention_user_branch(self):
-        self.assertEqual(
-            issue_id_from_branch("dan/pla-311-sp-c-3-advance-the-loop"), "PLA-311"
-        )
+        self.assertEqual(issue_id_from_branch("dan/pla-311-sp-c-3-advance-the-loop"), "PLA-311")
 
     def test_agent_branch(self):
-        self.assertEqual(
-            issue_id_from_branch("agent/pla-315-delegation-tree-mirror"), "PLA-315"
-        )
+        self.assertEqual(issue_id_from_branch("agent/pla-315-delegation-tree-mirror"), "PLA-315")
 
     def test_takes_first_team_number_not_slug_digits(self):
         # sp-c-3 in the slug must not be mistaken for the work item.
@@ -123,9 +117,7 @@ class TwoLevelMirrorTest(unittest.TestCase):
         root_issue = _issue(id="PLA-1", parent_id=None)
         sub_issue = _issue(id="PLA-2", parent_id="PLA-1")
         root_deleg = _deleg("d-root", "PLA-1", parent_id=None, branch="dan/pla-1-root")
-        sub_deleg = _deleg(
-            "d-sub", "PLA-2", parent_id="d-root", branch="agent/pla-2-sub"
-        )
+        sub_deleg = _deleg("d-sub", "PLA-2", parent_id="d-root", branch="agent/pla-2-sub")
         return [root_issue, sub_issue], [root_deleg, sub_deleg]
 
     def test_matching_two_level_tree_is_clean(self):
@@ -138,9 +130,7 @@ class TwoLevelMirrorTest(unittest.TestCase):
         # The AC: killing a delegation marks its sub-issue stale in one pass.
         issues, delegations = self._two_level()
         # kill the sub delegation
-        delegations[1] = _deleg(
-            "d-sub", "PLA-2", parent_id="d-root", branch="agent/pla-2-sub", live=False
-        )
+        delegations[1] = _deleg("d-sub", "PLA-2", parent_id="d-root", branch="agent/pla-2-sub", live=False)
         report = reconcile(issues, delegations, now=NOW)
         stale = _for(report, FindingKind.STALE)
         self.assertEqual([f.issue_id for f in stale], ["PLA-2"])
@@ -223,9 +213,7 @@ class UnlinkedBranchTest(unittest.TestCase):
 
     def test_explicit_issue_id_on_branch_is_respected(self):
         branches = [AgentBranch(name="weird-branch", issue_id="PLA-1")]
-        report = reconcile(
-            [_issue(id="PLA-1")], [_deleg("d", "PLA-1")], branches=branches, now=NOW
-        )
+        report = reconcile([_issue(id="PLA-1")], [_deleg("d", "PLA-1")], branches=branches, now=NOW)
         self.assertEqual(_for(report, FindingKind.UNLINKED_BRANCH), [])
 
 
@@ -243,9 +231,7 @@ class DriftTest(unittest.TestCase):
         delegations = [
             _deleg("d1", "PLA-1", branch="b1"),
             _deleg("d2", "PLA-2", parent_id="d1", branch="b2"),
-            _deleg(
-                "d3", "PLA-3", parent_id="d2", branch="b3"
-            ),  # parent should be PLA-2
+            _deleg("d3", "PLA-3", parent_id="d2", branch="b3"),  # parent should be PLA-2
         ]
         report = reconcile(issues, delegations, now=NOW)
         drift = _for(report, FindingKind.DRIFT)
@@ -260,9 +246,7 @@ class DriftTest(unittest.TestCase):
             _deleg("d2", "PLA-2", parent_id="d1", branch="b2"),
         ]
         report = reconcile(issues, delegations, now=NOW)
-        self.assertEqual(
-            [f.issue_id for f in _for(report, FindingKind.DRIFT)], ["PLA-2"]
-        )
+        self.assertEqual([f.issue_id for f in _for(report, FindingKind.DRIFT)], ["PLA-2"])
 
     def test_root_delegation_no_parent_is_not_drift(self):
         report = reconcile(
@@ -306,14 +290,10 @@ class OverdueTest(unittest.TestCase):
             started_at="2026-06-28T00:00:00.000Z",  # ~4.5d before NOW
         )
         report = reconcile([issue], [self._healthy_deleg("PLA-1")], now=NOW)
-        self.assertEqual(
-            [f.issue_id for f in _for(report, FindingKind.OVERDUE)], ["PLA-1"]
-        )
+        self.assertEqual([f.issue_id for f in _for(report, FindingKind.OVERDUE)], ["PLA-1"])
 
     def test_in_progress_under_three_days_is_ok(self):
-        issue = _issue(
-            id="PLA-1", status_name="In Progress", started_at="2026-07-01T00:00:00.000Z"
-        )
+        issue = _issue(id="PLA-1", status_name="In Progress", started_at="2026-07-01T00:00:00.000Z")
         report = reconcile([issue], [self._healthy_deleg("PLA-1")], now=NOW)
         self.assertEqual(_for(report, FindingKind.OVERDUE), [])
 
@@ -324,14 +304,10 @@ class OverdueTest(unittest.TestCase):
             updated_at="2026-06-29T00:00:00.000Z",  # ~3.5d before NOW
         )
         report = reconcile([issue], [self._healthy_deleg("PLA-1")], now=NOW)
-        self.assertEqual(
-            [f.issue_id for f in _for(report, FindingKind.OVERDUE)], ["PLA-1"]
-        )
+        self.assertEqual([f.issue_id for f in _for(report, FindingKind.OVERDUE)], ["PLA-1"])
 
     def test_in_review_under_two_days_is_ok(self):
-        issue = _issue(
-            id="PLA-1", status_name="In Review", updated_at="2026-07-01T06:00:00.000Z"
-        )
+        issue = _issue(id="PLA-1", status_name="In Review", updated_at="2026-07-01T06:00:00.000Z")
         report = reconcile([issue], [self._healthy_deleg("PLA-1")], now=NOW)
         self.assertEqual(_for(report, FindingKind.OVERDUE), [])
 
@@ -439,11 +415,7 @@ class ParseTreeTest(unittest.TestCase):
                                             "name": "In Review",
                                         },
                                         "parent": {"identifier": "PLA-1"},
-                                        "attachments": {
-                                            "nodes": [
-                                                {"url": "https://github.com/o/r/pull/9"}
-                                            ]
-                                        },
+                                        "attachments": {"nodes": [{"url": "https://github.com/o/r/pull/9"}]},
                                     },
                                 ]
                             }
@@ -537,17 +509,13 @@ class SnapshotTest(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 class CliTest(unittest.TestCase):
     def _write(self, doc) -> str:
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".json", delete=False, encoding="utf-8"
-        ) as fh:
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
             json.dump(doc, fh)
             return fh.name
 
     def test_dry_run_reports_findings_no_side_effects(self):
         snap = {
-            "issues": [
-                {"id": "PLA-9", "statusType": "started", "status": "In Progress"}
-            ],
+            "issues": [{"id": "PLA-9", "statusType": "started", "status": "In Progress"}],
             "delegations": [],
             "branches": [{"name": "experiment/scratch"}],
         }
@@ -564,9 +532,7 @@ class CliTest(unittest.TestCase):
 
     def test_json_output_is_machine_report(self):
         snap = {
-            "issues": [
-                {"id": "PLA-9", "statusType": "started", "status": "In Progress"}
-            ],
+            "issues": [{"id": "PLA-9", "statusType": "started", "status": "In Progress"}],
             "delegations": [],
             "branches": [],
         }
@@ -583,17 +549,13 @@ class CliTest(unittest.TestCase):
         path = self._write(SnapshotTest.SNAP)
         buf = io.StringIO()
         with redirect_stdout(buf):
-            rc = tr.main(
-                ["--dry-run", "--snapshot", path, "--now", "2026-07-02T12:00:00Z"]
-            )
+            rc = tr.main(["--dry-run", "--snapshot", path, "--now", "2026-07-02T12:00:00Z"])
         self.assertEqual(rc, 0)
         self.assertIn("clean", buf.getvalue().lower())
 
     def test_fail_on_findings_sets_exit_code(self):
         snap = {
-            "issues": [
-                {"id": "PLA-9", "statusType": "started", "status": "In Progress"}
-            ],
+            "issues": [{"id": "PLA-9", "statusType": "started", "status": "In Progress"}],
             "delegations": [],
             "branches": [],
         }

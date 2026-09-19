@@ -16,9 +16,7 @@ CLI = ROOT / "assurance/hosted.py"
 
 
 def git(root, *args):
-    result = subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, check=True
-    )
+    result = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
     return result.stdout.strip()
 
 
@@ -58,15 +56,11 @@ def repository(tmp_path):
                     "boundary": boundary,
                     "dependencies": ["shared/**"],
                     "case": name if boundary == "safe-hosted" else None,
-                    "release_probe": "approved-status"
-                    if boundary == "protected-live"
-                    else None,
+                    "release_probe": "approved-status" if boundary == "protected-live" else None,
                 },
             }
         )
-    (tmp_path / "assurance/surfaces.yaml").write_text(
-        yaml.safe_dump({"surfaces": surfaces})
-    )
+    (tmp_path / "assurance/surfaces.yaml").write_text(yaml.safe_dump({"surfaces": surfaces}))
     (tmp_path / "assurance/hosted-cases.yaml").write_text(
         yaml.safe_dump({"cases": {"safe": {"jobs": ["Adapter"], "steps": ["Assert"]}}})
     )
@@ -84,15 +78,11 @@ def repository(tmp_path):
         (".github/workflows/example-safe.yml", []),
     ],
 )
-def test_exact_committed_diff_selects_safe_and_routes_protected(
-    tmp_path, changed, want
-):
+def test_exact_committed_diff_selects_safe_and_routes_protected(tmp_path, changed, want):
     base = repository(tmp_path)
     target = tmp_path / changed
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        target.read_text() + "# changed\n" if target.exists() else "new\n"
-    )
+    target.write_text(target.read_text() + "# changed\n" if target.exists() else "new\n")
     git(tmp_path, "add", ".")
     git(tmp_path, "commit", "-qm", "test: exact candidate")
     head = git(tmp_path, "rev-parse", "HEAD")
@@ -102,9 +92,7 @@ def test_exact_committed_diff_selects_safe_and_routes_protected(
     assert result.returncode == 0, result.stderr
     selection = json.loads(result.stdout)
     assert selection["safe"] == want
-    assert selection["protected"] == (
-        ["workflow.deploy"] if changed == "shared/driver.py" else []
-    )
+    assert selection["protected"] == (["workflow.deploy"] if changed == "shared/driver.py" else [])
     assert selection["head"] == head
 
 

@@ -136,9 +136,7 @@ def _is_self_guarded(operand: str, guards: list[str]) -> bool:
     return any(re.sub(r"\s+", "", guard) == wanted for guard in guards)
 
 
-def _always_empty_reason(
-    operand: str, guards: list[str], declared: dict[str, dict]
-) -> str | None:
+def _always_empty_reason(operand: str, guards: list[str], declared: dict[str, dict]) -> str | None:
     """Why the selected value is always falsy, or None when it is not provably so."""
     quoted = QUOTED.match(operand)
     if quoted:
@@ -157,10 +155,7 @@ def _always_empty_reason(
         return None
     default = spec.get("default")
     if default is None:
-        return (
-            "its declaration carries no default, so an unset caller sends an "
-            "empty string"
-        )
+        return "its declaration carries no default, so an unset caller sends an empty string"
     if default in ("", False, 0):
         return f"its declaration defaults to {default!r}, which is falsy"
     return None

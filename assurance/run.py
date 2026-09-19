@@ -38,9 +38,7 @@ def discover(root):
     for path in sorted((root / ".github/workflows").glob("*.y*ml")):
         data = read_yaml(path)
         events = data.get("on", data.get(True, {}))
-        if events == "workflow_call" or (
-            isinstance(events, (dict, list)) and "workflow_call" in events
-        ):
+        if events == "workflow_call" or (isinstance(events, (dict, list)) and "workflow_call" in events):
             rows.append(
                 {
                     "id": "workflow." + path.stem,
@@ -50,15 +48,8 @@ def discover(root):
     for home in ("actions", ".github/actions"):
         for path in sorted((root / home).rglob("action.y*ml")):
             if read_yaml(path).get("runs", {}).get("using") == "composite":
-                name = (
-                    path.parent.relative_to(root)
-                    .as_posix()
-                    .replace("/", ".")
-                    .lstrip(".")
-                )
-                rows.append(
-                    {"id": "action." + name, "path": path.relative_to(root).as_posix()}
-                )
+                name = path.parent.relative_to(root).as_posix().replace("/", ".").lstrip(".")
+                rows.append({"id": "action." + name, "path": path.relative_to(root).as_posix()})
     return rows
 
 
@@ -72,9 +63,7 @@ def inventory(root):
     if len(declared) != len(entries) or len({r["id"] for r in entries}) != len(entries):
         raise AssuranceError("inventory: duplicate path or id")
     if declared != actual:
-        raise AssuranceError(
-            f"inventory: public surface mismatch; discovered={actual}, declared={declared}"
-        )
+        raise AssuranceError(f"inventory: public surface mismatch; discovered={actual}, declared={declared}")
     for row in entries:
         # Every public adapter controls a GitHub boundary. None may declare a
         # structural-only PR obligation or omit hosted release qualification.
@@ -83,12 +72,8 @@ def inventory(root):
         for lane, minimum in (("pr", 2), ("release", 3)):
             levels = row.get("required", {}).get(lane, [])
             if len(levels) < minimum or levels != list(LEVELS[: len(levels)]):
-                raise AssuranceError(
-                    f"inventory: {row['id']} requires cumulative {lane} evidence"
-                )
-        if not row.get("sabotage") or not all(
-            isinstance(s, str) and s.strip() for s in row["sabotage"]
-        ):
+                raise AssuranceError(f"inventory: {row['id']} requires cumulative {lane} evidence")
+        if not row.get("sabotage") or not all(isinstance(s, str) and s.strip() for s in row["sabotage"]):
             raise AssuranceError(f"inventory: missing sabotage for {row['id']}")
         evidence = row.get("evidence", {})
         if not isinstance(evidence, dict) or not set(evidence) <= set(LEVELS):
@@ -99,9 +84,7 @@ def inventory(root):
             for ref in refs:
                 target = (root / ref).resolve()
                 if not target.is_relative_to(root.resolve()) or not target.is_file():
-                    raise AssuranceError(
-                        f"inventory: missing or unsafe evidence reference {ref}"
-                    )
+                    raise AssuranceError(f"inventory: missing or unsafe evidence reference {ref}")
     return {
         "surfaces": len(entries),
         "evidence_produced": ["structural"],
@@ -132,9 +115,7 @@ def command(argv, cwd, *, env=None, log=None):
 def require_command(argv, cwd, **kwargs):
     result = command(argv, cwd, **kwargs)
     if result.returncode:
-        raise AssuranceError(
-            f"command failed ({result.returncode}): {argv}\n{result.stdout[-8000:]}"
-        )
+        raise AssuranceError(f"command failed ({result.returncode}): {argv}\n{result.stdout[-8000:]}")
     return result
 
 
@@ -150,8 +131,7 @@ def tree(root, *, prepared=False):
             p.stat().st_mode & 0o777,
         )
         for p in sorted(root.rglob("*"))
-        if p.is_file()
-        and not any(part in ignored for part in p.relative_to(root).parts)
+        if p.is_file() and not any(part in ignored for part in p.relative_to(root).parts)
     }
 
 
@@ -222,8 +202,7 @@ def output_evidence(root, destination, expected, *, workspace=False):
     suites = ET.parse(junit).getroot()
     suites = [suites] if suites.tag == "testsuite" else list(suites.iter("testsuite"))
     counts = {
-        key: sum(int(s.get(key, 0)) for s in suites)
-        for key in ("tests", "failures", "errors", "skipped")
+        key: sum(int(s.get(key, 0)) for s in suites) for key in ("tests", "failures", "errors", "skipped")
     }
     if counts["tests"] < 1 or counts["errors"] or counts["skipped"]:
         raise AssuranceError(f"unexpected-test-result: {counts}")
@@ -231,9 +210,7 @@ def output_evidence(root, destination, expected, *, workspace=False):
         raise AssuranceError(f"unexpected-test-failure: {counts}")
     cov = ET.parse(coverage).getroot()
     if int(cov.get("lines-valid", 0)) < 1 or float(cov.get("line-rate", 0)) != 1.0:
-        raise AssuranceError(
-            "coverage-output: consumer code did not execute completely"
-        )
+        raise AssuranceError("coverage-output: consumer code did not execute completely")
     destination.mkdir(parents=True, exist_ok=True)
     sources = [junit, coverage]
     if workspace:
@@ -273,9 +250,7 @@ def output_evidence(root, destination, expected, *, workspace=False):
 
 def lab(root, output, wheel=None):
     if output.exists():
-        raise AssuranceError(
-            "output directory already exists; choose a fresh path to retain each attempt"
-        )
+        raise AssuranceError("output directory already exists; choose a fresh path to retain each attempt")
     if wheel is not None and (not wheel.is_file() or wheel.suffix != ".whl"):
         raise AssuranceError("fitness-wheel must name an existing wheel")
     output.mkdir(parents=True)
@@ -284,9 +259,7 @@ def lab(root, output, wheel=None):
         "evidence_mode": "compatibility-terminal",
         "mode": "compatibility",
         "fitness_input": str(wheel) if wheel else "locked-dependency",
-        "fitness_digest": hashlib.sha256(wheel.read_bytes()).hexdigest()
-        if wheel
-        else None,
+        "fitness_digest": hashlib.sha256(wheel.read_bytes()).hexdigest() if wheel else None,
         "generated_render_equal": False,
         "cases": [],
     }
@@ -295,12 +268,9 @@ def lab(root, output, wheel=None):
             manifest.get("schema") != "tc.sdlc/disposable-consumers/v1"
             or manifest.get("mode") != "compatibility"
             or len(manifest.get("consumers", [])) != 3
-            or {s["id"] for s in manifest["consumers"]}
-            != {"python", "mixed", "generated"}
+            or {s["id"] for s in manifest["consumers"]} != {"python", "mixed", "generated"}
         ):
-            raise AssuranceError(
-                "consumer-manifest: exactly python, mixed and generated are required"
-            )
+            raise AssuranceError("consumer-manifest: exactly python, mixed and generated are required")
         with tempfile.TemporaryDirectory(prefix="tc-consumer-lab-") as scratch:
             scratch = Path(scratch)
             fresh = scratch / "fresh"
@@ -332,10 +302,7 @@ def lab(root, output, wheel=None):
                             target.write("\n" + (consumer / "gate.toml").read_text())
                     if spec["id"] == "generated":
                         with (consumer / "pyproject.toml").open("a") as target:
-                            target.write(
-                                "\n"
-                                + (consumer / "pyproject.tc_fitness.toml").read_text()
-                            )
+                            target.write("\n" + (consumer / "pyproject.tc_fitness.toml").read_text())
                     if wheel:
                         # uv sources overrides resolution without weakening the
                         # skeleton's catalogue or declared engine floor.
@@ -349,9 +316,7 @@ def lab(root, output, wheel=None):
                     logs = output / spec["id"] / variant
                     logs.mkdir(parents=True)
                     for index, argv in enumerate(spec["install"]):
-                        require_command(
-                            argv, consumer, log=logs / f"install-{index}.log"
-                        )
+                        require_command(argv, consumer, log=logs / f"install-{index}.log")
                     for iteration in (1, 2):
                         for index, argv in enumerate(spec["prepare"]):
                             require_command(
@@ -363,15 +328,13 @@ def lab(root, output, wheel=None):
                         if iteration == 1:
                             before = after
                         elif before != after:
-                            raise AssuranceError(
-                                f"preparation-not-fixed-point: {spec['id']}/{variant}"
-                            )
+                            raise AssuranceError(f"preparation-not-fixed-point: {spec['id']}/{variant}")
                     checkpoint(consumer)
                     shutil.copy2(consumer / "uv.lock", logs / "uv.lock")
                     gate_steps = []
-                    for step in tomllib.loads(
-                        (consumer / "pyproject.toml").read_text()
-                    )["tool"]["tc_fitness"]["steps"]:
+                    for step in tomllib.loads((consumer / "pyproject.toml").read_text())["tool"][
+                        "tc_fitness"
+                    ]["steps"]:
                         # Catalogue results complete inside their declared step,
                         # before the enclosing step's terminal result.
                         if "catalogue" in step:
@@ -384,9 +347,7 @@ def lab(root, output, wheel=None):
                             old, new = sabotage["replace"]
                             content = target.read_text()
                             if content.count(old) != 1:
-                                raise AssuranceError(
-                                    "sabotage target must match exactly once"
-                                )
+                                raise AssuranceError("sabotage target must match exactly once")
                             target.write_text(content.replace(old, new))
                         else:
                             target.unlink()
@@ -415,9 +376,7 @@ def lab(root, output, wheel=None):
                             "PYTHONDONTWRITEBYTECODE": "1",
                         }
                         argv = spec["evaluate"][phase]
-                        result = command(
-                            argv, consumer, env=env, log=logs / f"{phase}.log"
-                        )
+                        result = command(argv, consumer, env=env, log=logs / f"{phase}.log")
                         terminal = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
                         expected_rc = 0 if variant == "compliant" else 1
                         if result.returncode != expected_rc:
@@ -430,9 +389,7 @@ def lab(root, output, wheel=None):
                             re.MULTILINE,
                         )
                         if any(status == "SKIP" for status, _, _ in records):
-                            raise AssuranceError(
-                                "unexpected-terminal-result: SKIP is not an executed result"
-                            )
+                            raise AssuranceError("unexpected-terminal-result: SKIP is not an executed result")
                         # A CORE check can print its own FAIL diagnostic before
                         # the dispatcher emits the terminal record with an exit
                         # code. Only the latter is the execution result. Retain
@@ -440,19 +397,13 @@ def lab(root, output, wheel=None):
                         statuses = [
                             (status, name)
                             for status, name, detail in records
-                            if status != "FAIL"
-                            or re.search(r" \(exit [1-9][0-9]*\)$", detail)
+                            if status != "FAIL" or re.search(r" \(exit [1-9][0-9]*\)$", detail)
                         ]
-                        expected_failures = (
-                            {spec["sabotage"]["step"]}
-                            if variant == "sabotage"
-                            else set()
-                        )
+                        expected_failures = {spec["sabotage"]["step"]} if variant == "sabotage" else set()
                         if variant == "sabotage" and spec["sabotage"].get("rule"):
                             expected_failures.add(spec["sabotage"]["rule"])
                         expected_statuses = [
-                            ("FAIL" if name in expected_failures else "PASS", name)
-                            for name in gate_steps
+                            ("FAIL" if name in expected_failures else "PASS", name) for name in gate_steps
                         ]
                         if statuses != expected_statuses:
                             raise AssuranceError(
@@ -464,21 +415,13 @@ def lab(root, output, wheel=None):
                                     raise AssuranceError(
                                         f"unexpected-sabotage: missing {fragment!r}\n{terminal[-7000:]}"
                                     )
-                            for path, fragments in (
-                                spec["sabotage"].get("output_diagnostics", {}).items()
-                            ):
+                            for path, fragments in spec["sabotage"].get("output_diagnostics", {}).items():
                                 content = (consumer / path).read_text()
-                                if not all(
-                                    fragment in content for fragment in fragments
-                                ):
+                                if not all(fragment in content for fragment in fragments):
                                     raise AssuranceError(
                                         f"unexpected-sabotage: {path} lacks expected finding"
                                     )
-                        expected = (
-                            spec["sabotage"]["output_result"]
-                            if variant == "sabotage"
-                            else "pass"
-                        )
+                        expected = spec["sabotage"]["output_result"] if variant == "sabotage" else "pass"
                         outputs = output_evidence(
                             consumer,
                             logs / phase,
@@ -490,9 +433,7 @@ def lab(root, output, wheel=None):
                                 "phase": phase,
                                 "command": argv,
                                 "exit_code": result.returncode,
-                                "outputs": [
-                                    p.relative_to(output).as_posix() for p in outputs
-                                ],
+                                "outputs": [p.relative_to(output).as_posix() for p in outputs],
                             }
                         )
             summary["status"] = "pass"
@@ -507,9 +448,7 @@ def lab(root, output, wheel=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "command", choices=["discover", "inventory", "prepare", "render", "lab", "all"]
-    )
+    parser.add_argument("command", choices=["discover", "inventory", "prepare", "render", "lab", "all"])
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--fitness-wheel", type=Path)
@@ -529,9 +468,7 @@ def main():
             result = {"rendered": str(args.output)}
         else:
             if args.output is None:
-                args.output = (
-                    Path(tempfile.mkdtemp(prefix="tc-assurance-")) / "evidence"
-                )
+                args.output = Path(tempfile.mkdtemp(prefix="tc-assurance-")) / "evidence"
             if args.command == "all":
                 inventory(root)
             result = lab(

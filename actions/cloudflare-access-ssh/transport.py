@@ -59,9 +59,7 @@ LOWER_IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
 RELEASE_TAG = re.compile(r"v[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}(?:[a-z][0-9]+|\.[0-9]+)?")
 RECEIPT_ID = re.compile(r"sha256:[0-9a-f]{64}")
 CLOUDFLARED_RELEASE = re.compile(r"[0-9]+(?:\.[0-9]+){2}")
-HOSTNAME = re.compile(
-    r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}"
-)
+HOSTNAME = re.compile(r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
 USERNAME = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 SAFE_PATH = re.compile(r"/[A-Za-z0-9._/-]+")
 OPENSSH_FORMAT = "OPENSSH " + "PRIVATE KEY"
@@ -136,48 +134,30 @@ def _validated_request(raw: str) -> tuple[bytes, dict[str, object]]:
         raise TransportError(f"request is missing field(s): {', '.join(missing)}")
     if request["schema_version"] != SCHEMA:
         raise TransportError(f"schema_version must be {SCHEMA}")
-    if (
-        not isinstance(request["request_id"], str)
-        or IDENTIFIER.fullmatch(request["request_id"]) is None
-    ):
+    if not isinstance(request["request_id"], str) or IDENTIFIER.fullmatch(request["request_id"]) is None:
         raise TransportError("request_id has an invalid shape")
-    if (
-        not isinstance(request["repository"], str)
-        or REPOSITORY.fullmatch(request["repository"]) is None
-    ):
+    if not isinstance(request["repository"], str) or REPOSITORY.fullmatch(request["repository"]) is None:
         raise TransportError("repository has an invalid shape")
     for field in ("release_sha", "workflow_sha"):
         if not isinstance(request[field], str) or SHA.fullmatch(request[field]) is None:
             raise TransportError(f"{field} must be a 40-character lowercase commit SHA")
     for field in ("run_id", "run_attempt"):
-        if (
-            isinstance(request[field], bool)
-            or not isinstance(request[field], int)
-            or request[field] < 1
-        ):
+        if isinstance(request[field], bool) or not isinstance(request[field], int) or request[field] < 1:
             raise TransportError(f"{field} must be a positive integer")
     if request["environment"] != "production":
         raise TransportError("environment must be production")
     operation = request["operation"]
     if not isinstance(operation, str) or operation not in OPERATIONS:
         raise TransportError("operation is outside the deployment operation allowlist")
-    if (
-        not isinstance(request["cluster"], str)
-        or LOWER_IDENTIFIER.fullmatch(request["cluster"]) is None
-    ):
+    if not isinstance(request["cluster"], str) or LOWER_IDENTIFIER.fullmatch(request["cluster"]) is None:
         raise TransportError("cluster has an invalid shape")
     if (
         not isinstance(request["deployment_id"], str)
         or IDENTIFIER.fullmatch(request["deployment_id"]) is None
     ):
         raise TransportError("deployment_id has an invalid shape")
-    if (
-        not isinstance(request["tc_pipelines_pin"], str)
-        or SHA.fullmatch(request["tc_pipelines_pin"]) is None
-    ):
-        raise TransportError(
-            "tc_pipelines_pin must be a 40-character lowercase commit SHA"
-        )
+    if not isinstance(request["tc_pipelines_pin"], str) or SHA.fullmatch(request["tc_pipelines_pin"]) is None:
+        raise TransportError("tc_pipelines_pin must be a 40-character lowercase commit SHA")
     baseline_mode = request["baseline_mode"]
     if not isinstance(baseline_mode, str) or baseline_mode not in {
         "auto",
@@ -192,9 +172,7 @@ def _validated_request(raw: str) -> tuple[bytes, dict[str, object]]:
         raise TransportError("release_tag must be null or a CalVer tag")
     validation_run_id = request["validation_run_id"]
     if validation_run_id is not None and (
-        isinstance(validation_run_id, bool)
-        or not isinstance(validation_run_id, int)
-        or validation_run_id < 1
+        isinstance(validation_run_id, bool) or not isinstance(validation_run_id, int) or validation_run_id < 1
     ):
         raise TransportError("validation_run_id must be null or a positive integer")
     if operation == "stage":
@@ -212,29 +190,21 @@ def _validated_request(raw: str) -> tuple[bytes, dict[str, object]]:
             "rollback",
             "fix-forward",
         }:
-            raise TransportError(
-                "resolve-hold requires hold_action rollback or fix-forward"
-            )
+            raise TransportError("resolve-hold requires hold_action rollback or fix-forward")
         if hold_action == "fix-forward":
             if (
                 not isinstance(new_deployment_id, str)
                 or IDENTIFIER.fullmatch(new_deployment_id) is None
                 or new_deployment_id == request["deployment_id"]
             ):
-                raise TransportError(
-                    "fix-forward requires a distinct valid new_deployment_id"
-                )
+                raise TransportError("fix-forward requires a distinct valid new_deployment_id")
         elif new_deployment_id is not None:
             raise TransportError("rollback requires new_deployment_id to be null")
         if baseline_mode != "ordinary":
             raise TransportError("resolve-hold requires baseline_mode ordinary")
-    elif any(
-        value is not None for value in (held_scope, hold_action, new_deployment_id)
-    ):
+    elif any(value is not None for value in (held_scope, hold_action, new_deployment_id)):
         raise TransportError("hold fields are valid only for resolve-hold")
-    canonical = (
-        json.dumps(request, separators=(",", ":"), sort_keys=True) + "\n"
-    ).encode()
+    canonical = (json.dumps(request, separators=(",", ":"), sort_keys=True) + "\n").encode()
     return canonical, request
 
 
@@ -260,10 +230,7 @@ def _validate_response(raw: str, request: dict[str, object]) -> dict[str, object
             raise TransportError(f"response {field} does not match the request")
     if response["status"] != "succeeded":
         raise TransportError("response status is not succeeded")
-    if (
-        not isinstance(response["receipt_id"], str)
-        or RECEIPT_ID.fullmatch(response["receipt_id"]) is None
-    ):
+    if not isinstance(response["receipt_id"], str) or RECEIPT_ID.fullmatch(response["receipt_id"]) is None:
         raise TransportError("response receipt_id is not a SHA-256 identity")
     receipt_payload = {
         field: response[field]
@@ -275,14 +242,10 @@ def _validate_response(raw: str, request: dict[str, object]) -> dict[str, object
             "status",
         )
     }
-    canonical = json.dumps(
-        receipt_payload, separators=(",", ":"), sort_keys=True
-    ).encode()
+    canonical = json.dumps(receipt_payload, separators=(",", ":"), sort_keys=True).encode()
     expected_receipt = f"sha256:{hashlib.sha256(canonical).hexdigest()}"
     if not hmac.compare_digest(response["receipt_id"], expected_receipt):
-        raise TransportError(
-            "response receipt_id does not match the canonical response"
-        )
+        raise TransportError("response receipt_id does not match the canonical response")
     return response
 
 
@@ -297,9 +260,7 @@ def _write_result(
     response_root = runner_temp / "tc-deploy-responses"
     response_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     response_root.chmod(0o700)
-    descriptor, name = tempfile.mkstemp(
-        prefix=f"{request_id}-", suffix=".json", dir=response_root
-    )
+    descriptor, name = tempfile.mkstemp(prefix=f"{request_id}-", suffix=".json", dir=response_root)
     response_path = Path(name)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         os.fchmod(handle.fileno(), 0o600)
@@ -327,14 +288,8 @@ def _validated_cloudflared(raw: str) -> Path:
         metadata = path.lstat()
     except OSError as exc:
         raise TransportError("CLOUDFLARED_PATH does not exist") from exc
-    if (
-        not stat.S_ISREG(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or not os.access(path, os.X_OK)
-    ):
-        raise TransportError(
-            "CLOUDFLARED_PATH must be a regular executable, not a symlink"
-        )
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or not os.access(path, os.X_OK):
+        raise TransportError("CLOUDFLARED_PATH must be a regular executable, not a symlink")
     return path
 
 
@@ -343,9 +298,7 @@ def _validated_known_host(raw: str, hostname: str) -> str:
         raise TransportError("SSH known host must contain exactly one line")
     fields = raw.split()
     if len(fields) != 3 or fields[0] != hostname or fields[1] != "ssh-ed25519":
-        raise TransportError(
-            "SSH known host must pin this hostname to one ssh-ed25519 key"
-        )
+        raise TransportError("SSH known host must pin this hostname to one ssh-ed25519 key")
     try:
         decoded = base64.b64decode(fields[2], validate=True)
     except (binascii.Error, ValueError) as exc:
@@ -386,9 +339,7 @@ def _validate_private_key(path: Path) -> None:
         env=_child_environment(),
     )
     if result.returncode != 0:
-        raise TransportError(
-            "SSH_PRIVATE_KEY must be a valid unencrypted OpenSSH private key"
-        )
+        raise TransportError("SSH_PRIVATE_KEY must be a valid unencrypted OpenSSH private key")
 
 
 def _file_sha256(path: Path) -> str:
@@ -415,8 +366,7 @@ def _verify_cloudflared_version(path: Path, version: str) -> None:
     first_line = result.stdout.splitlines()[0] if result.stdout.splitlines() else ""
     if (
         result.returncode != 0
-        or re.match(rf"^cloudflared version {re.escape(version)}(?:\s|$)", first_line)
-        is None
+        or re.match(rf"^cloudflared version {re.escape(version)}(?:\s|$)", first_line) is None
     ):
         raise TransportError("cloudflared executable version does not match metadata")
 
@@ -548,11 +498,7 @@ def _run_streamed(
                             target.write(rendered)
                             target.flush()
                             if name == "stdout":
-                                nonempty = [
-                                    line.strip()
-                                    for line in rendered.splitlines()
-                                    if line.strip()
-                                ]
+                                nonempty = [line.strip() for line in rendered.splitlines() if line.strip()]
                                 if nonempty:
                                     final_line = nonempty[-1]
                     if reason is not None:
@@ -586,9 +532,7 @@ def _run_streamed(
                             reason = "operation_timeout"
                             _terminate_process_group(process)
             return ProcessResult(
-                return_code=process.returncode
-                if process.returncode is not None
-                else 124,
+                return_code=process.returncode if process.returncode is not None else 124,
                 final_line=final_line,
                 stdout_bytes=min(stdout_bytes, MAX_STDOUT_BYTES + 8192),
                 stderr_bytes=min(stderr_bytes, MAX_STDERR_BYTES + 8192),
@@ -618,13 +562,8 @@ def _status_request(request: dict[str, object]) -> tuple[bytes, dict[str, object
     return encoded, status
 
 
-def _write_diagnostic(
-    request: dict[str, object], result: ProcessResult, reason: str
-) -> Path:
-    root = (
-        Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
-        / "tc-deploy-diagnostics"
-    )
+def _write_diagnostic(request: dict[str, object], result: ProcessResult, reason: str) -> Path:
+    root = Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()) / "tc-deploy-diagnostics"
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     root.chmod(0o700)
     descriptor, raw_path = tempfile.mkstemp(
@@ -645,9 +584,7 @@ def _write_diagnostic(
             "return_code": result.return_code,
             "stdout_bytes": result.stdout_bytes,
             "stderr_bytes": result.stderr_bytes,
-            "stderr_tail": _bounded_utf8_tail(
-                result.stderr_tail, MAX_STDERR_TAIL_BYTES
-            ),
+            "stderr_tail": _bounded_utf8_tail(result.stderr_tail, MAX_STDERR_TAIL_BYTES),
             "fix": "Restore the headless Access route or forced deployment controller before retrying",
             "next": "Run the non-mutating status operation and inspect this diagnostic",
             "run": f"inspect {path}",
@@ -677,9 +614,7 @@ def run() -> int:
         raise TransportError("CLOUDFLARED_VERSION has an invalid shape")
     if RECEIPT_ID.fullmatch(cloudflared_sha256) is None:
         raise TransportError("CLOUDFLARED_SHA256 must be a SHA-256 identity")
-    request_bytes, request = _validated_request(
-        _required_env("REQUEST_ENVELOPE", MAX_REQUEST_BYTES)
-    )
+    request_bytes, request = _validated_request(_required_env("REQUEST_ENVELOPE", MAX_REQUEST_BYTES))
     known_host = _validated_known_host(_required_env("SSH_KNOWN_HOST", 4096), hostname)
     private_key = _required_env("SSH_PRIVATE_KEY", MAX_PRIVATE_KEY_BYTES)
     if (
@@ -690,24 +625,18 @@ def run() -> int:
         raise TransportError("SSH_PRIVATE_KEY must be an OpenSSH private key")
     observed_cloudflared_sha256 = _file_sha256(cloudflared)
     if observed_cloudflared_sha256 != cloudflared_sha256:
-        raise TransportError(
-            "cloudflared executable digest mismatch immediately before use"
-        )
+        raise TransportError("cloudflared executable digest mismatch immediately before use")
     _verify_cloudflared_version(cloudflared, cloudflared_version)
     token_id = _required_env("TUNNEL_SERVICE_TOKEN_ID", 4096)
     token_secret = _required_env("TUNNEL_SERVICE_TOKEN_SECRET", 16384)
     if any(character in token_id + token_secret for character in "\r\n\0"):
-        raise TransportError(
-            "Cloudflare service-token credentials have an invalid shape"
-        )
+        raise TransportError("Cloudflare service-token credentials have an invalid shape")
     ssh = shutil.which("ssh")
     if ssh is None:
         raise TransportError("ssh is required")
     temporary_root = Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
     proxy = f"ProxyCommand={cloudflared} access ssh --hostname %h"
-    with tempfile.TemporaryDirectory(
-        prefix="tc-deploy-ssh-", dir=temporary_root
-    ) as work:
+    with tempfile.TemporaryDirectory(prefix="tc-deploy-ssh-", dir=temporary_root) as work:
         directory = Path(work)
         directory.chmod(0o700)
         child_home = directory / "home"
@@ -759,9 +688,7 @@ def run() -> int:
         environment["TUNNEL_SERVICE_TOKEN_ID"] = token_id
         environment["TUNNEL_SERVICE_TOKEN_SECRET"] = token_secret
 
-        def invoke(
-            encoded: bytes, invocation: dict[str, object], label: str
-        ) -> dict[str, object]:
+        def invoke(encoded: bytes, invocation: dict[str, object], label: str) -> dict[str, object]:
             request_file = directory / f"request-{label}.json"
             _write_private(request_file, encoded)
             operation = str(invocation["operation"])

@@ -73,9 +73,7 @@ DELIBERATELY_OPTIONAL = {
 # action's, so it is removed before matching.
 DISPATCH_INPUT = re.compile(r"github\.event\.inputs\.[A-Za-z0-9_-]+")
 OWN_INPUT = re.compile(r"(?<!\.)\binputs\.([A-Za-z0-9_-]+)")
-STEP_OUTPUT = re.compile(
-    r"^\$\{\{\s*steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)\s*\}\}$"
-)
+STEP_OUTPUT = re.compile(r"^\$\{\{\s*steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)\s*\}\}$")
 # `$GITHUB_OUTPUT` and `${GITHUB_OUTPUT}` are the same file handle.
 OUTPUT_HANDLE = re.compile(r"\$\{?GITHUB_OUTPUT\}?")
 
@@ -143,18 +141,12 @@ def _resolved_outputs(document: dict) -> list[tuple[str, str, str]]:
 
 ACTIONS = [(_action_id(path), path) for path in _action_paths()]
 ACTION_IDS = [action_id for action_id, _ in ACTIONS]
-COMPOSITE = [
-    (action_id, path) for action_id, path in ACTIONS if _is_composite(_load(path))
-]
+COMPOSITE = [(action_id, path) for action_id, path in ACTIONS if _is_composite(_load(path))]
 COMPOSITE_IDS = [action_id for action_id, _ in COMPOSITE]
 INPUT_CASES = [
-    (action_id, name)
-    for action_id, path in COMPOSITE
-    for name in (_load(path).get("inputs") or {})
+    (action_id, name) for action_id, path in COMPOSITE for name in (_load(path).get("inputs") or {})
 ]
-GATE_BODY_INPUTS = sorted(
-    _load(REPO_ROOT / GATE_BODY / "action.yml").get("inputs") or {}
-)
+GATE_BODY_INPUTS = sorted(_load(REPO_ROOT / GATE_BODY / "action.yml").get("inputs") or {})
 
 
 def test_the_scan_found_actions_to_check() -> None:
@@ -211,9 +203,7 @@ def test_the_scan_found_actions_to_check() -> None:
     INPUT_CASES,
     ids=[f"{action_id}:{name}" for action_id, name in INPUT_CASES],
 )
-def test_every_declared_input_is_referenced_by_the_body(
-    action_id: str, name: str
-) -> None:
+def test_every_declared_input_is_referenced_by_the_body(action_id: str, name: str) -> None:
     referenced = _referenced_inputs(_runs_text(REPO_ROOT / action_id / "action.yml"))
 
     assert name in referenced, (
@@ -275,16 +265,13 @@ def test_every_declared_output_resolves_to_a_step_that_sets_it(action_id: str) -
         body = str(step.get("run") or "")
         # Both write forms count: `key=value` and the `key<<EOF` heredoc.
         written = bool(
-            re.search(rf"(?<![A-Za-z0-9_-]){re.escape(key)}(=|<<)", body)
-            and OUTPUT_HANDLE.search(body)
+            re.search(rf"(?<![A-Za-z0-9_-]){re.escape(key)}(=|<<)", body) and OUTPUT_HANDLE.search(body)
         )
         if f"{action_id}:{name}" in OUTPUT_WRITE_OK:
             if written:
                 exempt_but_written.append(name)
         elif not written:
-            broken.append(
-                f"{name} -> steps.{step_id} never writes `{key}` to $GITHUB_OUTPUT"
-            )
+            broken.append(f"{name} -> steps.{step_id} never writes `{key}` to $GITHUB_OUTPUT")
 
     assert not broken, (
         f"{action_id}: declared output(s) {broken}. Actions hands the caller an "
@@ -332,15 +319,10 @@ def test_gate_body_input_stays_required_unless_deliberately_optional(name: str) 
 def test_every_declared_exception_names_a_real_target() -> None:
     """A stale exemption would silently exempt a target it no longer explains."""
     outputs = {
-        f"{action_id}:{name}"
-        for action_id, path in COMPOSITE
-        for name in (_load(path).get("outputs") or {})
+        f"{action_id}:{name}" for action_id, path in COMPOSITE for name in (_load(path).get("outputs") or {})
     }
     stale = sorted(set(OUTPUT_WRITE_OK) - outputs)
-    stale += sorted(
-        f"{GATE_BODY}:{name}"
-        for name in set(DELIBERATELY_OPTIONAL) - set(GATE_BODY_INPUTS)
-    )
+    stale += sorted(f"{GATE_BODY}:{name}" for name in set(DELIBERATELY_OPTIONAL) - set(GATE_BODY_INPUTS))
     assert not stale, (
         f"exception(s) {stale} name inputs or outputs that no longer exist. "
         f"fix: remove them, or the exemption outlives the target it explains."

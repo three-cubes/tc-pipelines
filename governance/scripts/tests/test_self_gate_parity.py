@@ -26,6 +26,16 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 MAKEFILE = REPO_ROOT / "Makefile"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+PREPARE_AND_CHECK_COMMANDS = [
+    "uv lock",
+    "uv sync --locked",
+    "uv run --no-sync ruff check --force-exclude --select E,F,I,UP,B,S,RUF "
+    "--target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes "
+    "--exit-zero .",
+    "uv run --no-sync ruff format --force-exclude --line-length 110 --target-version py312 .",
+    "uv run --no-sync python assurance/run.py prepare",
+    "uv run --no-sync tc-fitness run",
+]
 
 
 def _project_config() -> dict:
@@ -49,8 +59,7 @@ def _make_check_commands(*, outer_make: bool = False) -> list[str]:
         env=env,
     )
     assert result.returncode == 0, (
-        f"{MAKEFILE.name}: cannot dry-run the local check target: "
-        f"{result.stderr.strip()}"
+        f"{MAKEFILE.name}: cannot dry-run the local check target: {result.stderr.strip()}"
     )
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
@@ -73,14 +82,7 @@ def test_self_gate_declares_the_contract_test_command() -> None:
 
 def test_make_check_runs_the_declared_fitness_gate() -> None:
     """Replacing the engine command would make local success diverge from CI."""
-    assert _make_check_commands() == [
-        "uv lock",
-        "uv sync --locked",
-        "uv run --no-sync ruff check --fix .",
-        "uv run --no-sync ruff format .",
-        "uv run --no-sync python assurance/run.py prepare",
-        "uv run --no-sync tc-fitness run",
-    ], (
+    assert _make_check_commands() == PREPARE_AND_CHECK_COMMANDS, (
         f"{MAKEFILE.name}: `check` must prepare deterministic mechanical and "
         "generated state before running the configured tc-fitness gate."
     )
@@ -88,23 +90,14 @@ def test_make_check_runs_the_declared_fitness_gate() -> None:
 
 def test_make_check_dry_run_is_stable_inside_an_outer_make() -> None:
     """GNU make directory notices must not become part of the command contract."""
-    assert _make_check_commands(outer_make=True) == [
-        "uv lock",
-        "uv sync --locked",
-        "uv run --no-sync ruff check --fix .",
-        "uv run --no-sync ruff format .",
-        "uv run --no-sync python assurance/run.py prepare",
-        "uv run --no-sync tc-fitness run",
-    ]
+    assert _make_check_commands(outer_make=True) == PREPARE_AND_CHECK_COMMANDS
 
 
 def test_ci_contract_tests_run_make_check() -> None:
     """A direct CI pytest invocation would bypass the configured local gate."""
     jobs = _ci_workflow().get("jobs") or {}
     steps = (jobs.get("tests") or {}).get("steps") or []
-    run_commands = [
-        step.get("run") for step in steps if isinstance(step, dict) and "run" in step
-    ]
+    run_commands = [step.get("run") for step in steps if isinstance(step, dict) and "run" in step]
     assert run_commands == ["make check"], (
         f"{CI_WORKFLOW.name}: the `tests` job runs {run_commands!r}. fix: invoke "
         "`make check` so CI executes the same configured tc-fitness gate as local "
@@ -127,8 +120,7 @@ def test_every_direct_ci_fitness_install_matches_the_locked_engine_tag() -> None
         )
     ]
     assert len(locked_refs) == 1, (
-        f"{PYPROJECT.name}: expected one immutable three-cubes-fitness dependency, "
-        f"found {locked_refs!r}."
+        f"{PYPROJECT.name}: expected one immutable three-cubes-fitness dependency, found {locked_refs!r}."
     )
     direct_refs = re.findall(
         r"git\+https://github\.com/three-cubes/tc-fitness@"
@@ -146,18 +138,14 @@ def test_contract_suite_configures_supported_parallel_pytest_execution() -> None
     """Removing xdist or ``-n auto`` would make the full required local gate miss its budget."""
     project = _project_config()
     dev_dependencies = project.get("dependency-groups", {}).get("dev", [])
-    assert any(
-        dependency.startswith("pytest-xdist") for dependency in dev_dependencies
-    ), (
+    assert any(dependency.startswith("pytest-xdist") for dependency in dev_dependencies), (
         f"{PYPROJECT.name}: the contract suite has no pytest-xdist dependency, so "
         "the supported `-n auto` acceleration cannot be installed. fix: declare "
         "pytest-xdist in the dev dependency group."
     )
     options = project.get("tool", {}).get("pytest", {}).get("ini_options", {})
     addopts = shlex.split(options.get("addopts", ""))
-    assert any(
-        addopts[index : index + 2] == ["-n", "auto"] for index in range(len(addopts))
-    ), (
+    assert any(addopts[index : index + 2] == ["-n", "auto"] for index in range(len(addopts))), (
         f"{PYPROJECT.name}: pytest addopts is {options.get('addopts')!r}, so the "
         "complete contract suite runs sequentially. fix: set `addopts = '-n auto'` "
         "while retaining the fitness step argv as `pytest -q`."

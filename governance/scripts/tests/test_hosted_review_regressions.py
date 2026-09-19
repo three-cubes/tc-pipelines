@@ -21,9 +21,7 @@ def test_arbitrary_hashed_files_cannot_satisfy_protected_admission(tmp_path):
     base = repository(tmp_path)
     inventory = tmp_path / "assurance/surfaces.yaml"
     data = yaml.safe_load(inventory.read_text())
-    data["surfaces"] = [
-        row for row in data["surfaces"] if row["hosted"]["boundary"] == "protected-live"
-    ]
+    data["surfaces"] = [row for row in data["surfaces"] if row["hosted"]["boundary"] == "protected-live"]
     inventory.write_text(yaml.safe_dump(data))
     (tmp_path / "assurance/hosted-cases.yaml").write_text("cases: {}\n")
     git(tmp_path, "add", ".")
@@ -47,10 +45,7 @@ def test_arbitrary_hashed_files_cannot_satisfy_protected_admission(tmp_path):
     now = datetime.now(UTC).isoformat()
     receipt = {
         "schema": "tc.sdlc/assurance/v1",
-        **{
-            key: expected[key]
-            for key in ("subject", "case_id", "expected", "candidate", "consumer")
-        },
+        **{key: expected[key] for key in ("subject", "case_id", "expected", "candidate", "consumer")},
         "actual": "pass",
         "execution": {
             **expected["execution"],
@@ -82,14 +77,10 @@ def test_pr_selection_binds_branch_head_and_tested_merge(tmp_path):
     git(tmp_path, "merge", "--no-ff", "-m", "test: merge", candidate)
     tested = git(tmp_path, "rev-parse", "HEAD")
     module = hosted_module()
-    selection = module.plan(
-        tmp_path, base, tested, tmp_path / "plan", candidate_head=candidate
-    )
+    selection = module.plan(tmp_path, base, tested, tmp_path / "plan", candidate_head=candidate)
     assert selection["head"] == tested
     assert selection["candidate_head"] == candidate
-    row = yaml.safe_load((tmp_path / "assurance/surfaces.yaml").read_text())[
-        "surfaces"
-    ][0]
+    row = yaml.safe_load((tmp_path / "assurance/surfaces.yaml").read_text())["surfaces"][0]
     expected = module.expectation_for(tmp_path, selection, row, {})
     assert expected["candidate"]["pipeline_commit"] == tested
     assert expected["candidate"]["pipeline_head_commit"] == candidate
@@ -97,9 +88,7 @@ def test_pr_selection_binds_branch_head_and_tested_merge(tmp_path):
         module.select(tmp_path, base, tested, candidate_head=base)
 
 
-@pytest.mark.parametrize(
-    "defect", [None, "head_sha", "status", "conclusion", "id", "run_attempt"]
-)
+@pytest.mark.parametrize("defect", [None, "head_sha", "status", "conclusion", "id", "run_attempt"])
 def test_pr_api_run_uses_candidate_branch_identity_not_tested_merge(defect):
     module = hosted_module()
     selection = {
@@ -221,9 +210,7 @@ def test_semgrep_scans_actual_fixture_source(tmp_path, finding):
         timeout=120,
     )
     data = json.loads(result.stdout)
-    assert (
-        "assurance/fixtures/python/project/src/control.py" in data["paths"]["scanned"]
-    )
+    assert "assurance/fixtures/python/project/src/control.py" in data["paths"]["scanned"]
     assert result.returncode == int(finding), result.stderr
     assert bool(data["results"]) is finding
 
@@ -280,9 +267,7 @@ def test_raw_job_log_transport_accepts_ansi_and_retains_http_failure(tmp_path):
     module = hosted_module()
     raw = b"2026-09-19T00:00:00Z \x1b[32mPASS\x1b[0m\n"
     (tmp_path / "job.log").write_bytes(raw)
-    handler = functools.partial(
-        http.server.SimpleHTTPRequestHandler, directory=tmp_path
-    )
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=tmp_path)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -341,10 +326,7 @@ def test_canonical_runtime_verifier_checks_real_protocol_receipt(tmp_path, defec
         "environments": {
             "prod": {
                 "targets": {
-                    "fixture": {
-                        key: {}
-                        for key in ("filesystem", "access", "deployment", "evidence")
-                    }
+                    "fixture": {key: {} for key in ("filesystem", "access", "deployment", "evidence")}
                 }
             }
         },
@@ -412,14 +394,11 @@ def test_canonical_runtime_verifier_checks_real_protocol_receipt(tmp_path, defec
             deployment_id="attacker-deployment",
         )
         evidence["expected_identity"] = {
-            key: evidence[key]
-            for key in ("source_sha", "image_digest", "deployment_id")
+            key: evidence[key] for key in ("source_sha", "image_digest", "deployment_id")
         }
         evidence["release_policy"] = {**policy, **evidence["expected_identity"]}
     path = tmp_path / "runtime.json"
-    path.write_text(
-        "arbitrary claimed success" if defect == "arbitrary" else json.dumps(evidence)
-    )
+    path.write_text("arbitrary claimed success" if defect == "arbitrary" else json.dumps(evidence))
     if defect:
         with pytest.raises(ValueError, match="canonical protected runtime"):
             verify_runtime(tmp_path, path, policy, "a" * 40)

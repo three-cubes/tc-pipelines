@@ -12,9 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("probe", choices=["gate", "mutation", "precommit"])
-    parser.add_argument(
-        "--output", type=Path, default=Path("artifacts/adapter-result.json")
-    )
+    parser.add_argument("--output", type=Path, default=Path("artifacts/adapter-result.json"))
     args = parser.parse_args()
     if args.probe == "gate":
         completed = subprocess.run(
@@ -37,11 +35,7 @@ def main():
             capture_output=True,
             check=False,
         )
-        if (
-            original.returncode != 0
-            or mutant.returncode != 1
-            or b"AssertionError" not in mutant.stderr
-        ):
+        if original.returncode != 0 or mutant.returncode != 1 or b"AssertionError" not in mutant.stderr:
             return 1
         result = {
             "status": "pass",

@@ -175,9 +175,7 @@ def resolve_installation_id(agent: AgentApp, assertion: str, repo: str) -> str:
 def apply_git_config() -> None:
     """Set canonical agent commit metadata in the current repository."""
     try:
-        subprocess.run(
-            ["git", "config", "--local", "user.name", CANONICAL_GIT_NAME], check=True
-        )
+        subprocess.run(["git", "config", "--local", "user.name", CANONICAL_GIT_NAME], check=True)
         subprocess.run(
             ["git", "config", "--local", "user.email", CANONICAL_GIT_EMAIL],
             check=True,
@@ -188,8 +186,7 @@ def apply_git_config() -> None:
             f"run inside a git repo, or drop --git-config and set it by hand."
         ) from None
     print(
-        f"agent-token: git metadata set to {CANONICAL_GIT_NAME} "
-        f"<{CANONICAL_GIT_EMAIL}>",
+        f"agent-token: git metadata set to {CANONICAL_GIT_NAME} <{CANONICAL_GIT_EMAIL}>",
         file=sys.stderr,
     )
 

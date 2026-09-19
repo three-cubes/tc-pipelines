@@ -81,9 +81,7 @@ def test_include_marker_is_resolved(name: str) -> None:
 @pytest.mark.parametrize("name", SKELETONS)
 def test_banner_is_present_after_render(name: str) -> None:
     rendered = render(name, SAMPLE_CONTEXT)
-    assert "🛑 Canonical standards" in rendered, (
-        f"{name} is missing the canonical-standards banner"
-    )
+    assert "🛑 Canonical standards" in rendered, f"{name} is missing the canonical-standards banner"
 
 
 @pytest.mark.parametrize("name", SKELETONS)

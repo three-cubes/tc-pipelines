@@ -384,9 +384,7 @@ def infer_repo(
     Returns ``"unknown"`` if nothing resolves, so the contract never silently
     invents a repo.
     """
-    team_repo_map = (
-        team_repo_map if team_repo_map is not None else DEFAULT_TEAM_REPO_MAP
-    )
+    team_repo_map = team_repo_map if team_repo_map is not None else DEFAULT_TEAM_REPO_MAP
 
     # 1. explicit repo:<name> label — the most authoritative signal, no fetch.
     for lbl in issue.labels:
@@ -484,11 +482,7 @@ def guardrails_validated(
 
     Any of those failing → ``False`` → the loop cannot arm.
     """
-    test_dir = (
-        Path(test_dir)
-        if test_dir is not None
-        else (Path(__file__).resolve().parent / "tests")
-    )
+    test_dir = Path(test_dir) if test_dir is not None else (Path(__file__).resolve().parent / "tests")
     # FAIL CLOSED (1): the harness FILE must exist. A missing/renamed harness must
     # never read as green — check before discovery even runs.
     if not test_dir.is_dir() or not any(test_dir.rglob(pattern)):
@@ -591,11 +585,7 @@ class HttpLinearSource:
         nodes: list[dict] = []
         for project_id in self._fetch_project_ids(initiative_id):
             nodes.extend(self._fetch_project_issue_nodes(project_id))
-        payload = {
-            "data": {
-                "initiative": {"projects": {"nodes": [{"issues": {"nodes": nodes}}]}}
-            }
-        }
+        payload = {"data": {"initiative": {"projects": {"nodes": [{"issues": {"nodes": nodes}}]}}}}
         return parse_initiative_issues(payload)
 
     def _fetch_project_ids(self, initiative_id: str) -> list[str]:
@@ -619,9 +609,7 @@ class HttpLinearSource:
                 {"pid": project_id, "first": ISSUE_PAGE_SIZE, "after": after},
             )
             _raise_on_graphql_errors(payload)
-            issues = ((payload.get("data") or {}).get("project") or {}).get(
-                "issues"
-            ) or {}
+            issues = ((payload.get("data") or {}).get("project") or {}).get("issues") or {}
             nodes.extend(issues.get("nodes") or [])
             page_info = issues.get("pageInfo") or {}
             after = page_info.get("endCursor")
@@ -774,11 +762,7 @@ def parse_initiative_issues(payload: dict) -> list[CandidateIssue]:
                         "state": (related.get("state") or {}).get("type"),
                     }
                 )
-            labels = [
-                n.get("name")
-                for n in (node.get("labels") or {}).get("nodes") or []
-                if n.get("name")
-            ]
+            labels = [n.get("name") for n in (node.get("labels") or {}).get("nodes") or [] if n.get("name")]
             out.append(
                 CandidateIssue.from_linear(
                     {
@@ -866,9 +850,7 @@ class Dispatcher:
     ) -> None:
         self.source = source
         self.config = config or loop.GuardrailConfig()
-        self.team_repo_map = (
-            team_repo_map if team_repo_map is not None else dict(DEFAULT_TEAM_REPO_MAP)
-        )
+        self.team_repo_map = team_repo_map if team_repo_map is not None else dict(DEFAULT_TEAM_REPO_MAP)
         self.default_user = default_user
         self.guardrails_validator = guardrails_validator
         self.clock = clock
@@ -876,18 +858,12 @@ class Dispatcher:
         # candidate-list description carried no **Repos:** line (see infer_repo).
         # Prefer an explicit resolver; else adapt a source that exposes the
         # DescriptionSource capability (e.g. HttpLinearSource.fetch_description).
-        self.description_resolver = _resolve_description_resolver(
-            source, description_resolver
-        )
+        self.description_resolver = _resolve_description_resolver(source, description_resolver)
 
-    def candidates(
-        self, initiative_id: str = ADP_INITIATIVE_ID
-    ) -> list[CandidateIssue]:
+    def candidates(self, initiative_id: str = ADP_INITIATIVE_ID) -> list[CandidateIssue]:
         return self.source.fetch(initiative_id)
 
-    def ready_queue(
-        self, initiative_id: str = ADP_INITIATIVE_ID
-    ) -> list[CandidateIssue]:
+    def ready_queue(self, initiative_id: str = ADP_INITIATIVE_ID) -> list[CandidateIssue]:
         return ready_queue(self.candidates(initiative_id))
 
     def contract_for(self, issue: CandidateIssue) -> DispatchContract:
@@ -1096,8 +1072,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit the plan as JSON (the machine dispatch contract) instead of "
-        "the human-readable view.",
+        help="Emit the plan as JSON (the machine dispatch contract) instead of the human-readable view.",
     )
     return parser
 

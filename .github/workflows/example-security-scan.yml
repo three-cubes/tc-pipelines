@@ -31,7 +31,9 @@ on:
         default: false
 
 permissions:
+  actions: read
   contents: read
+  security-events: write
 
 jobs:
   security-kairix:

@@ -161,9 +161,7 @@ lockfiles = [
         ),
     ],
 )
-def test_required_contract_accepts_multiline_lockfiles(
-    tmp_path: Path, name: str, contract: str
-) -> None:
+def test_required_contract_accepts_multiline_lockfiles(tmp_path: Path, name: str, contract: str) -> None:
     (tmp_path / name).write_text(contract.strip(), encoding="utf-8")
 
     result = _run(tmp_path)
@@ -199,9 +197,7 @@ lockfiles = [
 
 
 @pytest.mark.parametrize("required", ['"true"', "1", '"false"'])
-def test_malformed_required_value_cannot_silently_disable_scanning(
-    tmp_path: Path, required: str
-) -> None:
+def test_malformed_required_value_cannot_silently_disable_scanning(tmp_path: Path, required: str) -> None:
     (tmp_path / "pyproject.toml").write_text(
         "[tool.tc_fitness.core_checks.osv_scanner_sca]\n"
         f"required = {required}\n"
@@ -237,13 +233,10 @@ def test_required_contract_rejects_missing_or_malformed_lockfiles(
 
 
 @pytest.mark.parametrize("version", ["", "v2.2.4", "2.2", "latest", "2.2.4 # comment"])
-def test_required_contract_rejects_a_missing_or_non_exact_pin(
-    tmp_path: Path, version: str
-) -> None:
+def test_required_contract_rejects_a_missing_or_non_exact_pin(tmp_path: Path, version: str) -> None:
     version_line = f'scanner_version = "{version}"\n' if version else ""
     (tmp_path / "pyproject.toml").write_text(
-        "[tool.tc_fitness.core_checks.osv_scanner_sca]\nrequired = true\n"
-        + version_line,
+        "[tool.tc_fitness.core_checks.osv_scanner_sca]\nrequired = true\n" + version_line,
         encoding="utf-8",
     )
 
@@ -257,9 +250,7 @@ def test_composite_installs_and_verifies_only_when_lane_owns_provisioning() -> N
     document = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
     steps = (document.get("runs") or {}).get("steps") or []
     detect = next(step for step in steps if step.get("id") == "osv-contract")
-    install = next(
-        step for step in steps if step.get("name") == "Install declared OSV scanner"
-    )
+    install = next(step for step in steps if step.get("name") == "Install declared OSV scanner")
 
     assert "declared_osv_contract.py" in detect["run"]
     assert "uv pip install --python python --no-deps tomli==2.3.0" in detect["run"]
@@ -274,19 +265,13 @@ def test_composite_installs_and_verifies_only_when_lane_owns_provisioning() -> N
 
 def test_full_and_partitioned_sharded_workflow_provision_scanner_exactly_once() -> None:
     workflow = yaml.safe_load(
-        (REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml").read_text(
-            encoding="utf-8"
-        )
+        (REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml").read_text(encoding="utf-8")
     )
     jobs = workflow["jobs"]
 
-    unsharded_count = int(
-        jobs["quality"]["steps"][0]["with"]["provision-osv-scanner"] is True
-    )
+    unsharded_count = int(jobs["quality"]["steps"][0]["with"]["provision-osv-scanner"] is True)
     shard_owner = jobs["quality-shard"]["steps"][0]["with"]["provision-osv-scanner"]
-    partitioned_sharded_count = 4 * int(
-        _lane_owns_provisioning(shard_owner, shard_tier="matrix")
-    ) + int(
+    partitioned_sharded_count = 4 * int(_lane_owns_provisioning(shard_owner, shard_tier="matrix")) + int(
         jobs["quality-non-shard"]["steps"][1]["with"]["provision-osv-scanner"] is True
     )
 
@@ -296,12 +281,8 @@ def test_full_and_partitioned_sharded_workflow_provision_scanner_exactly_once() 
 
 def test_unpartitioned_shards_keep_required_scanner_available() -> None:
     workflow = yaml.safe_load(
-        (REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml").read_text(
-            encoding="utf-8"
-        )
+        (REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml").read_text(encoding="utf-8")
     )
 
-    shard_owner = workflow["jobs"]["quality-shard"]["steps"][0]["with"][
-        "provision-osv-scanner"
-    ]
+    shard_owner = workflow["jobs"]["quality-shard"]["steps"][0]["with"]["provision-osv-scanner"]
     assert _lane_owns_provisioning(shard_owner, shard_tier="") is True
