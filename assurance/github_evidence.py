@@ -8,7 +8,10 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-from receipt import ReceiptError, read
+try:  # Executable both as ``python assurance/...`` and as a package module.
+    from .receipt import ReceiptError, read
+except ImportError:  # pragma: no cover - exercised by the workflow entrypoint.
+    from receipt import ReceiptError, read
 
 MAX_DOWNLOAD = 16 * 1024 * 1024
 

@@ -141,6 +141,30 @@ Local tests and lint validate the implementation, not GitHub execution. Actual
 hosted resolution, permissions, image builds, downloads and artifact retention
 remain unverified until the reviewed branch is pushed and these cases run.
 
+## Live scanner qualification
+
+`live-scanner-qualification.yml` is the separate GitHub-hosted admission
+boundary for the Task 3 Checkov and OSV Scanner cases. It checks out the exact
+40-hex candidate, uses the one canonical `python-gate-body` scanner provisioner
+to install Checkov `3.2.531` and OSV Scanner `2.2.4`, then records compliant and
+violation results for each. It retains an attempt-specific artifact named
+`live-scanner-receipts-<run>-<attempt>`.
+
+Each `tc.sdlc/live-scanner-qualification/v1` receipt binds the candidate commit,
+fixture tree digest, executable digest, scanner version, and retained rule-data
+identity. Checkov records the digest of its installed packaged policy tree. OSV
+records the canonical digest of the scanner's actual remote response: OSV does
+not publish an immutable database revision per request, so this is explicitly a
+response identity rather than a claimed database-release version. The validator
+rejects a missing receipt, stale attempt, wrong tool pin, fixture replacement,
+or any tc-fitness `protocol-unit` ledger. A generic local adapter receipt cannot
+be substituted for this schema.
+
+The workflow is intentionally not a local command and is not included in normal
+PR fan-in. Local tests prove the writer refuses local execution; they do not
+claim a scanner result. A GitHub-hosted execution on the reviewed commit is
+still required before these receipts can be used by release admission.
+
 ## Disposable consumers
 
 `consumers.yaml` is the command and expected-result manifest. It runs the real

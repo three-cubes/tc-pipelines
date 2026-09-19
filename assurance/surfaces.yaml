@@ -33,6 +33,23 @@ surfaces:
       hermetic: [governance/scripts/tests/test_hosted_assurance.py]
       hosted: [.github/workflows/hosted-assurance.yml]
     sabotage: [missing-required-output]
+  - id: workflow.live-scanner-qualification
+    path: .github/workflows/live-scanner-qualification.yml
+    risk: control-plane
+    hosted:
+      boundary: assurance-harness
+      case: null
+      dependencies: ['assurance/live_scanners.py', 'assurance/fixtures/live-scanners/**', 'actions/python-gate-body/provision-scanners.sh', 'uv.lock', 'pyproject.toml']
+      release_probe: null
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted, live]
+    evidence:
+      structural: [governance/scripts/tests/test_live_scanner_qualification.py]
+      hermetic: [governance/scripts/tests/test_live_scanner_qualification.py]
+      hosted: [.github/workflows/live-scanner-qualification.yml]
+      live: [.github/workflows/live-scanner-qualification.yml]
+    sabotage: [fixture-identity-mismatch, wrong-scanner-version, protocol-ledger]
   - id: workflow.auto-merge-on-green
     path: .github/workflows/auto-merge-on-green.yml
     hosted:

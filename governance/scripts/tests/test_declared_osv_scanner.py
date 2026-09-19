@@ -14,6 +14,7 @@ pytestmark = pytest.mark.contract
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "actions" / "python-gate-body" / "declared_osv_contract.py"
 ACTION = REPO_ROOT / "actions" / "python-gate-body" / "action.yml"
+PROVISIONER = REPO_ROOT / "actions" / "python-gate-body" / "provision-scanners.sh"
 
 
 def _lane_owns_provisioning(value: bool | str, *, shard_tier: str) -> bool:
@@ -256,8 +257,10 @@ def test_composite_installs_and_verifies_only_when_lane_owns_provisioning() -> N
     assert "uv pip install --python python --no-deps tomli==2.3.0" in detect["run"]
     assert detect["if"] == "inputs.provision-osv-scanner == 'true'"
     assert install["if"] == "steps.osv-contract.outputs.required == 'true'"
-    assert "osv-scanner_SHA256SUMS" in install["run"]
-    assert '"$install_dir/osv-scanner" --version' in install["run"]
+    assert "provision-scanners.sh" in install["run"]
+    provisioner = PROVISIONER.read_text(encoding="utf-8")
+    assert "osv-scanner_SHA256SUMS" in provisioner
+    assert '"$install_dir/osv-scanner" --version' in provisioner
     assert "steps.osv-contract.outputs.version" in install["env"]["OSV_SCANNER_VERSION"]
 
 

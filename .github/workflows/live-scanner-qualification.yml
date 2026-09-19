@@ -1,0 +1,67 @@
+name: live scanner qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Exact 40-hex tc-pipelines candidate commit to qualify.
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      candidate:
+        description: Exact 40-hex tc-pipelines candidate commit to qualify.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: Native Checkov and OSV Scanner qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Reject a non-immutable candidate
+        env:
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::candidate must be an exact 40-hex commit" >&2
+            exit 1
+          }
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.candidate }}
+          fetch-depth: 1
+      - uses: ./actions/setup-uv-cached
+        with:
+          sync-args: --locked
+      - name: Provision pinned native scanners
+        env:
+          INSTALL_OSV_SCANNER: "true"
+          OSV_SCANNER_VERSION: "2.2.4"
+          INSTALL_CHECKOV_SCANNER: "true"
+          CHECKOV_VERSION: "3.2.531"
+        run: bash actions/python-gate-body/provision-scanners.sh
+      - name: Execute compliant and violation scanner fixtures
+        env:
+          CANDIDATE: ${{ inputs.candidate }}
+        run: >-
+          uv run --no-sync python assurance/live_scanners.py qualify
+          --candidate "$CANDIDATE" --output .assurance-live-scanners
+      - name: Summarise immutable scanner receipts
+        run: |
+          set -euo pipefail
+          cat .assurance-live-scanners/index.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain native scanner qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: live-scanner-receipts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .assurance-live-scanners/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
