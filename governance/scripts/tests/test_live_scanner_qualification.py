@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 from assurance.live_scanners import (
+    TOOLS,
     WORKFLOW_PATH,
     ReceiptError,
     digest,
@@ -67,7 +68,7 @@ def receipt(root: Path) -> dict[str, object]:
         "fixture": {"path": fixture_path, "digest": fixture_digest},
         "tool": {
             "name": "checkov",
-            "version": "3.2.531",
+            "version": TOOLS["checkov"],
             "executable_digest": "sha256:" + "b" * 64,
         },
         "rule_database": {
@@ -182,7 +183,7 @@ def test_receipt_rejects_an_unlisted_tc_fitness_ledger_even_with_matching_hashes
         validate_receipt(value, tmp_path, candidate="a" * 40)
 
 
-def test_live_workflow_uses_the_one_pinned_scanner_provisioner_and_retains_receipts():
+def test_live_workflow_uses_the_catalogued_scanner_provisioner_and_retains_receipts():
     workflow = yaml.safe_load((ROOT / WORKFLOW_PATH).read_text())
     steps = workflow["jobs"]["qualify"]["steps"]
     checkouts = [step for step in steps if "actions/checkout@" in str(step.get("uses", ""))]
@@ -195,14 +196,16 @@ def test_live_workflow_uses_the_one_pinned_scanner_provisioner_and_retains_recei
     provision = next(step for step in steps if step.get("name") == "Provision pinned native scanners")
     assert provision["run"].splitlines() == [
         "cd .tc-pipelines-trusted",
+        'export TC_SCANNER_PATH_FILE="$GITHUB_PATH"',
         "bash actions/python-gate-body/provision-scanners.sh",
     ]
     assert provision["env"] == {
         "INSTALL_OSV_SCANNER": "true",
-        "OSV_SCANNER_VERSION": "2.2.4",
         "INSTALL_CHECKOV_SCANNER": "true",
-        "CHECKOV_VERSION": "3.2.531",
+        "TC_SCANNER_BIN_DIR": "${{ runner.temp }}/tc-pipelines-scanners/bin",
     }
+    assert 'export TC_SCANNER_PATH_FILE="$GITHUB_PATH"' in provision["run"]
+    assert "2.6.0" not in provision["run"]
     execute = next(
         step for step in steps if step.get("name") == "Execute compliant and violation scanner fixtures"
     )
