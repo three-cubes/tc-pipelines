@@ -1,8 +1,8 @@
 # Canonical org-level rulesets
 
 Four organization rulesets govern branch protection across every three-cubes repo.
-tc-pipelines (reusable workflows + composite actions) and tc-fitness (the gate engine
-+ CORE checks) are the **paved path**: every rule below is enforced by a named component
+`tc-pipelines` (SDLC environment, orchestration, evidence and governance) and
+`tc-fitness` (fitness engine and check catalogue) are the shared product: every rule below is enforced by a named component
 of one of them, or by a native GitHub ruleset rule — nothing is aspirational.
 
 They replace the per-repo divergence: taz's two rulesets (`org-baseline-main` +

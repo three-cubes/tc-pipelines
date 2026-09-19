@@ -40,6 +40,10 @@ Canonical in this repo, prefixed IDs, **not** `ADR-###`. Full statements + sourc
 `STD-IDENTITY` · `STD-MERGE` · `RULESET-D1` · `CODEOWNERS-D1` · `GATE-HARDEN` · `QG-CONVERGE` ·
 `SONAR-HANDOFF` · `MUT-RATCHET` · `DEP-D1` · `REPO-MERGE` · `VERS-D1` · `WIF-D1..D5` · `COST-D1/2`.
 
+Accepted target decisions under implementation are `SDLC-PRODUCT-D1`,
+`SDLC-GRAPH-D1` and `SDLC-CATALOGUE-D1`. Their implementation state is recorded
+separately in `ADR-POLICY.md`; they do not redefine the in-force IDs above.
+
 ## tc-agent-zone — `docs/decisions/` (alias `TAZ-ADR-###`)
 
 | Alias | Home path | Status | Title / notes |

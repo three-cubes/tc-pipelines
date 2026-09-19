@@ -1,252 +1,195 @@
 # tc-pipelines
 
-**What this is:** the shared CI and deploy steps that every Three Cubes repo's GitHub Actions calls — instead of each repo keeping its own copy.
+`tc-pipelines` is the shared Three Cubes AI SDLC product. It provides the
+versioned development environment, task orchestration, CI workflows, release
+and deployment protocols, evidence contracts and governance templates used by
+Three Cubes repositories.
 
-**Why it exists:** quality checks, CI, and deploy used to be hand-copied across repos and drift apart. This repo holds one shared set of CI steps and deploy steps. Every repo uses these, so CI runs the exact same check you run on your laptop, and one fix here improves every repo at once.
+The canonical architecture is
+[`governance/standards/ai-sdlc-product-architecture.md`](governance/standards/ai-sdlc-product-architecture.md).
+[`RESOLVER.md`](RESOLVER.md) routes changes to their canonical home.
 
-> **Sibling repo:** [tc-fitness](https://github.com/three-cubes/tc-fitness) is the quality check itself — the program (`tc-fitness` CLI) that runs your linters, type-check, tests, coverage, security scan, and architecture rules and gives one pass/fail. This repo (tc-pipelines) is the CI and deploy steps that call that check.
+## Product model
 
-## How to use it (3 steps)
-
-1. **Add the workflow to your repo.** In your `.github/workflows`, call the shared check instead of writing your own job. The whole Python CI job is the caller YAML below — copy it and adjust the inputs.
-2. **Pin it to a release commit.** Every `uses:` names a full commit SHA with the tag in a trailing comment — `@<sha> # vX.Y.Z`. Never `@main`, and never a floating major: `@v1` only stays correct while something advances that tag on every release, and nothing does. You repin deliberately, so no change reaches you unasked. See [`governance/standards/supply-chain-pinning.md`](governance/standards/supply-chain-pinning.md).
-3. **Run the same check locally before you push.** Install the full dev env and run the check the same way CI does:
-   ```bash
-   make check
-   ```
-   Get it green locally first. The check you run locally is the exact same one CI runs.
-
-## What to expect
-
-- **Green merges itself.** When your PR's checks pass, it merges without waiting for a human reviewer.
-- **Red you fix.** A failing check is never bypassed. If it is green locally but red in CI, that is a bug in your local setup — fix the setup, do not force the merge.
-- **Changes to the checks need a human.** The only change that needs a human approval is a change to the files that define the quality check or CI themselves. This stops anyone — person or agent — from quietly weakening the check that protects every repo.
-
-## Where to go next
-
-- The canonical standard and full index: [`governance/STANDARDS.md`](governance/STANDARDS.md) — improve that one standard; do not fork your own copy.
-- The quality check itself: [tc-fitness](https://github.com/three-cubes/tc-fitness).
-- The current package-release path: [`governance/standards/sdlc-release-workflow.md`](governance/standards/sdlc-release-workflow.md) — prepare the feature PR once, merge it, then create or confirm the immutable tag and GitHub Release from the reviewed merge.
-- The product release and deployment path: [`governance/standards/ci-release-deployment-architecture.md`](governance/standards/ci-release-deployment-architecture.md) — local evidence, exact-merge admission, candidate publication, deployment handoff and PVT.
-- Runtime rollback, evidence and cleanup: [`governance/standards/infrastructure-deployment-fitness.md`](governance/standards/infrastructure-deployment-fitness.md) and [`governance/standards/deployment-verification.md`](governance/standards/deployment-verification.md).
-- Changing a check or a pipeline: [`governance/standards/improving-fitness-gates.md`](governance/standards/improving-fitness-gates.md) — converge up to the one home, tag-release, consumer-repin.
-- Deploy setup, migration, and cost notes: [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) · [docs/MIGRATION.md](docs/MIGRATION.md) · [docs/COST-OPTIMIZATION.md](docs/COST-OPTIMIZATION.md).
-
-**License:** Apache-2.0 (see [`LICENSE`](LICENSE)). This repo is public and used by both public and private org repos. It holds no credentials of any kind.
-
----
-
-The rest of this README is reference detail: the workflows you can call, the inputs they take, and the deploy and governance setup. The repo has two halves:
-
-- **CI & quality** — run the shared quality check, scan with Sonar, release, mutation-test, build containers.
-- **Azure-VM deploy** — snapshot, apply, and smoke-test a VM on merge.
-
----
-
-## Part 1 — CI & quality check
-
-The Python quality check is defined **once**, as a program you run: [tc-fitness](https://github.com/three-cubes/tc-fitness) (the `tc-fitness` CLI). The tool knows HOW to run the check; your repo says WHAT to check. Each repo declares what to check — dependency install, the exact pytest invocation (test dirs + `--cov` roots + markers + `-n auto`), ruff/bandit targets, the detect-secrets baseline, and its check-catalogue module — in a `[tool.tc_fitness]` block in `pyproject.toml` (or a `.tc-fitness.toml` file). Then:
-
-- **CI** runs it via [`python-quality-gate.yml`](.github/workflows/python-quality-gate.yml), which is just `checkout → setup-uv-cached → uv run tc-fitness run`.
-- **Local** `make check` runs the *same* `uv run tc-fitness run`.
-
-Both run the same program reading the same config, so the full check you run
-locally is the exact same one CI runs. For fast PR feedback, callers can opt in
-to the diff-scoped smoke tier by having the workflow write a changed-file list
-and passing that list to `tc-fitness run --changed-files-from`. Anything
-repo-specific is config the tool reads — never baked into the workflow.
-`tc-agent-zone` and `kairix` are current consumers.
-
-```yaml
-# caller in a three-cubes repo — the WHOLE python job:
-jobs:
-  quality:
-    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@<sha> # vX.Y.Z
-    with:
-      python-version: "3.12"
-      sync-args: "--locked --all-packages --group dev"   # workspace repo + CI tools
-      run-node: true                          # taz's TS half
-    secrets:
-      gh-token: ${{ secrets.GITHUB_TOKEN }}
+```text
+consumer sdlc.yaml + product tests
+                 |
+                 v
+       tc-pipelines SDLC release
+       ├── @three-cubes/tc-sdlc
+       ├── canonical OCI development image
+       ├── reusable GitHub workflows
+       ├── release/deployment protocols
+       └── governance library
+                 |
+                 v
+          tc-fitness evaluation
+                 |
+                 v
+       immutable candidate + evidence
+                 |
+                 v
+       production PVT or rollback
 ```
 
-### Reusable workflows
+`tc-fitness` is a core component of the SDLC product. `tc-pipelines` supplies
+the environment, task graph and evidence handoff. `tc-fitness` supplies the
+executable check catalogue and evaluation semantics. A coordinated
+`tc-pipelines` release records the compatible `tc-fitness` version.
 
-| Workflow | Purpose |
+Consumer repositories retain their source, product tests, qualification
+journeys and deployment values. They consume the shared product through one
+small declaration, one generated lock, thin Make targets and thin hosted
+workflow callers.
+
+## Current delivery state
+
+The repository currently ships the reusable workflows, composite actions,
+release/deployment contracts, governance library and `tc-fitness` integration.
+The executable-foundation tranche adds the `tc-sdlc` package, canonical image,
+task graph and coordinated release catalogue described by the architecture.
+
+Current workflows remain supported during that migration. Their responsibilities
+move behind the shared package and task graph before the old entrypoints are
+removed.
+
+Track the delivery order and exit criteria in
+[`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md). Follow
+[`docs/MIGRATION.md`](docs/MIGRATION.md) when moving a consumer.
+
+## Stable consumer commands
+
+The target consumer interface is:
+
+| Command | Purpose |
 |---|---|
-| [`python-quality-gate.yml`](.github/workflows/python-quality-gate.yml) | The shared Python check → `uv run tc-fitness run`. Sets up a pinned, cached uv venv, then runs the tool against the repo's `[tool.tc_fitness]` config. |
-| [`meta-quality-gate.yml`](.github/workflows/meta-quality-gate.yml) | Self-CI for **non-Python** repos (this repo, docs/action collections). Repo-agnostic hygiene checks — actionlint, yamllint, license-present, branch-naming — each one you can turn on or off; all caller inputs are bound to env vars before any shell runs (injection-safe). |
-| [`release-on-merge.yml`](.github/workflows/release-on-merge.yml) | Resolves a changed preparation receipt from the exact reviewed merge commit and calls the release spine with that immutable SHA. |
-| [`release.yml`](.github/workflows/release.yml) | Shared idempotent release spine: validates the committed preparation receipt, extracts the matching CHANGELOG section, creates or confirms the exact-SHA annotated tag, and creates or confirms the GitHub Release as `three-cubes-agent[bot]`. Repo-specific checks stay in the caller. |
-| [`prepare-release-metadata`](actions/prepare-release-metadata/action.yml) | Composite action for the current feature branch: accepts an exact version or a semantic bump, promotes populated `Unreleased` notes, updates the version source and uv lock together, and records the receipt that triggers release after merge. |
-| [`mutation-gate.yml`](.github/workflows/mutation-gate.yml) | Mutation/parity check scoped to the diff; keeps a survivors baseline that can only improve, never get worse. |
-| [`docker-build-publish.yml`](.github/workflows/docker-build-publish.yml) | Build and optionally push a container image. |
-| [`fresh-install-smoke.yml`](.github/workflows/fresh-install-smoke.yml) | Clean-image install smoke test via compose. |
-| [`example-callers.yml`](.github/workflows/example-callers.yml) + `example-<reusable>.yml` | Static **self-check of every reusable workflow above** — each reusable owns one `example-<reusable>.yml` file (a `workflow_call` reusable) that statically validates its call shape; a caller mismatch fails *here*, not in a consumer's pipeline. `example-callers.yml` is a thin `workflow_dispatch` dispatcher that fans out to them. Split one-file-per-reusable so parallel PRs no longer collide on a shared file. |
+| `make bootstrap` | Materialise the released environment and dependencies. |
+| `make prepare` | Apply deterministic generators, formatting, locks and manifest repairs. |
+| `make check` | Run affected checks, including the configured `tc-fitness` profile. |
+| `make check-all` | Run the complete verification graph. |
+| `make qualify` | Build and exercise the immutable release candidate. |
+| `make deploy` | Submit the qualified candidate to the protected deployment path. |
 
-Each workflow's inputs, secrets, and defaults are documented in the header of the workflow file. The two main consumer surfaces:
+Until the executable foundation is released, existing consumers continue to
+use their current `make check` and reusable-workflow callers. Migration replaces
+those internals while retaining these stable command names.
 
-#### `python-quality-gate.yml` — key inputs
+## Repository contents
 
-| Input | Default | Purpose |
-|---|---|---|
-| `python-version` | `"3.12"` | Python uv resolves against |
-| `uv-version` | `"0.12.5"` | pinned uv version |
-| `fetch-depth` | `2` | checkout depth (`0` for full-history scans) |
-| `sync-args` | `"--locked --all-packages --group dev"` | `uv sync` args; CI tools are declared in the locked `dev` group |
-| `tc-fitness-args` | `"run"` | args to the tool's CLI (e.g. `run --changed-files-from .tc-fitness-changed-files`) |
-| `write-changed-files` | `false` | write a newline-delimited PR/push diff file before the gate |
-| `changed-files-path` | `".tc-fitness-changed-files"` | path written when `write-changed-files` is true |
-| `pre-steps` / `post-steps` | `""` | bash run before / after the check |
-| `upload-coverage-artifact` | `true` | upload coverage XML for a downstream consumer job |
-| `run-node` | `false` | run the pnpm/TS half (separate ecosystem) |
-
-Diff-scoped PR smoke example:
-
-```yaml
-jobs:
-  quality:
-    uses: three-cubes/tc-pipelines/.github/workflows/python-quality-gate.yml@<sha> # vX.Y.Z
-    with:
-      write-changed-files: true
-      changed-files-path: .tc-fitness-changed-files
-      tc-fitness-args: run --changed-files-from .tc-fitness-changed-files
-```
-
-**Secret:** `gh-token` (optional) — `GITHUB_TOKEN` for the tool's secret-scan changed-file diff; falls back to `github.token`.
-
-#### `meta-quality-gate.yml` — key inputs
-
-| Input | Default | Purpose |
-|---|---|---|
-| `run-actionlint` / `run-yamllint` / `run-license` / `run-branch-naming` | `true` | turn each hygiene check on or off |
-| `yamllint-paths` | `".github/workflows actions"` | paths yamllint scans |
-| `license-file` / `spdx-id` | `"LICENSE"` / `"Apache-2.0"` | license check target + expected SPDX id |
-| `branch-name-pattern` | `^[a-z][a-z0-9-]*/[a-z0-9][a-z0-9_/-]*$` | org `<user>/<slug>` branch shape |
-
-### Composite actions (CI install steps)
-
-| Action | Purpose |
+| Path | Purpose |
 |---|---|
-| [`actions/setup-uv-cached`](actions/setup-uv-cached/action.yml) | The org-standard install step: pinned `astral-sh/setup-uv` (cache on) + `uv sync <sync-args>` from the repository's `pyproject.toml` and `uv.lock`. |
-| [`actions/pre-commit-cached`](actions/pre-commit-cached/action.yml) | `setup-uv-cached` + `pre-commit/action`, from one source. Self-pins `setup-uv-cached` at a release SHA. |
-| [`actions/license-present`](actions/license-present/action.yml) | Asserts a top-level LICENSE declaring the expected SPDX id — the whole-repo provenance check. Used by `meta-quality-gate.yml`'s license check. |
-| [`actions/setup-cloudflared`](actions/setup-cloudflared/action.yml) | Installs cloudflared 2026.8.3 from the reviewed release catalogue, verifies the official asset digest, executable digest and reported version, then exposes those identities and the executable path. `update_catalogue.py` checks the latest stable release separately for a dependency PR. |
-| [`actions/cloudflare-access-ssh`](actions/cloudflare-access-ssh/action.yml) | Streams one typed deployment request through Cloudflare Access to a forced-command SSH account. It verifies the executable again before credentials are read, pins the SSH host key, bounds time and output, and terminates the process group on failure. |
+| `governance/standards/` | Canonical AI SDLC, development, testing, release and deployment standards. |
+| `governance/skeletons/` | Consumer repository declarations and authoring entrypoints. |
+| `.github/workflows/` | Hosted workflow entrypoints and current migration-layer orchestration. |
+| `actions/` | Reusable CI composite actions. |
+| `.github/actions/` | Hosted deployment composite actions. |
+| `infra/` | Shared cloud identity and infrastructure modules. |
+| `tools/` | Trusted host and platform tooling. |
+| `packages/tc-sdlc/` | Shared SDLC package; introduced by the executable-foundation tranche. |
+| `images/sdlc/` | Canonical development image; introduced by the executable-foundation tranche. |
 
-`cloudflare-access-ssh` sends no remote command. Its stdin is an exact-key
-`tc.deploy.request.v1` JSON object containing the repository, immutable release
-and workflow SHAs, Actions run identity, environment and an allowlisted
-operation. The target account's forced command validates those fields again,
-maps the operation to a root-owned handler, serialises the deployment, and
-emits the deployment receipt. A zero exit without a matching final receipt
-fails. The action outputs the receipt identity, verified cloudflared version
-and executable digest, and the path to the canonical response JSON so downstream
-promotion consumes validated data instead of parsing logs. Store the SSH
-private key and Cloudflare service token in the consumer's secret store and
-hydrate them for one job only.
+## tc-fitness integration
 
-Cloudflared 2026.8.3 is the current reviewed release. Its headless Access SSH
-service-token journey remains live-unverified because upstream issue
-[#1674](https://github.com/cloudflare/cloudflared/issues/1674) reports that the
-Access SSH/TCP client can start an interactive login before applying service
-token headers. Each mutating operation performs a non-mutating `status` journey
-first and fails closed unless the target returns a matching receipt. A live
-status receipt permits the mutation; local process tests do not make that claim.
+Consumers declare their fitness configuration in `sdlc.yaml` and the native
+`tc-fitness` configuration file. `tc-sdlc` resolves the compatible engine from
+the coordinated release and executes the selected profile as a graph task.
 
----
+The standard profiles are:
 
-## Part 2 — Azure-VM deploy
+| Profile | Purpose |
+|---|---|
+| `smoke` | Warm affected feedback under 60 seconds. |
+| `full` | Complete repository verification and release admission. |
+| `nightly` | Soak, mutation and broad compatibility evaluation. |
 
-**The main consumer is [tc-agent-zone](https://github.com/three-cubes/tc-agent-zone)'s `deploy-on-merge` pipeline** — it calls [`azure-vm-deploy.yml`](.github/workflows/azure-vm-deploy.yml) at a release SHA to establish a recovery point → apply → smoke on every merge to `main`. The default recovery point is a host snapshot. The governed container-only deployment path uses a protected path/configuration backup plus an immutable predecessor image and requires `snapshot-policy=forbidden`, `skip-snapshot=true`, and the verified `container-rollback-receipt-digest`; see [`snapshot-before-apply.md`](governance/standards/snapshot-before-apply.md). Other repos depend on this workflow's inputs, secrets, and permissions staying the same. Ship a breaking change as a new release and let each consumer repin on its own schedule.
+The current migration-layer Python workflow runs `uv run tc-fitness run` from
+the consuming repository's `[tool.tc_fitness]` or `.tc-fitness.toml`
+configuration. This remains the compatibility path until the task graph owns
+the invocation.
 
-Every Three Cubes repo that deploys to Azure VMs does it the same way: composite actions for the small steps (snapshot, WIF login, apply via run-command, smoke check), one reusable workflow for the end-to-end flow, and a Bicep module for the Azure-side identity. Consumers call these instead of re-implementing them.
+## Hosted workflow surfaces
 
-### Quick start (new consumer repo)
-
-```bash
-# 1. Provision the WIF identity for your repo (one-time, ~2 min)
-az deployment group create \
-  --resource-group RG-AGENTS-CORE \
-  --template-file https://raw.githubusercontent.com/three-cubes/tc-pipelines/v1/infra/bicep/ci-deploy-identity.bicep \
-  --parameters repoOwner=three-cubes repoName=YOUR-REPO keyVaultName=kv-tc-agents
-
-# 2. Populate GitHub repo variables from the outputs (AZURE_CLIENT_ID / TENANT_ID / SUBSCRIPTION_ID)
-#    See docs/MIGRATION.md for the exact az/gh sequence.
-
-# 3. Create the production environment
-gh api -X PUT /repos/three-cubes/YOUR-REPO/environments/production --silent
-
-# 4. Add a thin workflow in your repo that calls azure-vm-deploy.yml at a release SHA (see docs/MIGRATION.md).
-```
-
-### Azure deploy surfaces
+The current reusable workflows remain supported while their implementation is
+moved behind `tc-sdlc`:
 
 | Surface | Purpose |
 |---|---|
-| [`.github/workflows/azure-vm-deploy.yml`](.github/workflows/azure-vm-deploy.yml) | Reusable — WIF → governed recovery point → apply → smoke for one or many VMs. |
-| [`.github/actions/wif-azure-login`](.github/actions/wif-azure-login/action.yml) | Wraps `azure/login@v2` with the Three Cubes WIF convention. |
-| [`.github/actions/snapshot-azure-vm-disk`](.github/actions/snapshot-azure-vm-disk/action.yml) | OS-disk snapshot before destructive ops. |
-| [`.github/actions/apply-on-vm-via-runcommand`](.github/actions/apply-on-vm-via-runcommand/action.yml) | Runs a script on a VM via `az vm run-command`. |
-| [`.github/actions/smoke-systemctl`](.github/actions/smoke-systemctl/action.yml) | Post-deploy `systemctl is-active` rollup. |
-| [`infra/bicep/ci-deploy-identity.bicep`](infra/bicep/ci-deploy-identity.bicep) | Provisions the managed identity + federated cred + RBAC roles. |
+| `python-quality-gate.yml` | Current Python and `tc-fitness` compatibility gate. |
+| `meta-quality-gate.yml` | Workflow/action repository hygiene. |
+| `docker-build-publish.yml` | Build and publish an immutable container image. |
+| `actions/prepare-release-metadata` | Prepare release metadata on the candidate branch: update the version source and uv lock, promote changelog notes and commit the preparation receipt. |
+| `release-on-merge.yml` and `release.yml` | Publish the already prepared release from the exact reviewed merge commit. Both validate the committed preparation receipt; neither prepares it. |
+| `azure-vm-deploy.yml` | Current Azure VM deployment compatibility path. |
+| `.github/actions/prune-azure-vm-snapshots` | Delete expired recovery snapshots for the current Azure compatibility path; each snapshotting consumer schedules it. |
+| `mutation-gate.yml` | Diff-scoped mutation evaluation. |
+| `fresh-install-smoke.yml` | Clean environment installation exercise. |
+| `independent-verifier.yml` | Independent evidence verification. |
 
-Design notes: [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) · migration: [docs/MIGRATION.md](docs/MIGRATION.md) · cost: [docs/COST-OPTIMIZATION.md](docs/COST-OPTIMIZATION.md).
+New workflow logic belongs in the task graph when it can run locally. Hosted
+workflow YAML owns GitHub credentials, protected environments, runner allocation
+and GitHub event handling.
 
-> **Layout note:** the CI install steps live under top-level `actions/`; the Azure deploy composites live under `.github/actions/` (referenced by `azure-vm-deploy.yml` via local `./.github/actions/...` paths). Both are valid composite-action locations.
+## Release and deployment
 
----
+A release candidate is built once and identified by an immutable OCI digest.
+Local qualification, CI qualification and production deployment consume that
+digest. GitHub records build provenance; deployment records the runtime identity,
+PVT result, rollback result and cleanup result.
 
-## Part 3 — Repo governance templates
+The generic deployment transaction belongs here. Product state, knowledge
+harvesting, runtime configuration and PVT journeys belong in the consumer.
+Ansible converges host prerequisites and Docker Compose applies the qualified
+single-host application stack.
 
-[`governance/`](governance/) holds the standard baseline a new repo adopts so its branch protection, review routing, dependency policy, and local check match the shared setup every repo uses: the `main` branch ruleset (`rulesets/main.json`), `CODEOWNERS`, `dependabot.yml`, and `pre-commit-config.yaml`. One command wires a repo from these — [`bootstrap-repo-governance.sh`](governance/scripts/bootstrap-repo-governance.sh). See [`governance/README.md`](governance/README.md).
+The current container-only deployment path uses the protected-state and
+predecessor-image recovery contract documented in
+[`snapshot-before-apply.md`](governance/standards/snapshot-before-apply.md) while
+the typed Ansible/Compose transaction is implemented.
 
----
+The complete contract is
+[`governance/standards/ci-release-deployment-architecture.md`](governance/standards/ci-release-deployment-architecture.md).
 
-## Part 4 — Agent identity
+## Governance and identity
 
-Agents create local commits with canonical `three-cubes-agent[bot]` metadata and no credential. Remote writes act as a dedicated **GitHub App**, not a person's account, so PRs retain clean authorship and the audit log records the actual remote actor without shared personal credentials.
+Ordinary work merges on a green gate. Changes to SDLC control-plane files are
+reviewed by the human code owner. Agents create local commits with canonical
+`three-cubes-agent[bot]` metadata; trusted brokers and GitHub Actions use
+short-lived GitHub App credentials for remote writes.
 
-The canonical org App is `three-cubes-agent`. **Per-agent Apps** (`tc-agent-builder`/`shape`/`consultant`/`growth`) give each agent its own least-privilege remote identity. The canonical set, capability-vs-enforcement HITL model, and credential boundary live in [`governance/agent-app-manifests/`](governance/agent-app-manifests/) + [`governance/agent-sdlc-access-and-hitl.md`](governance/agent-sdlc-access-and-hitl.md).
+The access contract is
+[`governance/agent-sdlc-access-and-hitl.md`](governance/agent-sdlc-access-and-hitl.md).
+The canonical standards index is
+[`governance/STANDARDS.md`](governance/STANDARDS.md).
 
-| Context | Credential path |
-|---|---|
-| Local commit | Set repository-local `user.name` and `user.email` to the canonical bot identity; no token or network access is involved. |
-| Off-CI remote write | Ask the trusted host broker to run the intended `git`, `gh`, or API operation. It mints a repository-scoped, short-lived App token, binds it to that operation, and never returns credentials to the agent harness. |
-| GitHub Actions | [`.github/actions/github-app-token`](.github/actions/github-app-token/action.yml) uses WIF to mint a short-lived token for authorised steps. Actions secrets materialise only in authorised jobs and are not a local plaintext retrieval mechanism. |
-| Broker backend | [`tools/`](tools/) provides `agent-token` for the trusted broker and restricted platform-operator diagnosis; it is not a direct agent-harness interface. |
+## Contributing
+
+Read, in order:
+
+1. [`AGENTS.md`](AGENTS.md)
+2. [`RESOLVER.md`](RESOLVER.md)
+3. [`governance/STANDARDS.md`](governance/STANDARDS.md)
+4. the standard governing the surface being changed
+
+Run the current self-gate with:
 
 ```bash
-# local commit metadata; this does not authenticate a remote write
-git config --local user.name 'three-cubes-agent[bot]'
-git config --local user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com'
+make check
 ```
 
-```yaml
-# in a consumer repo workflow — authenticate git/gh as the agent App:
-permissions: { id-token: write, contents: read }
-steps:
-  - id: app
-    uses: three-cubes/tc-pipelines/.github/actions/github-app-token@<sha> # vX.Y.Z
-    with:
-      client-id:       ${{ vars.AZURE_CLIENT_ID }}
-      tenant-id:       ${{ vars.AZURE_TENANT_ID }}
-      subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-  - run: gh pr merge --auto --merge "$PR_URL"
-    env: { GH_TOKEN: ${{ steps.app.outputs.token }} }
-```
-
-CI prerequisite: the repo's WIF identity needs Key Vault Secrets User on `kv-tc-agents` — provision once with `ci-deploy-identity.bicep keyVaultName=kv-tc-agents` (Part 2 quick start) and set the `AZURE_*` repo variables. Local agent harnesses do not receive that role; their host broker owns the corresponding off-CI access.
-
----
-
-## Principles
-
-- **One definition of the check.** The Python check is the `tc-fitness` program + the consuming repo's `[tool.tc_fitness]` config. CI and local both run it.
-- **Config lives in GitHub org/repo variables + secrets and each repo's `[tool.tc_fitness]`, never hardcoded here.** Reusable workflows take only orchestration-level config as `inputs`.
-- **Pin everything to a commit SHA** — third-party actions, this repo's reusables as consumers call them, and this repo's own composites as it self-references them. A floating major is not a pin; `test_uses_ref_pinning` and `test_self_pin_freshness` enforce both halves.
-- **Public, but no secrets.** Zero credentials in this repo.
+The repository will move its own self-gate behind `tc-sdlc` during the
+executable-foundation tranche. Verification evidence requires a complete
+terminal result from the current command.
 
 ## Versioning
 
-Consumers pin the release COMMIT with the tag in a trailing comment (`@<sha> # vX.Y.Z`) and repin deliberately, so nothing rolls out until they move the pin. The `vX.Y.Z` tags mark those baselines. This repo self-pins its own composites the same way, one release behind the tree by construction — see [`governance/standards/supply-chain-pinning.md`](governance/standards/supply-chain-pinning.md).
+Consumers pin immutable release identities. The coordinated release catalogue
+binds the npm package version, canonical image digest, workflow commit, schema
+version and compatible `tc-fitness` version. The upgrade command updates these
+surfaces in one reviewable change.
+
+Existing direct workflow SHA pins remain valid during migration and are removed
+after each consumer reaches the converged state.
+
+## Licence
+
+Apache-2.0. See [`LICENSE`](LICENSE).

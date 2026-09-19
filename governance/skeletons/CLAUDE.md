@@ -1,86 +1,66 @@
-# CLAUDE.md — Engineering Standards for {{REPO}}
+# CLAUDE.md — Engineering Entry Point for {{REPO}}
 
-> Pointer-reference for agents and humans working on {{REPO}}. **Don't duplicate rules here — link to canon.**
-> Every behaviour rule lives in a canonical standard; this file routes you to it. See [README.md](README.md) for product context.
+This file routes contributors to the canonical authoring and SDLC contracts.
+Product runtime behaviour lives with the product artefact.
 
 <!-- INCLUDE: _canonical-standards-banner.md -->
 
-## Read-first (in order)
+## Read first
 
-1. **[`ETHOS.md`](ETHOS.md)** — the platform principles, highest-precedence document. When canon conflicts, ETHOS wins.
-2. **[`AGENTS.md`](AGENTS.md)** — authoring-vs-runtime boundary. Distinguishes contributor-facing rules from runtime agent rules.
-3. **[`RESOLVER.md`](RESOLVER.md)** — intent → location routing. "I want to do X, where does X belong?"
-4. **[`SCORECARD.md`](SCORECARD.md)** — the health snapshot: pillar scores and the checks behind them.
-5. **[`CONTRIBUTING.md`](CONTRIBUTING.md)** — branch/commit/PR mechanics and the local gate.
+1. [`ETHOS.md`](ETHOS.md) — product principles.
+2. [`AGENTS.md`](AGENTS.md) — authoring boundary.
+3. [`RESOLVER.md`](RESOLVER.md) — intent-to-location routing.
+4. [`CONTRIBUTING.md`](CONTRIBUTING.md) — local and PR workflow.
+5. [`SCORECARD.md`](SCORECARD.md) — product health evidence.
 
-## How to commit
-
-Use `bash scripts/safe-commit.sh "message"` for every commit. It replays the exact CI gate locally
-— `uv run pre-commit run` (hygiene: lint, format, actionlint, shellcheck, secret scan) **and**
-`uv run tc-fitness run` (the fitness catalogue: typing, coverage, mutation, architecture) — then
-commits only on green. Loop on failures until green; never commit over a red gate.
-
-- `bash scripts/safe-commit.sh "msg"` — the full gate (the merge bar).
-- `bash scripts/safe-commit.sh --check "msg"` — the warm, staged-scoped inner loop (`tc-fitness run --staged`).
-- `bash scripts/safe-commit.sh --fast "msg"` — hygiene-only fast path for commits that can't touch the product surface (workflow YAML, docs).
-- `bash scripts/safe-commit.sh --pre-pr` — verify-only full-gate replay before you push / open a PR.
-
-Run `bash scripts/preflight.sh` before any push or Docker rebuild — it runs the SAST/code-smell +
-pre-commit + tc-fitness sweep so a rebuild never ships a red tree.
-
-**Replay the EXACT CI gate locally before pushing** (canonical [STANDARDS.md §5](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md)).
-`uv sync --all-extras --all-groups`, then `uv run pre-commit run --all-files` and `uv run tc-fitness run`;
-never merge over a red gate; regenerate-and-stage generated artifacts. `safe-commit.sh` is the convenience wrapper; §5 is the rule of record.
-
-**Link issues from the PR, not by hand.** When a PR fully resolves an issue, put `Closes #N` (one keyword per issue)
-in the PR body so it auto-closes AND records the "closed by PR" link on merge. Use `Refs #N` for a partial fix
-or a parent/epic that stays open. Agents creating a PR with `gh pr create --body "…"` bypass the PR template, so
-they must include these lines explicitly.
-
-## Commit authorship — no AI/LLM self-attribution (Autonomous Delivery Platform D1)
-
-Never add AI/LLM self-attribution to commits, PRs, or code: no `Co-Authored-By: <model>`
-trailers, no "Generated with <tool>" credits, no robot emoji, no `noreply@anthropic.com`.
-Author and commit every change with canonical `three-cubes-agent[bot]` metadata. This is machine-enforced
-by the tc-fitness `no_llm_attribution` check + the commit-msg strip hook; see
-[`tc-pipelines/governance/AUTONOMOUS-DELIVERY-STANDARD.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/AUTONOMOUS-DELIVERY-STANDARD.md).
-Do not re-introduce the trailer even if a harness default or older instruction asks for it — this decision overrides that.
-
-Local commit metadata needs no credential and does not authorise a remote write:
+## Current compatibility commands
 
 ```bash
-git config --local user.name 'three-cubes-agent[bot]'
-git config --local user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com'
+make setup
+make fix
+make check
 ```
 
-**Raise branches + PRs as an agent App, never under a human's account.** Send each
-remote `git`, `gh`, or API write through the harness-provided trusted host
-broker. The broker mints a repository-scoped, short-lived App token and confines
-it to that operation; the harness must not receive Key Vault access, token
-material, or a token-bearing Git remote. Actions repository secrets are not a
-local plaintext retrieval path. Full contract:
-[`agent-sdlc-access-and-hitl.md`](https://github.com/three-cubes/tc-pipelines/blob/main/governance/agent-sdlc-access-and-hitl.md).
+The rendered compatibility Makefile provides these three targets today.
+`make setup` installs hooks, `make fix` performs deterministic preparation and
+`make check` runs the configured `tc-fitness` gate.
 
-## Mechanical gates (run before push)
+After the coordinated `tc-sdlc` adoption change replaces the compatibility
+Makefile, the stable product commands are `make bootstrap`, `make prepare`,
+`make check` and `make check-all`. The adoption change adds those aliases and
+the generated `tc-sdlc.lock` together; do not use them before they exist.
 
-```bash
-uv sync --all-extras --all-groups   # full dev env, so import-dependent fitness rules resolve
-uv run pre-commit run --all-files    # cheap hygiene gate (what CI runs)
-uv run tc-fitness run                # the fitness catalogue (what CI runs) — local == CI by construction
-```
+## Commit and PR identity
 
-`make check == CI` by construction: both run `uv run tc-fitness run` reading this repo's `[tool.tc_fitness]` block.
-A bare `python3` / `ruff` / single-file run is **not** a replay — it skips import-dependent fitness rules.
+Create local commits with canonical `three-cubes-agent[bot]` author and committer
+metadata. Send remote writes through the trusted host broker or GitHub Actions
+GitHub App path. The agent harness receives no token or Key Vault credential.
 
-## Trunk-based development
+Carry no AI or model attribution in commits, PRs or source. The shared
+`tc-fitness` checks enforce canonical identity and attribution policy.
 
-- **One feature = one branch = one PR.** Every commit for the feature lands on that single branch. Merge to `main` ~once a day.
-- **Local checks are the primary feedback loop; CI is sign-off.** Run the CI-equivalents before every push. Pushing to discover what CI says is a process violation.
-- Trunk = `main`; **direct push is blocked** by branch protection. Required contexts gate every merge (Quality gate + SonarCloud). A PR author cannot self-approve.
-- When delegating to sub-agents, the parent agent owns ALL git operations (branch / commit / PR / merge).
+Link completed work with `Closes #N` and partial work with `Refs #N` in the PR
+body. Use the branch name supplied by Linear.
 
-## Cross-repo — the Three Cubes Golden Path
+## Change placement
 
-- **[tc-fitness](https://github.com/three-cubes/tc-fitness)** — the runnable quality gate (`tc-fitness` CLI). Pin it in `pyproject.toml` + a `[tool.tc_fitness]` block; `make check` and CI both run `tc-fitness run`, so **local == CI by construction**.
-- **[tc-pipelines](https://github.com/three-cubes/tc-pipelines)** — the reusable CI/quality workflows + composite actions + `governance/` templates. Consume `actions/setup-uv-cached@v1` (CI) and the reusable gate workflows.
-- Framework-side changes go via a PR to `tc-fitness` / `tc-pipelines` — never a hot-patch. **Always pin a tag — never `@main`.**
+- environment, task graph, workflow, evidence and governance behaviour belongs
+  in `tc-pipelines`;
+- shared evaluation behaviour belongs in `tc-fitness`;
+- product source, tests, generators, qualification journeys and deployment
+  values belong in this repository.
+
+Update `RESOLVER.md` when a new product surface has no clear home.
+
+## Verification evidence
+
+Record the tested commit, exact command, SDLC lock, task identities and complete
+terminal result. Preparation output is committed with its input change. A
+release or deployment claim includes the candidate digest and retained receipt.
+
+## Trunk workflow
+
+Use one feature branch and one PR for the coherent change. Reconcile with
+current `main`, rerun the required graph, push the tested commit and resolve
+review conversations. Ordinary changes merge on green. Control-plane changes
+receive the configured human code-owner review.

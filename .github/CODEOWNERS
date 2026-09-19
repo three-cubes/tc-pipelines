@@ -1,4 +1,4 @@
-# tc-pipelines CODEOWNERS — the org's CI + deploy control plane.
+# tc-pipelines CODEOWNERS — the shared AI SDLC control plane.
 #
 # A code-owner review is required ONLY for a PR that touches one of the paths
 # below. Everything else (README, CHANGELOG, prose docs) auto-merges on green
@@ -6,16 +6,21 @@
 # left ON. This is the org standard: governance/config needs a human; routine
 # work merges itself.
 #
-# Owner is @quanyeomans (matching the sibling control-plane repo tc-fitness):
-# the reusable workflows and composite actions here are consumed by every repo
-# in the org, so a change to them is the highest-blast-radius edit we make.
+# Owner is @quanyeomans (matching the sibling control-plane repo tc-fitness).
+# Environment, orchestration, fitness integration, release and deployment
+# changes can affect every consumer.
 
-# The reusable workflows + composite actions every repo consumes.
+# The shared SDLC package, image, workflows, actions and governance surfaces.
 /.github/                @quanyeomans
 /actions/                @quanyeomans
+/packages/               @quanyeomans
+/images/                 @quanyeomans
 
 # The canonical standards, rulesets, skeletons, and the bootstrap script.
 /governance/             @quanyeomans
+/RESOLVER.md             @quanyeomans
+/docs/IMPLEMENTATION.md  @quanyeomans
+/docs/MIGRATION.md       @quanyeomans
 
 # Deploy + tooling that acts on live infrastructure.
 /infra/                  @quanyeomans

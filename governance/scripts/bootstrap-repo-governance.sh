@@ -69,7 +69,7 @@ VERIFY_ONLY=0                # verify an existing OUT_DIR, render nothing
 
 # Canonical-homes line the affordance skeletons carry ({{CANONICAL_HOMES}}).
 # shellcheck disable=SC2016  # literal backticks are intentional (markdown code spans, no expansion)
-CANONICAL_HOMES='`tc-fitness` (gate engine) · `tc-pipelines` (reusable CI + governance templates)'
+CANONICAL_HOMES='`tc-pipelines` (SDLC environment, orchestration, evidence and governance) · `tc-fitness` (fitness engine and check catalogue) · consumer repository (product behaviour)'
 
 # The rendered affordance skeleton set (source name -> repo-root target).
 AFFORDANCE_SKELETONS=(CLAUDE.md AGENTS.md CONTRIBUTING.md ETHOS.md RESOLVER.md SCORECARD.md)
@@ -631,7 +631,7 @@ EOF
     cat ${OUT_DIR}/pyproject.tc_fitness.toml   # merge [dependency-groups] + [tool.tc_fitness] into pyproject.toml
     uv lock && uv sync --all-extras --all-groups
     uv run pre-commit install --hook-type commit-msg --hook-type pre-push && uv run pre-commit install
-    make check           # the exact gate CI runs — get it green before push
+    make check           # current compatibility gate; tc-sdlc adoption replaces the internals
     git add -A && git commit -m "chore(governance): wire the tc-fitness quality gate + CI"
     gh pr create --fill
 EOF

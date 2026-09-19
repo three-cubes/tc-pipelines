@@ -64,7 +64,7 @@ else
     warn "--quick: skipping the SAST leg (gitleaks/semgrep)"
 fi
 
-# 2. Pre-commit hygiene gate (what CI runs): lint, format, actionlint,
+# 2. Current compatibility hygiene gate: lint, format, actionlint,
 #    shell-lint, detect-secrets, no-attribution strip.
 if uv run pre-commit run --all-files; then
     pass "pre-commit (hygiene)"
@@ -72,8 +72,8 @@ else
     fail "pre-commit — run: uv run pre-commit run --all-files"
 fi
 
-# 3. The fitness catalogue (what CI runs): typing, honest coverage, mutation,
-#    architecture. `make check == CI` by construction.
+# 3. The current fitness catalogue: typing, coverage, mutation and architecture.
+#    The target tc-sdlc graph declares the evidence and ordering explicitly.
 if uv run tc-fitness run; then
     pass "tc-fitness (catalogue)"
 else

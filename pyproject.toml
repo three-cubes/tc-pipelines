@@ -1,7 +1,7 @@
 [project]
 name = "tc-pipelines-selftest-harness"
 version = "0.0.0"
-description = "Minimal uv project so python-quality-gate.yml can be self-tested against this repo's fixture gate (.github/workflows/test-shard-routing.yml). Not published; the reusable workflows + composite actions are the repo's real product."
+description = "Transition self-test harness for the tc-pipelines AI SDLC product."
 requires-python = ">=3.12"
 dependencies = [
     "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.15.2",
@@ -23,9 +23,10 @@ dev = [
 ]
 
 [tool.uv]
-# Deps-only harness: uv installs the dependencies into the venv but does NOT
-# build this root as a package (there is nothing to build — the repo's product
-# is its workflows + composite actions).
+# The current root remains a deps-only harness while the released SDLC package
+# is introduced under packages/tc-sdlc/. This flag changes in the executable-
+# foundation tranche; the canonical boundary is documented in
+# governance/standards/ai-sdlc-product-architecture.md.
 package = false
 
 [tool.tc_fitness]

@@ -1,177 +1,227 @@
-# Implementation
+# AI SDLC Implementation Roadmap
 
-How the layers compose. Read this to understand WHY the repo is shaped the way it is — and where to extend.
+This roadmap delivers the architecture in
+[`governance/standards/ai-sdlc-product-architecture.md`](../governance/standards/ai-sdlc-product-architecture.md).
+It records the executable tranches, dependencies and exit evidence. Product
+boundaries and requirements live in the standard; this document records delivery.
 
-## The 4 layers
+## Current state
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ Consumer repo (tc-agent-zone, kairix, ...)                      │
-│ ─────────────────────────────────────────                       │
-│ .github/workflows/deploy.yml — thin file, ~20 lines             │
-│ Calls the shared reusable workflow below.                       │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │  uses:
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer 2 — Reusable workflow                                     │
-│ ─────────────────────────────                                   │
-│ .github/workflows/azure-vm-deploy.yml                           │
-│ Defines the WIF → snapshot → apply → smoke shape.               │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │  uses:
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer 1 — Composite actions (the atoms)                         │
-│ ─────────────────────────────────                               │
-│ .github/actions/wif-azure-login                                 │
-│ .github/actions/snapshot-azure-vm-disk                          │
-│ .github/actions/apply-on-vm-via-runcommand                      │
-│ .github/actions/smoke-systemctl                                 │
-└─────────────────────────────────────────────────────────────────┘
+| Capability | Current implementation | Target implementation |
+|---|---|---|
+| Environment | Consumer-managed uv, pnpm, Go, shell and runner setup | Versioned canonical OCI/Dev Container image plus catalogue-driven native bootstrap |
+| Orchestration | Make, shell, `tc-fitness` configuration and workflow YAML collectively order work | Nx task graph supplied by `@three-cubes/tc-sdlc` |
+| Fitness | `tc-fitness` invoked directly by Python reusable workflows and consumer Makefiles | Version-compatible `tc-fitness` profiles executed as graph tasks |
+| CI | Reusable workflows contain substantial task orchestration | Thin workflows provide events, runners, credentials and protected environments |
+| Releases | Workflow and package pins advance through separate mechanisms | One release catalogue and generated consumer lock |
+| Deployment | Azure workflow transports consumer-authored scripts and performs infrastructure smoke | Qualified digest, typed transaction, host convergence, product PVT and rollback receipt |
+| Consumer adoption | Governance bootstrap copies several executable fragments | One declaration, one generated lock and thin stable commands |
 
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer 0 — Azure-side identity (provisioned once per consumer)   │
-│ ─────────────────────────────────────────                       │
-│ infra/bicep/ci-deploy-identity.bicep                            │
-│ Creates: user-assigned MI + federated cred + 3 RBAC roles       │
-└─────────────────────────────────────────────────────────────────┘
-```
+The migration retains the current workflows until their replacement passes the
+same consumer acceptance journeys.
 
-## Why this shape
-
-### Why composite actions for atoms (not bash scripts)
-
-A bash script that lives in this repo would need to be `curl`'d down by each consumer workflow run. Composite actions are first-class GitHub Actions — they:
-
-- Get cached by GitHub on the runner (faster startup)
-- Expose typed inputs/outputs (visible in the UI; auto-validated)
-- Compose naturally with `uses:` from other actions and workflows
-- Surface their interface via the same `action.yml` syntax everyone already knows
-
-### Why a reusable workflow on top
-
-Composite actions can't run on different runners than their caller — they're inline-expanded. A reusable workflow defines its own jobs + runners and can be composed at a higher level (parallel matrix, conditional jobs, environment protection). The deploy pattern needs that level — it's a job-shaped concern, not a step-shaped concern.
-
-### Why Bicep for the identity layer
-
-The WIF identity + federated credential + RBAC grants are infrastructure, not workflow logic. Bicep:
-
-- Is idempotent — re-running converges, doesn't drift
-- Outputs the identity's clientId/principalId for the GitHub variables step
-- Tracks state in the Azure deployment history (audit trail of "when did we change RBAC")
-- Composes with other Bicep modules (consumer repos that already use Bicep for VMs/KV can `module .. = { ... }` the deploy identity alongside)
-
-Terraform would work equivalently. Pick whichever your consumer repos already use; the Bicep here is a reference shape.
-
-### Why public visibility
-
-GitHub Actions reusable workflows + composite actions can be consumed across private repos only if both repos' Actions settings allow it AND the org plan supports it. On Free tier with private internal-visibility-disabled, cross-private-repo consumption fails with a 404.
-
-Making this repo **public** sidesteps the entire plan-tier question. The contents are workflows + Bicep + docs — no secrets, no proprietary code. The exposure is intentional: this is Three Cubes' public platform-engineering posture.
-
-## Caller contract
-
-A consumer workflow looks like this (full example in `docs/MIGRATION.md`):
+The current Azure compatibility caller maps the job token through the reusable's
+declared secret only when protected GHCR transport is selected:
 
 ```yaml
 jobs:
   deploy:
-    uses: three-cubes/tc-pipelines/.github/workflows/azure-vm-deploy.yml@<sha> # vX.Y.Z
-    permissions:
-      contents: read
-      id-token: write     # required for WIF
-      packages: write     # required only when passing ghcr-actions-token
     secrets:
       ghcr-actions-token: ${{ secrets.GITHUB_TOKEN }}
-    with:
-      resource-group: RG-AGENTS-CORE
-      op-tag: deploy-on-merge
-      skip-snapshot: ${{ github.event.inputs.skip_snapshot }}
-      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      targets: |
-        - vm-name: vm-openclaw
-          apply-script: |
-            cd /data/development/tc-agent-zone && git pull --ff-only
-            bash devsecops/apply/apply-openclaw-config.sh --no-snapshot
-          smoke-units: 'openclaw-gateway cli-proxy-api caddy'
-        - vm-name: vm-hermes-poc
-          apply-script: |
-            cd /data/development/tc-agent-zone && git pull --ff-only
-            bash devsecops/apply/hermes/apply-config.sh --no-snapshot
-          smoke-units: 'hermes-gateway-northcoast-retention.service'
 ```
 
-The contract:
+This mapping remains contract-tested until the deployment graph replaces the
+legacy apply path.
 
-| Input | Type | Notes |
-|---|---|---|
-| `resource-group` | string | Single RG for all targets. Multi-RG deploys need separate jobs. |
-| `targets` | YAML string | List of `{vm-name, apply-script, smoke-units}` maps. `smoke-units` can be empty. |
-| `op-tag` | string | Snapshot name prefix. Use the deploy mode (`deploy-on-merge`, `manual-apply`). |
-| `skip-snapshot` | string | "true" or "false". Maps to the `SKIP_SNAPSHOT=true` env var the snapshot action honours. |
-| `snapshot-retention-hours` | string | Positive whole-number recovery window for host snapshots. Defaults to `48`; the reusable records the expiry in `tc-expires-at`. |
-| `snapshot-policy` | string | `allowed` by default. `forbidden` selects the governed container-only exception and requires `skip-snapshot=true` plus `container-rollback-receipt-digest`. |
-| `container-rollback-receipt-digest` | string | Optional for normal callers; required as `sha256:<64 lowercase hex>` with `snapshot-policy=forbidden`. It identifies the verified pre-apply receipt binding protected backup paths, archive/manifest digests, and predecessor OCI image digest. |
-| `azure-{client,tenant,subscription}-id` | string | Repo variables. WIF needs these to mint the OIDC token. |
+## Delivery rules
 
-The reusable accepts one optional `workflow_call` secret,
-`ghcr-actions-token`. When present, only the apply step receives it. The caller
-must map `ghcr-actions-token: ${{ secrets.GITHUB_TOKEN }}` under the reusable
-job's `secrets` block; `${{ github.token }}` is populated only inside execution
-steps and evaluates empty in this job-level mapping. Granting `packages: write`
-alone does not opt in. The
-apply script runs through an Azure Managed Run Command whose unique resource name is
-derived from the workflow run, attempt, a runner-generated nonce, and target
-index; each opted-in value is passed as its own Azure CLI protected-parameter
-item from a separate anonymous FD. The command resource is deleted before
-smoke testing, by an exit trap, and by an independent `always()` step driven by
-a non-secret command manifest. Both the legacy and protected apply paths acquire
-the same VM-local `flock`, preserving per-VM deployment serialization even
-though uniquely named Managed Run Command resources can run concurrently. The
-protected command retains the legacy 90-minute apply timeout.
-Protected apply output is discarded on the VM because Azure retains only the
-last 4 KiB and a truncated secret cannot be redacted reliably. The managed
-result exposes only the workflow-generated exit proof; protected values are not
-added to target YAML, script text, ordinary parameters, logs, or workflow
-outputs. Callers that omit both secrets retain the existing
-`az vm run-command invoke` apply path. Both apply paths require a unique,
-exact-zero remote exit marker emitted by a parent shell after the caller script,
-so Azure cannot report a false green when its extension hides the remote shell
-exit status or the caller uses `exec`. An opted-in caller must grant
-`packages: write`; reusable workflows cannot elevate caller permissions, so a
-caller that omits or downgrades that permission remains authoritative. The
-reusable workflow intentionally inherits its permissions from the calling job:
-legacy callers can keep `contents: read` and `id-token: write`, while opted-in
-callers add `packages: write`.
+- Each tranche produces working software and terminal verification evidence.
+- `tc-agent-zone` is the first complete vertical consumer.
+- The current entrypoint remains available until its replacement passes local,
+  CI and consumer acceptance checks.
+- Shared behaviour lands in `tc-pipelines`; evaluation behaviour lands in
+  `tc-fitness`; product behaviour remains in the consumer.
+- Tranche PRs group coherent deliverables. Cross-repository dependency releases
+  use separate PRs because each repository has an independent protected trunk.
+- Deletion follows proven parity and a recorded consumer inventory.
 
-The reusable workflow does the rest:
-1. WIF login (composite action)
-2. Snapshot every target VM (composite action)
-3. Loop targets: apply via az run-command + smoke check
-4. Fail the job loudly on any per-step error — caller sees a clean red X
+## Tranche 1 — Product contract
 
-## Extending
+**Status:** in progress
 
-When a new pattern is needed (e.g. ACR push before deploy, Bicep apply before VM deploy):
+**Deliverables**
 
-1. Build it as a **composite action** if it's a single step shape.
-2. Build it as a **reusable workflow** if it's a multi-job shape.
-3. Add docs/MIGRATION.md examples for at least one consumer.
-4. Cut a new major tag (`v2`) if it breaks any existing consumer.
+- canonical AI SDLC architecture;
+- repository resolver and ownership boundaries;
+- README, standards, migration and cost documentation aligned to that architecture;
+- `tc-fitness` defined as a core pipeline component;
+- superseded architectural instructions removed;
+- implementation acceptance fixtures specified.
 
-## Versioning policy
+**Exit evidence**
 
-- `vX.Y.Z` releases are immutable. A major bump means a breaking change to the inputs, outputs or secrets of a composite or reusable workflow.
-- **Consumers pin the release COMMIT, not the tag** — `@<sha> # vX.Y.Z` — and repin deliberately. Nothing reaches a consumer until it moves its pin, which is what makes a breaking change safe to publish.
-- No floating ref of any kind: not `latest`, not `@main`, not a major like `@v1`. A floating major is only correct while something advances that tag on every release; nothing does, so it silently freezes while the tree beside it moves.
-- Self-pins name an immutable reviewed commit whose target content matches the current tree. Commit a changed target first, then pin its callers to that commit so one release contains the working path. [`supply-chain-pinning.md`](../governance/standards/supply-chain-pinning.md) defines the check.
+- every canonical index points to one product architecture;
+- repository searches return no active statement that workflows and composite
+  actions alone are the product;
+- current commands remain accurately documented as migration surfaces;
+- the full `tc-pipelines` self-gate passes.
 
-## Security model
+**Elapsed target:** 1–2 working days.
 
-- The repo is public. Workflows + Bicep are visible to anyone — that's by design.
-- No secrets live in this repo. All secrets live in the consumer repos' GitHub Secrets or in Azure Key Vault.
-- WIF identity per consumer repo. A leaked identity rotation is `az deployment` away, not a service-principal rotation drill.
-- Federated credential subject pinned to `repo:OWNER/NAME:ref:refs/heads/main` and `repo:OWNER/NAME:environment:NAME`. PR-from-fork can't deploy.
+## Tranche 2 — Executable foundation
+
+**Status:** planned after Tranche 1 review
+
+**Deliverables**
+
+- `packages/tc-sdlc/` with the Nx preset, CLI, schema loader and graph executors;
+- `images/sdlc/` with the canonical Dev Container/OCI image;
+- `sdlc.yaml` schema and generated `tc-sdlc.lock`;
+- `bootstrap`, `prepare`, `check` and `check-all` commands;
+- release catalogue generation;
+- Python-only, pnpm-only and mixed-language acceptance fixtures.
+
+**Behavioural evidence**
+
+1. Start each fixture from an empty checkout.
+2. Bootstrap the released environment.
+3. Run preparation twice and observe no second-run changes.
+4. Change one project and observe the expected affected graph.
+5. Run the same task identity natively, in the canonical image and in a hosted workflow.
+6. Record matching lock, input and task identities.
+
+**Exit criteria**
+
+- clean bootstrap works on supported macOS and Linux paths;
+- the canonical image executes every fixture;
+- warm affected feedback completes within 60 seconds for the reference fixture;
+- `tc-fitness` executes as a graph task with the catalogue-declared version;
+- task concurrency uses declared CPU and resource limits.
+
+**Elapsed target:** 3–5 working days.
+
+## Tranche 3 — tc-agent-zone vertical adoption
+
+**Status:** depends on Tranche 2 release
+
+**Deliverables**
+
+- `tc-agent-zone/sdlc.yaml` and generated lock;
+- Python, pnpm, Go, generator and fitness projects represented in the graph;
+- preparation separated from read-only evaluation;
+- existing Make commands routed through `tc-sdlc`;
+- one thin PR workflow executing the affected graph;
+- duplicate post-merge evaluation removed after exact-integration evidence is live.
+
+**Behavioural evidence**
+
+- affected changes select their direct and dependent projects;
+- generator input changes refresh the declared output before evaluation;
+- isolated tasks remain deterministic across worker counts and execution order;
+- local and hosted runs report the same task and lock identities;
+- a complete graph run preserves current coverage, security and fitness obligations.
+
+**Exit criteria**
+
+- the ordinary local loop no longer enters consumer-specific orchestration scripts;
+- PR CI executes the graph once;
+- exact integration evidence promotes without repeating equivalent work;
+- existing tests and gates retain their behavioural coverage.
+
+**Elapsed target:** 3–4 working days.
+
+## Tranche 4 — Immutable release qualification
+
+**Status:** depends on Tranche 3
+
+**Deliverables**
+
+- one container build task producing an OCI digest and provenance receipt;
+- local Compose qualification consuming that digest;
+- production-shaped filesystem, permissions, secrets and dependency checks;
+- knowledge-harvest input and output identities in the qualification receipt;
+- retained failure diagnostics with bounded secret-safe output.
+
+**Exit criteria**
+
+- one candidate digest passes local and hosted qualification;
+- qualification never rebuilds the candidate;
+- representative Hermes journeys exercise real container boundaries;
+- failure cases retain actionable evidence and leave the host clean.
+
+**Elapsed target:** 3–4 working days.
+
+## Tranche 5 — Repeatable VM deployment
+
+**Status:** depends on Tranche 4
+
+**Deliverables**
+
+- Ansible roles for host users, groups, shared filesystem permissions, Docker,
+  Cloudflare SSH, scoped sudo and cleanup timers;
+- Molecule tests proving host convergence and idempotence;
+- Docker Compose deployment by qualified digest;
+- typed harvest, apply, health, PVT, promotion and rollback operations;
+- SSH and Azure transports implementing the same request and receipt contract;
+- automatic cleanup of expired images, build cache and deployment artefacts.
+
+**Exit criteria**
+
+- a second host convergence reports no changes;
+- a failed health or PVT journey restores the predecessor digest;
+- harvested learning persists across cutover and its identity is recorded;
+- production PVT passes against the deployed digest;
+- cleanup retains the active, predecessor and evidence window and removes expired data.
+
+**Elapsed target:** 4–5 working days.
+
+## Tranche 6 — Fleet convergence and removal
+
+**Status:** depends on a successful tc-agent-zone production deployment
+
+**Deliverables**
+
+- adopt the released product in `tc-fitness`, kairix and remaining consumers;
+- automated coordinated upgrade PRs;
+- remove superseded workflow orchestration, copied scripts and independent pins;
+- publish fleet timing, cache and failure-classification measures.
+
+**Exit criteria**
+
+- each active repository uses a released SDLC catalogue and generated lock;
+- consumer repositories retain only product-specific build and deployment logic;
+- every compatibility surface has zero consumers before removal;
+- scheduled and PR workflows have distinct documented outcomes;
+- CI and infrastructure consumption are observable by repository and task.
+
+**Elapsed target:** 3–5 working days after the first production proof.
+
+## Expected elapsed delivery
+
+| Milestone | Target |
+|---|---:|
+| Importable foundation and reference fixture | within 5 working days of approved Tranche 1 |
+| tc-agent-zone local and CI vertical | within 10 working days |
+| Qualified Hermes production deployment | within 15 working days |
+| Fleet convergence and old-path removal | within 20 working days |
+
+Independent fixture, image and deployment preparation can overlap. Contract
+changes, coordinated releases and production mutations remain ordered.
+
+## Measures
+
+Record these values for every tranche:
+
+- cold bootstrap duration;
+- warm affected-check duration;
+- full graph duration;
+- CPU utilisation and peak memory;
+- cache hit rate by task;
+- CI minutes per merged change;
+- duplicate hosted task executions;
+- failures classified as product, test, environment or external dependency;
+- release qualification duration;
+- deployment, PVT and rollback duration;
+- retained and expired disk consumption.
+
+Measurements guide optimisation after redundant work has been removed.

@@ -1,93 +1,78 @@
-# Supply-chain pinning
+# Supply-Chain Pinning
 
-Every `uses:` resolves to a full commit SHA — including a reference to a file
-sitting beside it in this repo. A pinned step runs whatever that commit held, not
-what a reviewer reads locally, so the pin IS the contract about which revision
-executes.
+The coordinated SDLC release catalogue is the authored source for executable
+identities. It binds:
 
-## Why the SHAs are repeated rather than named once
+- the `@three-cubes/tc-sdlc` package version;
+- the canonical OCI image digest;
+- the GitHub workflow commit;
+- the schema version;
+- the compatible `tc-fitness` version.
 
-`uses:` accepts **no context of any kind**. Not `env`, not `inputs`, not `vars`,
-in a reusable-workflow call or an action step:
+The generated consumer `tc-sdlc.lock` records that release. `tc-sdlc upgrade`
+materialises every required reference in one reviewable change.
 
-```
-uses: org/repo/.github/workflows/gate.yml@${{ inputs.pin }}
-→ context "inputs" is not allowed here. no context is available here.
-```
+## GitHub workflow references
 
-So a ref is a literal or it is nothing. There is no variable to extract, and the
-repetition is the platform's floor rather than a design choice.
+GitHub requires `uses:` references to contain a literal ref. Expressions and
+variables cannot supply that coordinate. Every workflow and action reference
+therefore resolves to a full commit SHA.
 
-Nor is it one fact written many times. Each pin is an independent assertion that
-*this* caller loads *that* revision of *that* target — this repo carries pins
-across a dozen distinct targets, and they share a SHA only because they share a
-release. The single authoritative representation is the release; each pin is a
-local claim about it.
+Repeated workflow SHAs are generated projections of the coordinated release,
+rather than independent values maintained by a contributor. The generator
+updates all call sites and validates the complete referenced action graph.
 
-**What keeps them consistent is a checker, not a variable.**
-`test_self_pin_freshness` resolves every self-pin from git history and compares
-the complete executed target graph with the current graph. It normalises each
-pin coordinate only for that file's content comparison, then follows the pinned
-coordinate and checks the nested target recursively. It fails when a pin is not
-an ancestor of HEAD or any target in its executed graph contains stale content.
+## Internal action references
 
-The genuinely DRY alternative — a floating `@v1` — is what this exists to
-prevent. One moving reference, no repetition, and it froze while a composite
-beneath it changed: a destructive deploy advertised a rollback handle that was
-the empty string on every run, because the workflow read an output the pinned
-revision no longer emitted. `test_uses_ref_pinning` rejects floating refs.
+A commit cannot contain a reference to its own future hash. The release builder:
 
-## Self-pins execute reviewed current content
+1. identifies the reviewed commit containing the target content;
+2. resolves every referenced action and reusable workflow recursively;
+3. materialises immutable references to reviewed content;
+4. verifies the resulting graph in a release fixture;
+5. publishes the workflow commit in the release catalogue.
 
-A commit cannot pin itself because writing the pin changes the hash. Commit the
-target first, then update its callers to that immutable commit. An unchanged
-target may retain an older immutable ancestor only when its complete recursive
-target graph is content-equivalent to the current graph. A changed target uses
-the reviewed commit that first contains that target and its current dependencies.
+An unchanged action may retain an older immutable ancestor when its complete
+executed target graph is content-equivalent. The verifier reports each retained
+coordinate and its content identity.
 
-This removes the former two-tag bootstrap. The release commit contains callers
-that already execute the reviewed target content, and consumers pin that single
-release.
+Merge commits preserve reviewed target commits in repository ancestry. Repository
+merge settings use merge commits and protect release tags from update or deletion.
 
-This topology requires merge commits. Configure each repository with
-`allow_merge_commit=true`, `allow_squash_merge=false`, and
-`allow_rebase_merge=false`; run `governance/scripts/check-repository-merge-settings.sh`
-to verify those settings before releasing.
+## Consumer upgrades
 
-## Consumer repins
+The release event opens one App-authored upgrade PR in each enrolled consumer.
+The PR updates:
 
-A consumer's pin is rarely one line. Beyond the `uses:` ref, count anything that
-independently asserts the same revision: an admission check that greps the
-materialized commit, a deploy adapter carrying its own copy, a test fixture
-naming the expected value. Search unfiltered — `grep -rn <sha> .` with only
-`.git` and vendor directories excluded — because a filtered search that misses a
-site returns a confident wrong answer. Extensionless executables are the usual
-casualty of an `--include=*.sh`.
+- the SDLC package version;
+- the canonical image digest;
+- literal workflow and action SHAs;
+- the compatible `tc-fitness` dependency;
+- the schema and generated lock;
+- any generated compatibility material still required during migration.
 
-Repeated values in a **trust root** are deliberate. A script that decides whether
-the code it is about to execute is the reviewed code must not read its expected
-values from a file an attacker could influence — that would make the file an
-input to the check it is performing. Such a script hardcodes its `PATH`, its
-binary paths, and its expected revisions for the same reason. Do not deduplicate
-these into a shared source. The same holds for a test fixture: a test that
-imported the expected value could not detect a wrong one.
+The consumer validates the release catalogue, regenerates the lock, executes
+preparation and the affected graph, then enables auto-merge subject to required
+checks and code-owner review.
 
-Match on the SHA. A guard that also matches a human-readable version comment
-couples two files on a string that carries no control, and fails confusingly when
-only one is updated.
+## Independent trust roots
 
-## Automated consumer repins
+A verifier may carry an independent expected digest or identity when reading it
+from the evaluated input would make the check circular. These values are named
+as trust roots, generated from the reviewed release and covered by tests that
+exercise a wrong value.
 
-`dispatch-consumer-repins.yml` runs when a tc-pipelines release is published.
-It checks out the release tag, resolves that tag to its commit SHA, and sends the
-tag/SHA pair to each enrolled consumer as a `repository_dispatch` event using the
-`three-cubes-agent` App.
+The materialiser distinguishes generated projections from independent trust
+roots. Generated projections update automatically. Trust-root changes are
+listed separately in the review summary.
 
-Each consumer validates that the tag still resolves to the dispatched SHA through
-the GitHub API. It then runs its repository-local pin updater, runs the updater
-in check mode, creates one App-authored PR, and enables auto-merge. The consumer
-PR remains subject to its existing required checks and CODEOWNERS review.
+## Current compatibility path
 
-The dispatch carries the tag and its resolved commit as an immutable release
-coordinate. Consumers keep full-SHA pins, required checks, CODEOWNERS review,
-and deployment controls.
+Existing workflows contain direct SHA references and use
+`test_self_pin_freshness`, `test_uses_ref_pinning` and the current consumer-repin
+dispatcher. These remain enforced until the release-catalogue materialiser has
+passed the equivalent nested-reference and consumer-upgrade fixtures.
+
+After parity, the materialiser replaces manual self-pin and consumer-repin
+procedures. Literal immutable references remain because GitHub requires them;
+their maintenance becomes generated SDLC work.

@@ -38,7 +38,8 @@ SKELETONS = (
 SAMPLE_CONTEXT = {
     "REPO": "three-cubes/sample-repo",
     "CANONICAL_HOMES": (
-        "`tc-fitness` (gate engine) · `tc-pipelines` (reusable CI + governance templates)"
+        "`tc-pipelines` (SDLC environment, orchestration, evidence and governance) · "
+        "`tc-fitness` (fitness engine and check catalogue) · consumer repository (product behaviour)"
     ),
 }
 

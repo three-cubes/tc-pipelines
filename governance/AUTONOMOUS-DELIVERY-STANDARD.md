@@ -33,13 +33,16 @@ Two hard-won lessons shape everything below:
   Semgrep OSS + gitleaks, revive CodeQL on public repos (D6); Sigstore/gitsign signing P2 (D7);
   engineering-hub extract-then-remove — its repo is already deleted (D8).
 
-## The paved road (CORE)
-- **tc-pipelines** — reusable workflows + composite actions + governance templates + org rulesets.
-- **tc-fitness** — the single-binary gate engine (`uv run tc-fitness run` reading each repo's
-  `[tool.tc_fitness]`), so `make check == CI` by construction.
-- Consumers pin `@v1` / engine `@vX` + lockfile SHA. Org required-workflows + rulesets applied centrally.
-  Renovate customManager constrains the engine version (no silent drift). `bootstrap-repo-governance.sh`
-  onboards any repo. **Principle: promote prior-work up into CORE, never fork-and-inline.**
+## The shared product (CORE)
+
+- **tc-pipelines** — released environment, task graph, hosted entrypoints,
+  evidence, release/deployment protocols, governance templates and org rulesets.
+- **tc-fitness** — fitness engine and shared check catalogue, executed as a
+  version-compatible task in the SDLC graph.
+- Consumers adopt one coordinated release catalogue and generated lock. The
+  adoption tool renders required hosted references and governance. Shared
+  behaviour moves into the appropriate CORE repo and reaches consumers through
+  a coordinated upgrade.
 
 ## The gate — "green means correct" (blocking on the merge path)
 Two required contexts — **`Quality gate`** + **`no-attribution`** — cover: lint/format ·

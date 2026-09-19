@@ -11,6 +11,7 @@ related:
   - governance/decisions/ADR-INDEX.md
   - governance/STANDARDS.md
   - governance/AUTONOMOUS-DELIVERY-STANDARD.md
+  - governance/standards/ai-sdlc-product-architecture.md
   - docs/IMPLEMENTATION.md
 linear:
   - SGO-176
@@ -31,7 +32,8 @@ linear:
 The org's paved-road decisions were made real in code and prose before they were ever written as
 numbered ADRs. Roughly twenty org-wide, cross-cutting decisions are **embedded** across
 `governance/STANDARDS.md`, `governance/gate-hardening.md`, `governance/AUTONOMOUS-DELIVERY-STANDARD.md`,
-the `governance/` templates (rulesets, CODEOWNERS, dependabot, renovate), and `docs/IMPLEMENTATION.md`
+`governance/standards/ai-sdlc-product-architecture.md`, the `governance/`
+templates (rulesets, CODEOWNERS, dependabot, renovate), and `docs/IMPLEMENTATION.md`
 / `docs/COST-OPTIMIZATION.md`. They already carry short, stable,
 **prefixed handles** in that prose — `STD-MERGE`, `STD-IDENTITY`, `RULESET-D1`, `CODEOWNERS-D1`,
 `GATE-HARDEN`, `DEP-D1`, `QG-CONVERGE`, `SONAR-HANDOFF`, `MUT-RATCHET`, `REPO-MERGE`, `WIF-D1..D5`,
@@ -108,14 +110,27 @@ authoritative text — read the source.
 | `MUT-RATCHET` | Mutation is diff-scoped and ratcheted: an escaped mutant on a changed line fails; the survivors baseline only ratchets down; Mutation is **not currently a required status check** (deferred until the workflow is wired). | `governance/gate-hardening.md`; `.github/workflows/mutation-gate.yml` |
 | `DEP-D1` | Dependency policy: 3-day-cooldown, grouped dependabot (pip + npm + github-actions, security-toggle-off) + a Renovate customManager pinning the tc-fitness engine version (no silent drift). | `governance/dependabot.yml`; `governance/renovate.json` |
 | `REPO-MERGE` | Two CORE paved-road repos — tc-pipelines (reusable CI + governance templates) and tc-fitness (the gate engine); consumers pin `@v1` / engine `@vX` + lockfile SHA; **promote prior work up into CORE, never fork-and-inline.** | `AUTONOMOUS-DELIVERY-STANDARD.md` (paved road); `STANDARDS.md` §3 |
-| `VERS-D1` | Semantic major pinning for reusables: `@vN` majors, breaking input/output changes cut a new major, **no `latest` tag** (undeclared moving targets break trust). | `docs/IMPLEMENTATION.md` (versioning policy); `README.md` |
-| `WIF-D1` | Azure deploys authenticate via Workload Identity Federation (OIDC): CI mints a short-lived token at runtime — no service-principal secret stored in GitHub. | `docs/IMPLEMENTATION.md` (security model); `README.md` |
-| `WIF-D2` | One WIF identity **per consumer repo** (blast-radius isolation); a leaked identity is an `az deployment` rotation away, not an org-wide SP drill. | `docs/IMPLEMENTATION.md` |
-| `WIF-D3` | The federated-credential subject is pinned to `repo:OWNER/NAME:ref:refs/heads/main` + `:environment:NAME`, so PR-from-fork cannot deploy. | `docs/IMPLEMENTATION.md` |
-| `WIF-D4` | The identity + federated credential + RBAC grants are provisioned as Bicep (`ci-deploy-identity.bicep`) — idempotent, audit-tracked in Azure deployment history. | `docs/IMPLEMENTATION.md` (why Bicep); `infra/bicep/` |
-| `WIF-D5` | tc-pipelines is **public** (workflows + Bicep + docs, no secrets), sidestepping the private-repo Actions plan-tier limit for cross-repo reuse. | `docs/IMPLEMENTATION.md` (why public visibility) |
+| `VERS-D1` | Semantic major pinning for reusables: `@vN` majors, breaking input/output changes cut a new major, **no `latest` tag** (undeclared moving targets break trust). | `docs/IMPLEMENTATION.md` (current compatibility versioning policy); `README.md` |
+| `WIF-D1` | Azure deploys authenticate via Workload Identity Federation (OIDC): CI mints a short-lived token at runtime and stores no service-principal secret in GitHub. | `governance/agent-sdlc-access-and-hitl.md`; `README.md` |
+| `WIF-D2` | One WIF identity per consumer repo limits deployment blast radius. | `governance/agent-sdlc-access-and-hitl.md` |
+| `WIF-D3` | Federated subjects bind the approved repository ref or protected environment. | `governance/agent-sdlc-access-and-hitl.md` |
+| `WIF-D4` | Bicep provisions identity, federated credential and RBAC state idempotently. | `infra/bicep/`; `governance/standards/deployment-verification.md` |
+| `WIF-D5` | tc-pipelines publishes public, secret-free SDLC artefacts for consumption across repositories. | `governance/standards/ai-sdlc-product-architecture.md`; `README.md` |
 | `COST-D1` | Every deploy-snapshotting consumer runs the reusable snapshot-prune action with a **48-hour** recovery window, including one legacy migration run after adoption. | `docs/COST-OPTIMIZATION.md` |
 | `COST-D2` | Right-size / stop-when-idle always-on VMs and prefer ephemeral PR envs or smoke-on-prod over a permanently-paid staging tier. | `docs/COST-OPTIMIZATION.md` |
+
+## Accepted target decisions under implementation
+
+These additive decisions define the approved target architecture. They do not
+claim that the corresponding executable surfaces exist. Each becomes an
+in-force operational contract only when its implementation tranche and consumer
+acceptance evidence are complete.
+
+| ID | Target decision | Implementation state | Source of record |
+|---|---|---|---|
+| `SDLC-PRODUCT-D1` | `tc-pipelines` becomes the released SDLC environment, task graph, hosted orchestration, evidence and governance product; `tc-fitness` remains its required evaluation engine and check catalogue. | Architecture accepted; executable foundation pending. | `governance/standards/ai-sdlc-product-architecture.md`; `docs/IMPLEMENTATION.md` |
+| `SDLC-GRAPH-D1` | Local and hosted execution bind the same generated SDLC lock, task identities and canonical environment. | Task graph, lock generator and image pending. | `governance/standards/ai-sdlc-product-architecture.md`; `docs/MIGRATION.md` |
+| `SDLC-CATALOGUE-D1` | One coordinated release catalogue binds package, workflow commit, image digest, schema and compatible fitness engine, and the upgrade command materialises those immutable references together. | Release catalogue and upgrade command pending. | `governance/standards/ai-sdlc-product-architecture.md`; `governance/standards/supply-chain-pinning.md` |
 
 The broader `AUTONOMOUS-DELIVERY-STANDARD.md` locked decisions **D1–D8** (no-attribution, guard-forward-only,
 safe lights-out merge, Linear-as-control-surface, and the D5–D8 defaults) sit above this register as

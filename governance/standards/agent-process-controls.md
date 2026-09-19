@@ -34,7 +34,7 @@ Do not treat a layer-4 failure with another layer-4 control.
 | Risk (observed behaviour) | Current layer | Structural treatment |
 |---|---|---|
 | A behaviour change to a **shared contract** with no test pinning it. | 4 (failed) | **tc-fitness**: a contract-change gate + mutation coverage on the shared base — a surviving mutant on the changed branch is a missing test. DoD: red-before-green evidence. |
-| An **engine change reaches the fleet** before any consumer validates it. | none | **tc-pipelines**: a pre-release consumer canary — run a consumer's full gate against the *candidate ref* before tag + repin. Blocks the release if the consumer reds. |
+| An **engine change reaches the fleet** before any consumer validates it. | none | **tc-pipelines**: run the candidate coordinated release against reference consumer fixtures before publication. |
 | **"Done/green" claimed** without verifying the required checks. | 4 (failed once) | **DoD**: never claim green from "no visible fails"; require the pasted required-check output. Honesty risk — human review is the backstop; instrument the claim-then-corrected rate. |
 | **Delegation reproduces the agent's own anti-patterns** (code-first sub-agent specs). | none | **subagent-orchestration**: a test-first spec template — "define the behaviour; write the failing tests; prove they fail on the old behaviour; then implement." |
 
@@ -54,9 +54,8 @@ Land each treatment in the canonical home that already owns that surface — nev
 mechanism:
 
 - Contract-change + mutation coverage → **tc-fitness** CORE checks.
-- Consumer canary → a **tc-pipelines** reusable, wired into
-  [`improving-fitness-gates.md`](improving-fitness-gates.md) between "engine PR merged" and
-  "tag + repin".
+- Candidate consumer qualification → the **tc-pipelines** release graph defined
+  by [`improving-fitness-gates.md`](improving-fitness-gates.md).
 - Test-first + evidence DoD → [`development-workflow.md`](development-workflow.md).
 - Test-first sub-agent spec template → the subagent-orchestration standard.
 

@@ -1,4 +1,4 @@
-# tc-pipelines — local/CI parity gate.
+# tc-pipelines current self-gate; migrated behind tc-sdlc in Tranche 2.
 
 .PHONY: check
 

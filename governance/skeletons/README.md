@@ -9,7 +9,7 @@ These are **repo-agnostic structure with placeholders**, not another repo's file
 
 | Skeleton | Renders to (repo root) | What it is |
 |---|---|---|
-| [`CLAUDE.md`](CLAUDE.md) | `CLAUDE.md` | Pointer-reference index — routes every task to its canonical standard; carries the "How to commit" section pointing at `scripts/safe-commit.sh`. |
+| [`CLAUDE.md`](CLAUDE.md) | `CLAUDE.md` | Pointer-reference index for stable SDLC commands, identity, evidence and canonical homes. |
 | [`AGENTS.md`](AGENTS.md) | `AGENTS.md` | Agent entrypoint — the authoring-vs-runtime boundary + the D1 no-attribution rule. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | `CONTRIBUTING.md` | Contributor loop — setup, branch/commit/PR mechanics, the gate-is-the-contract rule. |
 | [`ETHOS.md`](ETHOS.md) | `ETHOS.md` | The 7 platform principles (verbatim Rules; repo fills the "How to apply" examples). |
@@ -23,7 +23,7 @@ These are **repo-agnostic structure with placeholders**, not another repo's file
 Two tokens resolve at render time (from `--repo`):
 
 - `{{REPO}}` — the repo slug, e.g. `three-cubes/<name>`.
-- `{{CANONICAL_HOMES}}` — the canonical-homes line, default `` `tc-fitness` (gate engine) · `tc-pipelines` (reusable CI + governance templates) ``.
+- `{{CANONICAL_HOMES}}` — the canonical-homes line, default `` `tc-pipelines` (SDLC environment, orchestration, evidence and governance) · `tc-fitness` (fitness engine and check catalogue) · consumer repository (product behaviour) ``.
 
 Rendering is two steps:
 

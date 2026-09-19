@@ -1,171 +1,219 @@
-# Migration
+# AI SDLC Consumer Migration
 
-How to migrate an existing repo to consume the shared workflow. The two worked examples are the ones we know intimately: `tc-agent-zone` (the agent platform) and `kairix` (the memory runtime).
+This guide moves a repository from copied scripts and direct reusable-workflow
+assembly to the released `tc-pipelines` SDLC product. The product contract lives
+in
+[`governance/standards/ai-sdlc-product-architecture.md`](../governance/standards/ai-sdlc-product-architecture.md).
 
-## tc-agent-zone — before → after
+## Migration states
 
-### Before
+| State | Consumer result |
+|---|---|
+| Declared | `sdlc.yaml` describes toolchains, projects, fitness profiles and product targets. |
+| Locked | `tc-sdlc.lock` binds package, image, workflow, schema and `tc-fitness` identities. |
+| Local | Stable Make commands execute through the released package. |
+| Hosted | Thin GitHub workflows execute the same task graph in the canonical image. |
+| Qualified | One immutable application digest passes local and hosted product journeys. |
+| Deployed | Production applies that digest and records PVT, rollback and cleanup evidence. |
+| Converged | Superseded consumer orchestration and independent pins are removed. |
 
-The repo currently has `.github/workflows/deploy-on-merge.yml` — ~130 lines covering:
+Migrate one complete vertical before broad fleet adoption. `tc-agent-zone` is
+the reference vertical because it exercises the full Python, TypeScript, Go,
+container, state-harvest and VM deployment surface.
 
-- Azure login via WIF (inlined)
-- Snapshot loop (inlined)
-- Apply on vm-openclaw (inlined)
-- Apply on vm-hermes-poc (inlined)
-- Smoke check (inlined)
+## 1. Inventory the consumer
 
-Every change to the deploy pattern means editing this file in-place. Every NEW repo means copy-pasting this file.
+Record:
 
-### After
+- language package and workspace boundaries;
+- generated inputs and outputs;
+- current local commands;
+- workflow jobs and triggers;
+- fitness configuration and profiles;
+- container build inputs and outputs;
+- product qualification journeys;
+- runtime state, secrets and ownership requirements;
+- deployment and rollback commands;
+- current workflow, action, fitness and toolchain pins.
 
-Replace `.github/workflows/deploy-on-merge.yml` with a ~25-line thin caller:
+Classify each item as shared SDLC behaviour or product behaviour using
+[`RESOLVER.md`](../RESOLVER.md). Promote shared behaviour into `tc-pipelines` or
+`tc-fitness` before consumer adoption.
+
+## 2. Add the declaration and lock
+
+Add `sdlc.yaml` at the repository root. Declare real projects and dependencies;
+represent Python workspaces, pnpm packages, Go modules, generators, images and
+qualification journeys as graph nodes.
+
+Generate `tc-sdlc.lock` from one released catalogue. Commit the declaration and
+lock together. The upgrade command owns later changes to package, image,
+workflow and `tc-fitness` identities.
+
+## 3. Adopt stable local commands
+
+Route the repository Makefile through `tc-sdlc`:
+
+```make
+.PHONY: bootstrap prepare check check-all qualify deploy
+
+bootstrap:
+	tc-sdlc bootstrap
+
+prepare:
+	tc-sdlc prepare
+
+check:
+	tc-sdlc check --affected
+
+check-all:
+	tc-sdlc check --all
+
+qualify:
+	tc-sdlc qualify
+
+deploy:
+	tc-sdlc deploy
+```
+
+Keep product-specific commands behind graph targets. The shared command names
+remain consistent across repositories.
+
+Run preparation twice. The first run applies required deterministic changes;
+the second run produces no diff. Run affected and complete checks and retain
+their task identities.
+
+## 4. Move hosted CI to the graph
+
+Replace consumer job implementation with a thin call to the released workflow.
+The hosted layer supplies:
+
+- GitHub event and exact integration identity;
+- runner allocation;
+- short-lived credentials;
+- protected environment decisions;
+- retained task and release evidence.
+
+The graph supplies task selection, ordering, concurrency and commands. Validate
+one representative change for each language and generator boundary. Compare
+task identity and lock digest with the local run.
+
+Remove post-merge evaluation when the merge queue or exact-integration evidence
+proves the admitted tree and the post-merge work produces no distinct release
+outcome.
+
+The existing Azure compatibility caller inherits workflow permissions. A caller
+that uses WIF and no GHCR token declares:
 
 ```yaml
-name: "4 · Deploy on merge to main"
-
-on:
-  workflow_dispatch:
-    inputs:
-      scope:
-        description: Scope to deploy (auto = infer from changed paths)
-        required: true
-        default: auto
-        type: choice
-        options: [auto, all, config, skills, cron, infra, agents, bootstrap, hermes]
-      skip_snapshot:
-        description: Skip snapshot-before-apply (dev only)
-        required: false
-        default: 'false'
-        type: choice
-        options: ['false', 'true']
-
 permissions:
   contents: read
   id-token: write
-
-jobs:
-  deploy:
-    uses: three-cubes/tc-pipelines/.github/workflows/azure-vm-deploy.yml@<sha> # vX.Y.Z
-    with:
-      resource-group: RG-AGENTS-CORE
-      op-tag: deploy-on-merge
-      skip-snapshot: ${{ github.event.inputs.skip_snapshot }}
-      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
-      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
-      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      targets: |
-        - vm-name: vm-openclaw
-          apply-script: |
-            cd /data/development/tc-agent-zone && git pull --ff-only
-            bash devsecops/apply/apply-openclaw-config.sh --no-snapshot
-          smoke-units: 'openclaw-gateway cli-proxy-api caddy'
-        - vm-name: vm-hermes-poc
-          apply-script: |
-            cd /data/development/tc-agent-zone && git pull --ff-only
-            bash devsecops/apply/hermes/apply-config.sh --no-snapshot
-          smoke-units: 'hermes-gateway-northcoast-retention.service'
 ```
 
-The `runbook-ci-driven-apply.md` runbook collapses to a single `az deployment` command, since `infra/bicep/ci-deploy-identity.bicep` does what the manual `az identity create` + `az role assignment` + `az identity federated-credential` sequence used to do.
+The hosted job adds package access only when it opts into the documented token
+transport. The coordinated deployment path replaces this caller after the typed
+SSH/Azure transport passes the same acceptance journeys.
 
-### Migration steps for tc-agent-zone
+## 5. Integrate tc-fitness
 
-```bash
-# 1. Run the Bicep module to (re-)provision the identity. Already provisioned
-#    manually 2026-06-09 — this step is idempotent and will update tags +
-#    role-assignment names but won't disrupt the live MI.
-az deployment group create \
-  --resource-group RG-AGENTS-CORE \
-  --template-file https://raw.githubusercontent.com/three-cubes/tc-pipelines/v1/infra/bicep/ci-deploy-identity.bicep \
-  --parameters repoOwner=three-cubes repoName=tc-agent-zone keyVaultName=kv-tc-agents \
-               identityName=mi-github-deploy
+Bind the consumer's `smoke`, `full` and `nightly` profiles in `sdlc.yaml`.
+Retain the native `tc-fitness` configuration as the check catalogue and policy
+source. The released SDLC catalogue supplies the compatible engine version.
 
-# 2. Replace .github/workflows/deploy-on-merge.yml in tc-agent-zone with the
-#    thin caller above (PR #N).
+Verify:
 
-# 3. Smoke-test via workflow_dispatch:
-gh workflow run "4 · Deploy on merge to main" \
-  --field scope=auto --field skip_snapshot=true \
-  --repo three-cubes/tc-agent-zone
+- affected checks run in the warm local graph;
+- complete checks run for release admission;
+- nightly checks retain failures and diagnostics;
+- task sharding preserves coverage and fitness semantics;
+- a change to the engine version arrives through the coordinated SDLC upgrade.
 
-# 4. After green: re-test with skip_snapshot=false to verify snapshot path.
+## 6. Qualify one immutable candidate
 
-# 5. Done. Future deploy-pattern improvements ship as tc-pipelines
-#    bumps; tc-agent-zone consumes them automatically.
-```
+Build the application image once and record its digest. Run local and hosted
+qualification against that digest. Exercise:
 
-## kairix — before → after
+- clean startup and dependency health;
+- required files, directories, symlinks and permissions;
+- secrets and environment resolution;
+- persistent-state harvest and restore;
+- representative product journeys;
+- failure diagnostics and cleanup.
 
-### Before
+Qualification produces the candidate receipt consumed by deployment.
 
-`.github/workflows/release-vm-deploy.yml` (~250 lines) does a webhook-based deploy:
+## 7. Adopt the deployment transaction
 
-- Workflow signs a payload with HMAC-SHA256
-- POSTs to an operator-configured webhook URL (passes through Cloudflare Access)
-- Polls a commit status (`vm-reflib-regression`) every 15s up to 900s for success/failure
+Converge host prerequisites through the shared Ansible roles. Keep product
+Compose definitions, state mappings, agent definitions and PVT journeys in the
+consumer.
 
-### After (target shape)
+Exercise these paths before production reliance:
 
-Two-phase change — bigger than tc-agent-zone's because kairix's current model is fundamentally different:
+1. status and preflight;
+2. repeated host convergence with zero second-run changes;
+3. successful candidate start and PVT;
+4. failed health check and predecessor restoration;
+5. failed PVT and predecessor restoration;
+6. interrupted operation and lock recovery;
+7. cleanup with active and predecessor images retained.
 
-**Phase 1 — Side-by-side adoption.** Add a new workflow `azure-vm-deploy-poc.yml` that uses the shared workflow against a kairix non-production VM. Validate WIF-based push works for kairix's deploy shape. Keep the existing webhook flow as the production path.
+The target deployment contract gives the Cloudflare SSH and Azure transports
+the same typed operation and receipt. This transport parity is not implemented
+yet; it is a deployment-transaction tranche deliverable.
 
-**Phase 2 — Cutover.** Once Phase 1 has run reliably for ~2 weeks, retire the webhook + HMAC secret. Replace `release-vm-deploy.yml`'s deploy job with the shared workflow call. The Cloudflare Access dance + the HMAC secret rotation overhead goes away.
+The current compatibility surfaces remain distinct:
 
-### Migration steps for kairix
+- `cloudflare-access-ssh` accepts a `tc.deploy.request.v1` operation and
+  validates the returned deployment receipt;
+- `azure-vm-deploy.yml` accepts Azure-specific inputs plus a YAML list of
+  `{vm-name, apply-script, smoke-units}` targets and returns its current
+  preflight, snapshot and optional apply outputs.
 
-```bash
-# 1. Provision kairix's WIF identity. New identity, scoped to kairix's RG.
-az deployment group create \
-  --resource-group RG-KAIRIX-CORE \
-  --template-file https://raw.githubusercontent.com/three-cubes/tc-pipelines/v1/infra/bicep/ci-deploy-identity.bicep \
-  --parameters repoOwner=three-cubes repoName=kairix keyVaultName=kv-kairix
+Use the current Azure caller contract documented in `README.md` until the
+shared request-and-receipt interface has executable contract tests and consumer
+acceptance evidence. Do not switch transports by configuration before then.
 
-# 2. Populate GitHub variables on three-cubes/kairix from the deployment outputs.
+## 8. Remove superseded surfaces
 
-# 3. Add .github/workflows/azure-vm-deploy-poc.yml with a workflow_dispatch
-#    trigger calling the shared workflow against vm-kairix-staging (or
-#    whatever the test VM is). Run 2-3 deploys via this path to validate.
+Produce a removal inventory that names each old file, its replacement and the
+evidence that the replacement has passed. Remove items after their consumer
+count reaches zero.
 
-# 4. Once Phase 1 is solid: open a PR that replaces release-vm-deploy.yml's
-#    deploy job with the shared-workflow call. Remove the HMAC signing logic
-#    + the Cloudflare Access env vars.
-```
+Typical removal candidates include:
 
-## Bootstrapping a brand-new repo
+- copied workflow jobs;
+- consumer-specific tool installation;
+- shell task schedulers;
+- independent workflow and fitness repin scripts;
+- VM-side application builds;
+- untyped deployment payloads;
+- duplicate full post-merge checks;
+- manual cleanup commands replaced by lifecycle policy.
 
-```bash
-# 1. Create the repo using the GitHub template (TODO — not yet built)
-gh repo create three-cubes/NEW-REPO --template three-cubes/platform-repo-template --private
+## Rollback during migration
 
-# 2. Provision the WIF identity
-az deployment group create \
-  --resource-group RG-AGENTS-CORE \
-  --template-file https://raw.githubusercontent.com/three-cubes/tc-pipelines/v1/infra/bicep/ci-deploy-identity.bicep \
-  --parameters repoOwner=three-cubes repoName=NEW-REPO
+The generated lock identifies the previous coordinated SDLC release. Revert the
+declaration and lock together and execute the previous released environment.
+For application deployment, select the previous qualified image digest and its
+state receipt.
 
-# 3. Populate variables, create environment
-CLIENT_ID=$(az deployment group show -g RG-AGENTS-CORE --name ci-deploy-identity \
-  --query 'properties.outputs.clientId.value' -o tsv)
-# ...etc
-gh variable set AZURE_CLIENT_ID --body "$CLIENT_ID" --repo three-cubes/NEW-REPO
-gh api -X PUT /repos/three-cubes/NEW-REPO/environments/production --silent
+Retain the current compatibility workflow until the corresponding package/image
+path has passed its consumer acceptance journey. This provides a bounded rollback
+path while keeping one documented target architecture.
 
-# 4. The template already includes .github/workflows/deploy-on-merge.yml.
-#    Edit it to point at YOUR target VMs + apply scripts.
-```
+## Migration completion evidence
 
-A future PR will add the `three-cubes/platform-repo-template` repo. Until then, copy-paste the thin caller from the tc-agent-zone migration example above.
+A consumer is converged when:
 
-## Rollback
-
-If the migration introduces a bug:
-
-```bash
-# Revert the workflow file in the consumer repo. The shared workflow is
-# pinned to a release SHA, so repinning to the previous one gets you out
-# and nothing moves under you in the meantime:
-uses: three-cubes/tc-pipelines/.github/workflows/azure-vm-deploy.yml@<known-good-sha>
-```
-
-The shared workflow has snapshots baked in by default — even a buggy apply gets a rollback window.
+- the declaration and lock are committed;
+- local and hosted task identities match;
+- the affected loop meets the 60-second target;
+- the complete graph is green;
+- `tc-fitness` runs through the graph;
+- one candidate digest passes local qualification, hosted qualification and
+  production PVT;
+- rollback has been exercised;
+- superseded orchestration is removed;
+- the release and deployment receipts are retained and linked from the change.
