@@ -4,26 +4,27 @@
 
 <!-- INCLUDE: _canonical-standards-banner.md -->
 
-## Prepare the repository
+## Prepare the current compatibility repository
 
 ```bash
-make bootstrap
-make prepare
+make setup
+make fix
 ```
 
-Bootstrap materialises the released environment and dependencies. Preparation
-applies deterministic formatting, generators, lock and manifest maintenance.
-Commit preparation output with the change that produced it.
+`make setup` installs the repository hooks. `make fix` applies the deterministic
+formatting and lock maintenance implemented by the rendered compatibility
+Makefile. Commit preparation output with the change that produced it.
 
-Repositories still migrating to `tc-sdlc` use the current commands documented
-in their Makefile until the coordinated adoption change lands.
+The coordinated `tc-sdlc` adoption change replaces these compatibility targets
+with `make bootstrap`, `make prepare`, `make check` and `make check-all`. Use the
+commands present in the repository Makefile until that change lands.
 
 ## Develop and verify
 
 1. Create the Linear-named feature branch from current `main`.
 2. Use `make check` for affected feedback while editing.
-3. Use `make check-all` before release admission or where the change surface
-   requires the complete graph.
+3. Use `make check` before release admission. After `tc-sdlc` adoption, use
+   `make check-all` for the complete graph.
 4. Reconcile with current `main` and repeat the required graph.
 5. Open one coherent PR through the trusted GitHub App path.
 6. Resolve review conversations and retain complete verification evidence.

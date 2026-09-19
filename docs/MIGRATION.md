@@ -159,8 +159,21 @@ Exercise these paths before production reliance:
 6. interrupted operation and lock recovery;
 7. cleanup with active and predecessor images retained.
 
-The Cloudflare SSH and Azure transports accept the same typed operation and
-return the same receipt. Select transport through deployment configuration.
+The target deployment contract gives the Cloudflare SSH and Azure transports
+the same typed operation and receipt. This transport parity is not implemented
+yet; it is a deployment-transaction tranche deliverable.
+
+The current compatibility surfaces remain distinct:
+
+- `cloudflare-access-ssh` accepts a `tc.deploy.request.v1` operation and
+  validates the returned deployment receipt;
+- `azure-vm-deploy.yml` accepts Azure-specific inputs plus a YAML list of
+  `{vm-name, apply-script, smoke-units}` targets and returns its current
+  preflight, snapshot and optional apply outputs.
+
+Use the current Azure caller contract documented in `README.md` until the
+shared request-and-receipt interface has executable contract tests and consumer
+acceptance evidence. Do not switch transports by configuration before then.
 
 ## 8. Remove superseded surfaces
 

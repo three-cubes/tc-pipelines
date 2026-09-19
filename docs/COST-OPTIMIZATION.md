@@ -125,11 +125,58 @@ not an operator memory task.
 Container-only releases use the predecessor digest plus a protected-state
 receipt when that combination provides complete recovery. Host or infrastructure
 changes use a recovery point appropriate to the changed state. Snapshot expiry
-is recorded when the snapshot is created and enforced by lifecycle cleanup.
+is recorded when the snapshot is created. The target deployment graph enforces
+it through lifecycle cleanup.
 
 Recovery policy is selected by the deployment contract and verified before
 mutation. The policy reflects the state at risk rather than applying a VM disk
 snapshot to every container change.
+
+### Current Azure compatibility cleanup
+
+`azure-vm-deploy.yml` records snapshot expiry but does not delete expired
+snapshots. Every consumer using that snapshotting path must schedule the
+separate pruner until deployment-graph lifecycle cleanup is implemented:
+
+```yaml
+name: Prune deploy snapshots
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      prune-legacy-deployment-snapshots:
+        description: Include untagged snapshots created before lifecycle tags
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@<sha> # vX.Y.Z
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: three-cubes/tc-pipelines/.github/actions/prune-azure-vm-snapshots@<sha> # vX.Y.Z
+        with:
+          resource-group: RG-AGENTS-CORE
+          retention-hours: "48"
+          prune-legacy-deployment-snapshots: ${{ inputs.prune-legacy-deployment-snapshots || 'false' }}
+```
+
+Run one manually dispatched migration with
+`prune-legacy-deployment-snapshots=true` after adopting lifecycle tags. Later
+scheduled runs delete tagged snapshots after `tc-expires-at`. The action also
+limits the one-time migration to untagged names matching the former
+`*-osdisk-pre-*` convention and older than the configured retention window.
 
 ## Runner placement
 

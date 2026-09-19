@@ -13,22 +13,22 @@ Product runtime behaviour lives with the product artefact.
 4. [`CONTRIBUTING.md`](CONTRIBUTING.md) — local and PR workflow.
 5. [`SCORECARD.md`](SCORECARD.md) — product health evidence.
 
-## Stable SDLC commands
+## Current compatibility commands
 
 ```bash
-make bootstrap
-make prepare
+make setup
+make fix
 make check
-make check-all
 ```
 
-`tc-pipelines` supplies the released environment and task graph. `tc-fitness`
-executes the configured fitness profile inside that graph. Local and hosted
-runs bind the same `tc-sdlc.lock`, task definitions and input identities.
+The rendered compatibility Makefile provides these three targets today.
+`make setup` installs hooks, `make fix` performs deterministic preparation and
+`make check` runs the configured `tc-fitness` gate.
 
-Repositories still migrating to `tc-sdlc` use the commands implemented by their
-current Makefile. Their migration state and removal inventory belong in the
-repository roadmap.
+After the coordinated `tc-sdlc` adoption change replaces the compatibility
+Makefile, the stable product commands are `make bootstrap`, `make prepare`,
+`make check` and `make check-all`. The adoption change adds those aliases and
+the generated `tc-sdlc.lock` together; do not use them before they exist.
 
 ## Commit and PR identity
 

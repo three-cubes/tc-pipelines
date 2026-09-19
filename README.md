@@ -112,13 +112,15 @@ the invocation.
 The current reusable workflows remain supported while their implementation is
 moved behind `tc-sdlc`:
 
-| Workflow | Purpose |
+| Surface | Purpose |
 |---|---|
 | `python-quality-gate.yml` | Current Python and `tc-fitness` compatibility gate. |
 | `meta-quality-gate.yml` | Workflow/action repository hygiene. |
 | `docker-build-publish.yml` | Build and publish an immutable container image. |
-| `release-on-merge.yml` and `release.yml` | Release preparation and publication. |
+| `actions/prepare-release-metadata` | Prepare release metadata on the candidate branch: update the version source and uv lock, promote changelog notes and commit the preparation receipt. |
+| `release-on-merge.yml` and `release.yml` | Publish the already prepared release from the exact reviewed merge commit. Both validate the committed preparation receipt; neither prepares it. |
 | `azure-vm-deploy.yml` | Current Azure VM deployment compatibility path. |
+| `.github/actions/prune-azure-vm-snapshots` | Delete expired recovery snapshots for the current Azure compatibility path; each snapshotting consumer schedules it. |
 | `mutation-gate.yml` | Diff-scoped mutation evaluation. |
 | `fresh-install-smoke.yml` | Clean environment installation exercise. |
 | `independent-verifier.yml` | Independent evidence verification. |

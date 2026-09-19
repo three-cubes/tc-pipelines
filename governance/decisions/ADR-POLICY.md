@@ -106,11 +106,11 @@ authoritative text — read the source.
 | `RULESET-D1` | The org-level `main` rulesets: block deletion + force-push; PR required with **0 approvals (autonomous)** on product repos (**1** on CORE) + code-owner review; **not strict** (no forced rebase) + **no stale-dismiss** (approvals stick); required checks = Quality gate + no-attribution. | `governance/rulesets/main-product.json` / `main-core.json` / `main-baseline.json`; `governance/README.md` |
 | `CODEOWNERS-D1` | Two-tier review routing: only the control plane (the gate's own definition) is owned — **no `* @OWNER`** — so work merges autonomously while gate-defining changes need a human. | `governance/CODEOWNERS`; `governance/README.md` |
 | `GATE-HARDEN` | Before a repo flips to 0-review its gate must clear the Gate-Hardening bar — a hard bar on new/changed code + monotonic ratchet on legacy debt, determinism non-negotiable. **Harden then flip, never flip first.** | `governance/gate-hardening.md` |
-| `QG-CONVERGE` | `tc-pipelines` executes the consumer task graph in the released environment; `tc-fitness` remains the fitness engine inside that graph. Local and hosted runs bind the same SDLC lock and task identity. | `governance/standards/ai-sdlc-product-architecture.md`; `STANDARDS.md` §2–3 |
+| `QG-CONVERGE` | The reusable Python gate shrinks to `checkout → setup-uv-cached → uv run tc-fitness run`; every step lives in each repo's `[tool.tc_fitness]`, so `make check == CI` by construction. | `.github/workflows/python-quality-gate.yml`; `STANDARDS.md` §2–3; `CHANGELOG.md` |
 | `MUT-RATCHET` | Mutation is diff-scoped and ratcheted: an escaped mutant on a changed line fails; the survivors baseline only ratchets down; Mutation is **not currently a required status check** (deferred until the workflow is wired). | `governance/gate-hardening.md`; `.github/workflows/mutation-gate.yml` |
 | `DEP-D1` | Dependency policy: 3-day-cooldown, grouped dependabot (pip + npm + github-actions, security-toggle-off) + a Renovate customManager pinning the tc-fitness engine version (no silent drift). | `governance/dependabot.yml`; `governance/renovate.json` |
-| `REPO-MERGE` | Two CORE product repos — tc-pipelines (SDLC environment, orchestration, evidence and governance) and tc-fitness (fitness engine and check catalogue); consumers adopt one coordinated SDLC release and promote reusable behaviour into the CORE home. | `AUTONOMOUS-DELIVERY-STANDARD.md` (paved road); `STANDARDS.md` §3 |
-| `VERS-D1` | One coordinated SDLC release catalogue binds the package version, workflow commit, image digest, schema and compatible fitness engine; the upgrade command materialises immutable consumer references together. | `governance/standards/ai-sdlc-product-architecture.md`; `README.md` |
+| `REPO-MERGE` | Two CORE paved-road repos — tc-pipelines (reusable CI + governance templates) and tc-fitness (the gate engine); consumers pin `@v1` / engine `@vX` + lockfile SHA; **promote prior work up into CORE, never fork-and-inline.** | `AUTONOMOUS-DELIVERY-STANDARD.md` (paved road); `STANDARDS.md` §3 |
+| `VERS-D1` | Semantic major pinning for reusables: `@vN` majors, breaking input/output changes cut a new major, **no `latest` tag** (undeclared moving targets break trust). | `docs/IMPLEMENTATION.md` (current compatibility versioning policy); `README.md` |
 | `WIF-D1` | Azure deploys authenticate via Workload Identity Federation (OIDC): CI mints a short-lived token at runtime and stores no service-principal secret in GitHub. | `governance/agent-sdlc-access-and-hitl.md`; `README.md` |
 | `WIF-D2` | One WIF identity per consumer repo limits deployment blast radius. | `governance/agent-sdlc-access-and-hitl.md` |
 | `WIF-D3` | Federated subjects bind the approved repository ref or protected environment. | `governance/agent-sdlc-access-and-hitl.md` |
@@ -118,6 +118,19 @@ authoritative text — read the source.
 | `WIF-D5` | tc-pipelines publishes public, secret-free SDLC artefacts for consumption across repositories. | `governance/standards/ai-sdlc-product-architecture.md`; `README.md` |
 | `COST-D1` | Every deploy-snapshotting consumer runs the reusable snapshot-prune action with a **48-hour** recovery window, including one legacy migration run after adoption. | `docs/COST-OPTIMIZATION.md` |
 | `COST-D2` | Right-size / stop-when-idle always-on VMs and prefer ephemeral PR envs or smoke-on-prod over a permanently-paid staging tier. | `docs/COST-OPTIMIZATION.md` |
+
+## Accepted target decisions under implementation
+
+These additive decisions define the approved target architecture. They do not
+claim that the corresponding executable surfaces exist. Each becomes an
+in-force operational contract only when its implementation tranche and consumer
+acceptance evidence are complete.
+
+| ID | Target decision | Implementation state | Source of record |
+|---|---|---|---|
+| `SDLC-PRODUCT-D1` | `tc-pipelines` becomes the released SDLC environment, task graph, hosted orchestration, evidence and governance product; `tc-fitness` remains its required evaluation engine and check catalogue. | Architecture accepted; executable foundation pending. | `governance/standards/ai-sdlc-product-architecture.md`; `docs/IMPLEMENTATION.md` |
+| `SDLC-GRAPH-D1` | Local and hosted execution bind the same generated SDLC lock, task identities and canonical environment. | Task graph, lock generator and image pending. | `governance/standards/ai-sdlc-product-architecture.md`; `docs/MIGRATION.md` |
+| `SDLC-CATALOGUE-D1` | One coordinated release catalogue binds package, workflow commit, image digest, schema and compatible fitness engine, and the upgrade command materialises those immutable references together. | Release catalogue and upgrade command pending. | `governance/standards/ai-sdlc-product-architecture.md`; `governance/standards/supply-chain-pinning.md` |
 
 The broader `AUTONOMOUS-DELIVERY-STANDARD.md` locked decisions **D1–D8** (no-attribution, guard-forward-only,
 safe lights-out merge, Linear-as-control-surface, and the D5–D8 defaults) sit above this register as
