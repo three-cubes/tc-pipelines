@@ -12,11 +12,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[3]
 CLI = ROOT / "actions/preparation-writeback/preparation_writeback.py"
+WRITER = ROOT / ".github/workflows/preparation-writeback.yml"
 
 
 def git(root: Path, *args: str) -> str:
@@ -283,6 +285,18 @@ def test_authenticated_fetch_uses_real_git_without_persistent_credentials(tmp_pa
         text=True,
         capture_output=True,
     ).returncode == 1
+
+
+def test_private_consumer_fetch_receives_the_read_token_in_the_fetch_step() -> None:
+    workflow = yaml.safe_load(WRITER.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["write-preparation"]["steps"]
+    fetch = next(
+        step
+        for step in steps
+        if step.get("name") == "Validate and apply without executing PR code"
+    )
+    assert "preparation_writeback.py fetch" in fetch["run"]
+    assert fetch["env"]["GITHUB_READ_TOKEN"] == "${{ github.token }}"
 
 
 @pytest.mark.parametrize("entries", [("preparation-patch.json", "preparation-receipt.json"), ("preparation-receipt.json", "preparation-patch.json")])

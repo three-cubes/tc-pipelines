@@ -133,7 +133,6 @@ jobs:
           REPOSITORY: ${{ inputs.repository }}
           ARTIFACT_ID: ${{ steps.source.outputs.artifact_id }}
           ROOT: ${{ steps.source.outputs.root }}
-          GITHUB_READ_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh api "repos/${REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > "$ROOT/receipt.zip"
@@ -152,6 +151,7 @@ jobs:
           WORKFLOW_RUN_ID: ${{ steps.source.outputs.workflow_run_id }}
           WORKFLOW_RUN_ATTEMPT: ${{ steps.source.outputs.workflow_run_attempt }}
           ROOT: ${{ steps.source.outputs.root }}
+          GITHUB_READ_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           worktree="$ROOT/worktree"
