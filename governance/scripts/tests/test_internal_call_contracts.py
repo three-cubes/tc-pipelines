@@ -185,7 +185,6 @@ def _gate_body_calls() -> dict[str, dict]:
 # same fan-in context. Inputs a lane sets deliberately per-lane (tier, sharding,
 # coverage upload, the attribution scan) are excluded.
 CONSUMER_FORWARDED = (
-    "pre-evaluation-normalize",
     "pre-steps",
     "post-steps",
     "python-version",

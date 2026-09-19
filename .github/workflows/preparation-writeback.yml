@@ -56,7 +56,7 @@ jobs:
       # immutable validator checkout; it has no consumer write authority.
       - id: bootstrap
         name: Mint scoped token for private tc-pipelines tools
-        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@c10c77b30ad489390ed71714db3a032f68d6c812 # v2.2.1
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@7fe3471280bb6d642186e63aec9b30fafbdac4e3 # v2.2.1
         with:
           client-id: ${{ inputs.azure-client-id }}
           tenant-id: ${{ inputs.azure-tenant-id }}

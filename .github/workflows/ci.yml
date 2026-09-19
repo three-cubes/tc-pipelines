@@ -69,7 +69,7 @@ jobs:
           # clone has none of those objects, so they would skip rather than check.
           fetch-depth: 0
       - name: Set up uv + Python
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@02bc49afcffb7e0d01fc8c2dadc0352791a46046 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@7fe3471280bb6d642186e63aec9b30fafbdac4e3 # v2.2.1 candidate
       - name: Run the contract tests
         run: make check
 
