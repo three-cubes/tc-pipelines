@@ -1,0 +1,84 @@
+name: assurance composite adapter executor
+on:
+  workflow_call:
+    inputs:
+      case:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  adapter:
+    name: Adapter
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Detect changes
+        id: changes
+        if: inputs.case == 'action-actions-detect-code-changes'
+        uses: ./actions/detect-code-changes
+        with:
+          code-change-filter: '^'
+          fetch-depth: '0'
+      - name: Verify license
+        if: inputs.case == 'action-actions-license-present'
+        uses: ./actions/license-present
+      - name: Run pre-commit
+        if: inputs.case == 'action-actions-pre-commit-cached'
+        uses: ./actions/pre-commit-cached
+        with:
+          sync-args: --locked
+          pre-commit-config: assurance/fixtures/hosted/pre-commit.yaml
+          extra-args: --all-files
+      - name: Install cloudflared
+        id: cloudflared
+        if: inputs.case == 'action-actions-setup-cloudflared'
+        uses: ./actions/setup-cloudflared
+      - name: Install locked environment
+        if: inputs.case == 'action-actions-setup-uv-cached'
+        uses: ./actions/setup-uv-cached
+        with:
+          sync-args: --locked
+      - name: Run Python gate body
+        if: inputs.case == 'action-actions-python-gate-body'
+        uses: ./actions/python-gate-body
+        with:
+          python-version: '3.12'
+          uv-version: '0.12.5'
+          sync-args: --locked
+          fetch-depth: '0'
+          tc-fitness-args: run
+          write-changed-files: 'false'
+          changed-files-path: .tc-fitness-changed-files
+          run-no-attribution: 'false'
+          pre-evaluation-normalize: ''
+          pre-steps: cp assurance/fixtures/hosted/gate.toml .tc-fitness.toml
+          post-steps: ''
+          run-node: 'false'
+          node-version-file: '.nvmrc'
+          pnpm-version: '11.22.0'
+          pnpm-install-args: --frozen-lockfile
+          ts-coverage-command: ''
+          gh-token: ${{ github.token }}
+          provision-osv-scanner: 'false'
+          upload-coverage-artifact: 'false'
+          coverage-xml-path: coverage.xml
+          coverage-artifact-name: assurance-unused-coverage
+      - name: Verify observed outputs
+        env:
+          CASE_ID: ${{ inputs.case }}
+          CODE_CHANGED: ${{ steps.changes.outputs.code-changed }}
+          CLOUDFLARED_PATH: ${{ steps.cloudflared.outputs.path }}
+          CLOUDFLARED_DIGEST: ${{ steps.cloudflared.outputs.executable-digest }}
+        run: python3 assurance/verify_adapter.py
+      - name: Retain named outputs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: adapter-${{ inputs.case }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30

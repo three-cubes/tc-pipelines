@@ -1,4 +1,4 @@
-# Local surface and consumer assurance
+# Surface and consumer assurance
 
 Run `make assurance`. It validates the exact public inventory and executes the
 Python, mixed Python/pnpm and freshly bootstrapped consumers. The command prints
@@ -36,6 +36,77 @@ describe tests; their presence alone does not establish their execution level.
 The inventory command produces structural inventory validation only. The lab
 produces hermetic **consumer** evidence, not hermetic proof for all 54 adapters.
 Admission must reject absent required adapter evidence.
+
+## Hosted adapters and receipts
+
+`surfaces.yaml` also classifies execution boundaries. Twelve adapters are safe
+to exercise without production credentials: six reusable workflows and six
+composites. Twenty-four protected adapters require a consumer-authorised
+non-mutating status receipt at release admission. Eighteen callable example
+wrappers are structural documentation; two reusable assurance executors are
+internal harnesses. All remain in the exact structural inventory, so their
+call contracts cannot silently disappear. These classifications describe the
+case boundary, not a claim that it has executed.
+
+PR and merge-group CI call `hosted-assurance.yml`, which selects from exact Git
+base/head commits and invokes each changed safe adapter through real
+`workflow_call`. Dependencies in the versioned inventory select affected
+adapters too. The action cases use local candidate action paths inside the
+reusable `hosted-actions.yml` executor. Existing immutable nested self-pins
+remain subject to the repository's self-pin contract tests.
+
+For local selection or release planning:
+
+```sh
+make assurance-hosted ASSURANCE_HOSTED_ARGS='select --base <40-hex> --head <40-hex>'
+make assurance-hosted ASSURANCE_HOSTED_ARGS='plan --base <40-hex> --head <40-hex> --complete --output /absolute/new-directory'
+```
+
+The complete selector is also available through the hosted workflow's manual
+dispatch. `selection.json` includes exact protected probe expectations for the
+consumer's protected environment. Cloudflare uses its existing allowlisted
+`status` request; Azure status references the existing `systemctl is-active`
+boundary. Azure deployment preflight can freeze writers and acquire leases,
+so this lane does not invoke it. Endpoints, units and credentials remain owned
+by the consumer; the assurance planner does not invent them or call them.
+
+`receipt.schema.json` defines `tc.sdlc/assurance/v1`. `receipt.py write` binds a
+declared expectation and a real observation to retained output digests;
+`receipt.py validate` checks those identities and outputs again. Every attempt
+uses a new execution UUID and a new directory. Non-applicable package/image,
+fitness-ledger and runtime fields are explicit nulls. Pipeline adapter cases
+qualify the workflow commit, not a new fitness wheel or a not-yet-existing SDLC
+package/image. Their task input digest binds the entire candidate Git tree and
+resolved case contract. Negative receipts need the exact declared finding in
+retained non-log evidence; a matching exit code is insufficient.
+
+Hosted collection reads the real GitHub run-attempt jobs and complete job logs,
+requires every named case job and assertion step, and rejects skipped, missing
+or duplicate outcomes. Receipts, raw logs, terminal records, failure diagnostics
+and the selection are uploaded in attempt-specific artifacts, with receipt
+digests in the job summary. Composite consumer outputs and scanner/mutation
+artifacts are retained by their actual producer workflows. Local receipts stay
+labelled `local`; the writer refuses to label them GitHub evidence outside the
+matching Actions run and attempt.
+
+`make assurance-hosted ASSURANCE_HOSTED_ARGS='admit --output /absolute/evidence-directory'`
+consumes retained evidence without repeating evaluations. It reselects the
+immutable candidate, recomputes receipt expectations and compares hosted
+terminal records with GitHub again. Protected cases require external
+`live-boundary` receipts with bound runtime receipts and the declared status
+operation. Missing external proof blocks admission while ordinary PR CI remains
+limited to safe adapters and the existing hermetic gate. The resulting
+`admission.json` records complete receipt digests for coordinated release
+composition. Tag/publish composition is the subsequent coordinated-release
+task; this change does not publish or deploy anything.
+
+The exact `Quality gate` fan-in now includes hosted assurance;
+`no-attribution` retains its protected name. The full self-gate runs on PR and
+merge-group candidates, with no duplicate full `push: main` evaluation.
+
+Local tests and lint validate the implementation, not GitHub execution. Actual
+hosted resolution, permissions, image builds, downloads and artifact retention
+remain unverified until the reviewed branch is pushed and these cases run.
 
 ## Disposable consumers
 

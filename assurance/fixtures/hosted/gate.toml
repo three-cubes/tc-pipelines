@@ -1,0 +1,6 @@
+name = "hosted adapter fixture"
+
+[[steps]]
+id = "surface-inventory"
+summary = "execute the public candidate inventory"
+run = ["python", "assurance/adapter_probe.py", "gate"]

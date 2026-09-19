@@ -152,10 +152,10 @@ def test_queue_less_profiles_require_current_base_status_checks(name: str) -> No
 
 
 def test_self_check_is_ready_for_queue_validation_and_cancels_superseded_pr_runs() -> None:
-    """Keep the dogfood gate aligned with the profile that bootstrap ships."""
+    """Validate PR/integration candidates without repeating full work after merge."""
     triggers = _triggers(SELF_CHECK)
-    assert {"pull_request", "push", "merge_group"} <= set(triggers)
-    assert triggers["push"]["branches"] == ["main"]
+    assert {"pull_request", "merge_group"} <= set(triggers)
+    assert "push" not in triggers
 
     workflow = yaml.load(SELF_CHECK.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     concurrency = workflow.get("concurrency") or {}

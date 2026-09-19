@@ -1,0 +1,164 @@
+name: hosted adapter assurance
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Exact comparison-base commit.
+        type: string
+        required: true
+      head:
+        description: Exact candidate commit; must match this workflow checkout.
+        type: string
+        required: true
+      complete:
+        description: Select the complete release adapter inventory.
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      base:
+        type: string
+        required: true
+      head:
+        type: string
+        required: true
+      complete:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      safe: ${{ steps.plan.outputs.safe }}
+      actions: ${{ steps.plan.outputs.actions }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - uses: ./actions/setup-uv-cached
+        with:
+          sync-args: --locked
+      - id: plan
+        env:
+          BASE: ${{ inputs.base }}
+          HEAD: ${{ inputs.head }}
+          COMPLETE: ${{ inputs.complete }}
+        run: uv run --no-sync python assurance/hosted.py plan --base "$BASE" --head "$HEAD" --output .assurance-hosted
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: assurance-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .assurance-hosted/selection.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+  meta:
+    name: workflow-meta-quality-gate
+    needs: select
+    if: contains(fromJSON(needs.select.outputs.safe), 'workflow-meta-quality-gate')
+    uses: ./.github/workflows/meta-quality-gate.yml
+    with:
+      run-no-attribution: false
+      yamllint-paths: .github/workflows actions .github/actions
+  python:
+    name: workflow-python-quality-gate
+    needs: select
+    if: contains(fromJSON(needs.select.outputs.safe), 'workflow-python-quality-gate')
+    uses: ./.github/workflows/python-quality-gate.yml
+    with:
+      run-no-attribution: false
+      sync-args: --locked
+      pre-steps: cp assurance/fixtures/hosted/gate.toml .tc-fitness.toml
+      upload-coverage-artifact: false
+  fresh:
+    name: workflow-fresh-install-smoke
+    needs: select
+    if: contains(fromJSON(needs.select.outputs.safe), 'workflow-fresh-install-smoke')
+    uses: ./.github/workflows/fresh-install-smoke.yml
+    with:
+      image-name: tc-assurance-fixture
+      build-context: assurance/fixtures/hosted
+      smoke-script: assurance/fixtures/hosted/smoke.sh
+      smoke-env-var-name: ASSURANCE_IMAGE_TAG
+  mutation:
+    name: workflow-mutation-gate
+    needs: select
+    if: contains(fromJSON(needs.select.outputs.safe), 'workflow-mutation-gate')
+    uses: ./.github/workflows/mutation-gate.yml
+    with:
+      restrict-to-main: false
+      install-mode: uv
+      uv-sync-args: --locked
+      apt-packages: ''
+      diff-base-strategy: explicit
+      diff-base-override: ${{ inputs.base }}
+      runner-command: uv run --no-sync python assurance/adapter_probe.py mutation
+      runner-args: --output artifacts/mutation.json
+      baseline-path: artifacts/mutation.json
+  security:
+    name: workflow-security-scan
+    needs: select
+    if: contains(fromJSON(needs.select.outputs.safe), 'workflow-security-scan')
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/security-scan.yml
+    with:
+      run-codeql: false
+      sarif-upload: false
+      gitleaks-baseline: assurance/fixtures/hosted/no-baseline.json
+      semgrep-configs: assurance/fixtures/hosted/semgrep.yaml
+  canary:
+    name: workflow-fitness-engine-canary
+    needs: select
+    if: contains(fromJSON(needs.select.outputs.safe), 'workflow-fitness-engine-canary')
+    uses: ./.github/workflows/fitness-engine-canary.yml
+    with:
+      candidate-ref: ac490ef70b0862985ca81714cd70ffe78762c194
+      consumer-repo: ${{ github.repository }}
+      consumer-ref: ${{ inputs.head }}
+      driver-ref: ${{ inputs.head }}
+      gate-command: uv lock && uv sync --locked && cp assurance/fixtures/hosted/gate.toml .tc-fitness.toml && uv run --no-sync tc-fitness run
+  actions:
+    name: ${{ matrix.case }}
+    needs: select
+    if: needs.select.outputs.actions != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        case: ${{ fromJSON(needs.select.outputs.actions) }}
+    uses: ./.github/workflows/hosted-actions.yml
+    with:
+      case: ${{ matrix.case }}
+  receipts:
+    needs: [select, meta, python, fresh, mutation, security, canary, actions]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - uses: ./actions/setup-uv-cached
+        with:
+          sync-args: --locked
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: assurance-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .assurance-hosted
+      - name: Validate and retain hosted receipts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uv run --no-sync python assurance/hosted.py collect --output .assurance-hosted
+      - name: Retain raw failed and final evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: assurance-receipts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .assurance-hosted/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30

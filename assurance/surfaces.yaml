@@ -1,8 +1,45 @@
 schema: tc.sdlc/surface-assurance/v1
 # Obligations for every published adapter; references are not execution receipts.
 surfaces:
+  - id: workflow.hosted-actions
+    path: .github/workflows/hosted-actions.yml
+    risk: control-plane
+    hosted:
+      boundary: assurance-harness
+      case: null
+      dependencies: ['assurance/**']
+      release_probe: null
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_hosted_assurance.py]
+      hermetic: [governance/scripts/tests/test_hosted_assurance.py]
+      hosted: [.github/workflows/hosted-assurance.yml]
+    sabotage: [missing-required-output]
+  - id: workflow.hosted-assurance
+    path: .github/workflows/hosted-assurance.yml
+    risk: control-plane
+    hosted:
+      boundary: assurance-harness
+      case: null
+      dependencies: ['assurance/**']
+      release_probe: null
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_hosted_assurance.py]
+      hermetic: [governance/scripts/tests/test_hosted_assurance.py]
+      hosted: [.github/workflows/hosted-assurance.yml]
+    sabotage: [missing-required-output]
   - id: workflow.auto-merge-on-green
     path: .github/workflows/auto-merge-on-green.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -14,17 +51,27 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.azure-vm-deploy
     path: .github/workflows/azure-vm-deploy.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/smoke-systemctl/action.yml#systemctl-is-active'
     risk: deployment
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_internal_call_contracts.py]
-      hermetic: []
+      hermetic: [governance/scripts/tests/test_azure_vm_deploy_preflight.py, governance/scripts/tests/test_azure_vm_deploy_protected_run_command.py]
       hosted: []
     sabotage: [missing-required-output]
   - id: workflow.capability-health-probe
     path: .github/workflows/capability-health-probe.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/smoke-systemctl/action.yml#systemctl-is-active'
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -36,6 +83,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.dependabot-automerge
     path: .github/workflows/dependabot-automerge.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -47,6 +99,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.docker-build-publish
     path: .github/workflows/docker-build-publish.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -58,6 +115,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.event-dispatch
     path: .github/workflows/event-dispatch.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -69,6 +131,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-azure-vm-deploy
     path: .github/workflows/example-azure-vm-deploy.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: deployment
     required:
       pr: [structural, hermetic]
@@ -80,6 +147,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-capability-health-probe
     path: .github/workflows/example-capability-health-probe.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -91,6 +163,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-dependabot-automerge
     path: .github/workflows/example-dependabot-automerge.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -102,6 +179,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-docker-build-publish
     path: .github/workflows/example-docker-build-publish.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -113,6 +195,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-event-dispatch
     path: .github/workflows/example-event-dispatch.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -124,6 +211,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-fitness-engine-canary
     path: .github/workflows/example-fitness-engine-canary.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -135,6 +227,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-fresh-install-smoke
     path: .github/workflows/example-fresh-install-smoke.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -146,6 +243,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-independent-verifier
     path: .github/workflows/example-independent-verifier.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -157,6 +259,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-loop-implement
     path: .github/workflows/example-loop-implement.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -168,6 +275,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-mutation-gate
     path: .github/workflows/example-mutation-gate.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -179,6 +291,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-publish-pypi
     path: .github/workflows/example-publish-pypi.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -190,6 +307,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-pytest-durations-refresh
     path: .github/workflows/example-pytest-durations-refresh.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -201,6 +323,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-python-quality-gate
     path: .github/workflows/example-python-quality-gate.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -212,6 +339,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-release-on-merge
     path: .github/workflows/example-release-on-merge.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -223,6 +355,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-release
     path: .github/workflows/example-release.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -234,6 +371,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-require-work-item
     path: .github/workflows/example-require-work-item.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -245,6 +387,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-security-scan
     path: .github/workflows/example-security-scan.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -256,6 +403,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.example-verify-and-close
     path: .github/workflows/example-verify-and-close.yml
+    hosted:
+      boundary: structural-example
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -267,17 +419,27 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.fitness-engine-canary
     path: .github/workflows/fitness-engine-canary.yml
+    hosted:
+      boundary: safe-hosted
+      case: workflow-fitness-engine-canary
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_internal_call_contracts.py]
-      hermetic: []
-      hosted: []
+      hermetic: [governance/scripts/tests/test_fitness_engine_canary.py]
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: workflow.fresh-install-smoke
     path: .github/workflows/fresh-install-smoke.yml
+    hosted:
+      boundary: safe-hosted
+      case: workflow-fresh-install-smoke
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -285,10 +447,15 @@ surfaces:
     evidence:
       structural: [governance/scripts/tests/test_internal_call_contracts.py]
       hermetic: []
-      hosted: []
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: workflow.independent-verifier
     path: .github/workflows/independent-verifier.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -300,6 +467,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.loop-implement
     path: .github/workflows/loop-implement.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -311,6 +483,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.meta-quality-gate
     path: .github/workflows/meta-quality-gate.yml
+    hosted:
+      boundary: safe-hosted
+      case: workflow-meta-quality-gate
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -318,10 +495,15 @@ surfaces:
     evidence:
       structural: [governance/scripts/tests/test_internal_call_contracts.py]
       hermetic: []
-      hosted: []
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: workflow.mutation-gate
     path: .github/workflows/mutation-gate.yml
+    hosted:
+      boundary: safe-hosted
+      case: workflow-mutation-gate
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -329,10 +511,15 @@ surfaces:
     evidence:
       structural: [governance/scripts/tests/test_internal_call_contracts.py]
       hermetic: []
-      hosted: []
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: workflow.publish-pypi
     path: .github/workflows/publish-pypi.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -344,6 +531,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.pytest-durations-refresh
     path: .github/workflows/pytest-durations-refresh.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -355,6 +547,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.python-quality-gate
     path: .github/workflows/python-quality-gate.yml
+    hosted:
+      boundary: safe-hosted
+      case: workflow-python-quality-gate
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -362,32 +559,47 @@ surfaces:
     evidence:
       structural: [governance/scripts/tests/test_internal_call_contracts.py]
       hermetic: []
-      hosted: []
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: workflow.release-on-merge
     path: .github/workflows/release-on-merge.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_internal_call_contracts.py]
-      hermetic: []
+      hermetic: [governance/scripts/tests/test_release_on_merge.py]
       hosted: []
     sabotage: [missing-required-output]
   - id: workflow.release
     path: .github/workflows/release.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_internal_call_contracts.py]
-      hermetic: []
+      hermetic: [governance/scripts/tests/test_release_tag.py]
       hosted: []
     sabotage: [missing-required-output]
   - id: workflow.require-work-item
     path: .github/workflows/require-work-item.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -399,6 +611,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: workflow.security-scan
     path: .github/workflows/security-scan.yml
+    hosted:
+      boundary: safe-hosted
+      case: workflow-security-scan
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -406,10 +623,15 @@ surfaces:
     evidence:
       structural: [governance/scripts/tests/test_internal_call_contracts.py]
       hermetic: []
-      hosted: []
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: workflow.verify-and-close
     path: .github/workflows/verify-and-close.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['governance/scripts/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -421,28 +643,43 @@ surfaces:
     sabotage: [missing-required-output]
   - id: action.actions.cloudflare-access-ssh
     path: actions/cloudflare-access-ssh/action.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['actions/cloudflare-access-ssh/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: 'actions/cloudflare-access-ssh/transport.py#status'
     risk: deployment
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
-      hermetic: []
+      hermetic: [governance/scripts/tests/test_cloudflare_access_ssh_action.py]
       hosted: []
     sabotage: [missing-required-output]
   - id: action.actions.detect-code-changes
     path: actions/detect-code-changes/action.yml
+    hosted:
+      boundary: safe-hosted
+      case: action-actions-detect-code-changes
+      dependencies: ['actions/detect-code-changes/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
-      hermetic: []
-      hosted: []
+      hermetic: [governance/scripts/tests/test_detect_code_changed.py]
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: action.actions.license-present
     path: actions/license-present/action.yml
+    hosted:
+      boundary: safe-hosted
+      case: action-actions-license-present
+      dependencies: ['actions/license-present/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -450,10 +687,15 @@ surfaces:
     evidence:
       structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
       hermetic: []
-      hosted: []
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: action.actions.pre-commit-cached
     path: actions/pre-commit-cached/action.yml
+    hosted:
+      boundary: safe-hosted
+      case: action-actions-pre-commit-cached
+      dependencies: ['actions/pre-commit-cached/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -461,65 +703,95 @@ surfaces:
     evidence:
       structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
       hermetic: []
-      hosted: []
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: action.actions.prepare-release-metadata
     path: actions/prepare-release-metadata/action.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['actions/prepare-release-metadata/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
-      hermetic: []
+      hermetic: [governance/scripts/tests/test_release_preparation.py]
       hosted: []
     sabotage: [missing-required-output]
   - id: action.actions.python-gate-body
     path: actions/python-gate-body/action.yml
+    hosted:
+      boundary: safe-hosted
+      case: action-actions-python-gate-body
+      dependencies: ['actions/python-gate-body/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
-      hermetic: []
-      hosted: []
+      hermetic: [governance/scripts/tests/test_pre_evaluation_normalization.py, governance/scripts/tests/test_declared_osv_scanner.py]
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: action.actions.setup-cloudflared
     path: actions/setup-cloudflared/action.yml
+    hosted:
+      boundary: safe-hosted
+      case: action-actions-setup-cloudflared
+      dependencies: ['actions/setup-cloudflared/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: deployment
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
-      hermetic: []
-      hosted: []
+      hermetic: [governance/scripts/tests/test_setup_cloudflared_action.py]
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: action.actions.setup-uv-cached
     path: actions/setup-uv-cached/action.yml
+    hosted:
+      boundary: safe-hosted
+      case: action-actions-setup-uv-cached
+      dependencies: ['actions/setup-uv-cached/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
     risk: control-plane
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
-      hermetic: []
-      hosted: []
+      hermetic: [governance/scripts/tests/test_setup_uv_cached_action.py]
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: action.github.actions.apply-on-vm-via-runcommand
     path: .github/actions/apply-on-vm-via-runcommand/action.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['.github/actions/apply-on-vm-via-runcommand/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: deployment
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
-      hermetic: []
+      hermetic: [governance/scripts/tests/test_run_command_output_gate.py]
       hosted: []
     sabotage: [missing-required-output]
   - id: action.github.actions.github-app-token
     path: .github/actions/github-app-token/action.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['.github/actions/github-app-token/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
@@ -531,17 +803,27 @@ surfaces:
     sabotage: [missing-required-output]
   - id: action.github.actions.postmerge-pr-evidence
     path: .github/actions/postmerge-pr-evidence/action.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['.github/actions/postmerge-pr-evidence/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
-      hermetic: []
+      hermetic: [governance/scripts/tests/test_postmerge_pr_evidence.py]
       hosted: []
     sabotage: [missing-required-output]
   - id: action.github.actions.prune-azure-vm-snapshots
     path: .github/actions/prune-azure-vm-snapshots/action.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['.github/actions/prune-azure-vm-snapshots/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/smoke-systemctl/action.yml#systemctl-is-active'
     risk: deployment
     required:
       pr: [structural, hermetic]
@@ -553,6 +835,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: action.github.actions.smoke-systemctl
     path: .github/actions/smoke-systemctl/action.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['.github/actions/smoke-systemctl/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/smoke-systemctl/action.yml#systemctl-is-active'
     risk: deployment
     required:
       pr: [structural, hermetic]
@@ -564,6 +851,11 @@ surfaces:
     sabotage: [missing-required-output]
   - id: action.github.actions.snapshot-azure-vm-disk
     path: .github/actions/snapshot-azure-vm-disk/action.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['.github/actions/snapshot-azure-vm-disk/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/smoke-systemctl/action.yml#systemctl-is-active'
     risk: deployment
     required:
       pr: [structural, hermetic]
@@ -575,17 +867,27 @@ surfaces:
     sabotage: [missing-required-output]
   - id: action.github.actions.verify-postmerge-pr-evidence
     path: .github/actions/verify-postmerge-pr-evidence/action.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['.github/actions/verify-postmerge-pr-evidence/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/verify-postmerge-pr-evidence/action.yml#read-only-evidence'
     risk: control-plane
     required:
       pr: [structural, hermetic]
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_composite_action_internal_consistency.py]
-      hermetic: []
+      hermetic: [governance/scripts/tests/test_postmerge_pr_evidence.py]
       hosted: []
     sabotage: [missing-required-output]
   - id: action.github.actions.wif-azure-login
     path: .github/actions/wif-azure-login/action.yml
+    hosted:
+      boundary: protected-live
+      case: null
+      dependencies: ['.github/actions/wif-azure-login/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: '.github/actions/smoke-systemctl/action.yml#systemctl-is-active'
     risk: deployment
     required:
       pr: [structural, hermetic]
