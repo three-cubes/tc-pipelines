@@ -356,13 +356,15 @@ def lab(root, output, wheel=None):
                             )
                     checkpoint(consumer)
                     shutil.copy2(consumer / "uv.lock", logs / "uv.lock")
-                    gate_steps = {
-                        step["id"]
-                        for step in tomllib.loads(
-                            (consumer / "pyproject.toml").read_text()
-                        )["tool"]["tc_fitness"]["steps"]
-                    }
-                    gate_steps.update(spec.get("catalogue_checks", []))
+                    gate_steps = []
+                    for step in tomllib.loads(
+                        (consumer / "pyproject.toml").read_text()
+                    )["tool"]["tc_fitness"]["steps"]:
+                        # Catalogue results complete inside their declared step,
+                        # before the enclosing step's terminal result.
+                        if "catalogue" in step:
+                            gate_steps.extend(spec.get("catalogue_checks", []))
+                        gate_steps.append(step["id"])
                     if variant == "sabotage":
                         sabotage = spec["sabotage"]
                         target = consumer / sabotage["path"]
@@ -440,7 +442,7 @@ def lab(root, output, wheel=None):
                             ("FAIL" if name in expected_failures else "PASS", name)
                             for name in gate_steps
                         ]
-                        if sorted(statuses) != sorted(expected_statuses):
+                        if statuses != expected_statuses:
                             raise AssuranceError(
                                 f"unexpected-terminal-result: expected {expected_statuses}, got {statuses}"
                             )

@@ -367,7 +367,7 @@ def test_workspace_validator_rejects_real_incorrect_tap(tmp_path, defect):
         )
 
 
-@pytest.mark.parametrize("defect", ["skip", "duplicate"])
+@pytest.mark.parametrize("defect", ["skip", "duplicate", "reordered"])
 def test_generated_terminal_validator_rejects_real_altered_result(tmp_path, defect):
     import shutil
 
@@ -380,11 +380,18 @@ def test_generated_terminal_validator_rejects_real_altered_result(tmp_path, defe
     manifest = yaml.safe_load(path.read_text())
     generated = next(row for row in manifest["consumers"] if row["id"] == "generated")
     original = generated["evaluate"]["affected"]
-    alteration = (
-        "text = text.replace('FAIL [harness-canon-reference]', 'SKIP [harness-canon-reference]')"
-        if defect == "skip"
-        else "text += '\\nPASS [consumer-tests] consumer-tests\\n'"
+    terminal_pattern = (
+        r"^(?:PASS \[[^]\n]+\].*|FAIL \[[^]\n]+\].* \(exit [1-9][0-9]*\))$"
     )
+    alteration = {
+        "skip": "text = text.replace('FAIL [harness-canon-reference]', 'SKIP [harness-canon-reference]')",
+        "duplicate": "text += '\\nPASS [consumer-tests] consumer-tests\\n'",
+        "reordered": (
+            f"rows = re.findall({terminal_pattern!r}, text, re.MULTILINE); "
+            "assert len(rows) == 9; reversed_rows = iter(rows[::-1]); "
+            f"text = re.sub({terminal_pattern!r}, lambda match: next(reversed_rows), text, flags=re.MULTILINE)"
+        ),
+    }[defect]
     # Execute the actual gate and alter only its generated sabotage transcript.
     # The engine, returned status, produced files and positive path remain real.
     script = (
