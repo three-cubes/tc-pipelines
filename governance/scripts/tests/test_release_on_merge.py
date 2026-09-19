@@ -17,9 +17,7 @@ RESOLVE_STEP = "Resolve prepared release from merge commit"
 
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [*args], capture_output=True, text=True, cwd=cwd, check=False
-    )
+    return subprocess.run([*args], capture_output=True, text=True, cwd=cwd, check=False)
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -63,14 +61,10 @@ def _repository(tmp_path: Path, *, receipt_changes: bool) -> tuple[Path, str]:
     return repository, _git(repository, "rev-parse", "HEAD")
 
 
-def _resolve(
-    repository: Path, merge_sha: str, output_file: Path
-) -> subprocess.CompletedProcess[str]:
+def _resolve(repository: Path, merge_sha: str, output_file: Path) -> subprocess.CompletedProcess[str]:
     step = _resolve_step()
     assert step, f"release-on-merge.yml has no `{RESOLVE_STEP}` step"
-    prelude = (
-        'export MERGE_SHA="$1" PREPARATION_FILE="$2" GITHUB_OUTPUT="$3"\n'
-    )
+    prelude = 'export MERGE_SHA="$1" PREPARATION_FILE="$2" GITHUB_OUTPUT="$3"\n'
     return _run(
         repository,
         "bash",

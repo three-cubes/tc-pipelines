@@ -30,13 +30,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from loop_dispatcher import (  # noqa: E402 — path shim above
+from loop_dispatcher import (
     CandidateIssue,
     Dispatcher,
     StaticIssueSource,
     guardrails_validated,
 )
-from loop_governor import (  # noqa: E402
+from loop_governor import (
     DEFAULT_CIRCUIT_BREAKER_THRESHOLD,
     ContinueAction,
     Governor,
@@ -45,12 +45,12 @@ from loop_governor import (  # noqa: E402
     NullStateStore,
     StateStoreError,
 )
-from loop_runner import (  # noqa: E402
+from loop_runner import (
     LoggingDispatchSink,
     RunDecision,
     Runner,
 )
-from loop_state_machine import GuardrailConfig, GuardrailTripped  # noqa: E402
+from loop_state_machine import GuardrailConfig, GuardrailTripped
 
 
 # --------------------------------------------------------------------------- #
@@ -70,15 +70,21 @@ def _issue(id="PLA-1"):
     )
 
 
-def _fresh_runner(issues, store, *, config=None, soak_ticks=0, armed=True,
-                  cost=1.0, validator=lambda: True):
+def _fresh_runner(
+    issues,
+    store,
+    *,
+    config=None,
+    soak_ticks=0,
+    armed=True,
+    cost=1.0,
+    validator=lambda: True,
+):
     """A BRAND-NEW Runner + Governor (as a fresh process would build) bound to the
     given (possibly shared, on-disk) state store. Arming is re-decided here every
     call — exactly as the workflow re-arms from LOOP_ARMED each tick — so nothing
     but the durable store carries state between ticks."""
-    dispatcher = Dispatcher(
-        StaticIssueSource(issues), config=config, guardrails_validator=validator
-    )
+    dispatcher = Dispatcher(StaticIssueSource(issues), config=config, guardrails_validator=validator)
     governor = Governor(config)
     if armed:
         governor.arm(guardrails_validated=True)
@@ -340,9 +346,7 @@ class SoakBeforeLiveTest(_HardeningCase):
         # A disarmed tick is a pure preview: it must not burn a soak tick.
         cfg = GuardrailConfig()
         store = JsonFileStateStore(self._state_file())
-        runner, _ = _fresh_runner(
-            [_issue("PLA-1")], store, config=cfg, soak_ticks=2, armed=False
-        )
+        runner, _ = _fresh_runner([_issue("PLA-1")], store, config=cfg, soak_ticks=2, armed=False)
         res = runner.run_once(LoggingDispatchSink(), dry_run=False)
         self.assertEqual(res.decision, RunDecision.RECORDED)
         self.assertEqual(store.load().soak_ticks, 0)  # unchanged — disarmed preview
@@ -384,9 +388,7 @@ class GuardrailsValidatedFailClosedTest(_HardeningCase):
         # A truncated harness (green, but fewer than the known-minimum) fails closed.
         d = self._tmpdir()
         (d / "test_stub_guardrails.py").write_text(_STUB_FEWER_TESTS, encoding="utf-8")
-        self.assertFalse(
-            guardrails_validated(test_dir=d, pattern="test_stub_guardrails.py")
-        )
+        self.assertFalse(guardrails_validated(test_dir=d, pattern="test_stub_guardrails.py"))
 
     def test_real_harness_validates(self):
         # The real 25-test stop-condition harness IS green and above the floor.
@@ -404,11 +406,12 @@ class GuardrailsValidatedFailClosedTest(_HardeningCase):
         with self.assertRaises(GuardrailTripped):
             gov.arm(guardrails_validated=validator())
         # ...and the runner REFUSES the tick (nothing selected, nothing dispatched).
-        dispatcher = Dispatcher(
-            StaticIssueSource([_issue("PLA-1")]), guardrails_validator=validator
-        )
+        dispatcher = Dispatcher(StaticIssueSource([_issue("PLA-1")]), guardrails_validator=validator)
         runner = Runner(
-            dispatcher, gov, guardrails_validator=validator, state_store=NullStateStore()
+            dispatcher,
+            gov,
+            guardrails_validator=validator,
+            state_store=NullStateStore(),
         )
         res = runner.run_once(LoggingDispatchSink(), dry_run=True)
         self.assertEqual(res.decision, RunDecision.REFUSED)

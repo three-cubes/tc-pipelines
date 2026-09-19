@@ -117,9 +117,9 @@ def _tests_for_skipped(var: str, body: str) -> bool:
     neither counts.
     """
     return any(
-        "skipped" in line
-        and _reads(var, line)
+        _reads(var, line)
         and not line.lstrip().startswith(("#", "echo"))
+        and ("skipped" in line or ("success" in line and "!=" in line))
         for line in body.splitlines()
     )
 
@@ -152,10 +152,10 @@ def test_queue_less_profiles_require_current_base_status_checks(name: str) -> No
 
 
 def test_self_check_is_ready_for_queue_validation_and_cancels_superseded_pr_runs() -> None:
-    """Keep the dogfood gate aligned with the profile that bootstrap ships."""
+    """Validate PR/integration candidates without repeating full work after merge."""
     triggers = _triggers(SELF_CHECK)
-    assert {"pull_request", "push", "merge_group"} <= set(triggers)
-    assert triggers["push"]["branches"] == ["main"]
+    assert {"pull_request", "merge_group"} <= set(triggers)
+    assert "push" not in triggers
 
     workflow = yaml.load(SELF_CHECK.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     concurrency = workflow.get("concurrency") or {}
@@ -221,9 +221,7 @@ def test_a_bare_required_context_has_a_top_level_publisher(context: str) -> None
         f"fix: name a top-level job of {SELF_CHECK.name} exactly `{context}`, "
         f"or drop the context from {RULESET_DIR.name}/."
     )
-    delegated = sorted(
-        job_id for job_id in publishers if SELF_CHECK_JOBS[job_id].get("uses")
-    )
+    delegated = sorted(job_id for job_id in publishers if SELF_CHECK_JOBS[job_id].get("uses"))
     assert not delegated, (
         f"{SELF_CHECK.name}: job(s) {delegated} publish the required context "
         f"`{context}` through a reusable `uses:`. A delegated leg reports as "
@@ -249,7 +247,8 @@ def test_the_fan_in_reads_every_lane_it_requires(job: str) -> None:
     # lines alone, so dropping a lane from the check while leaving it in the
     # progress line is not mistaken for reading it.
     body = "\n".join(
-        line for line in str(_fan_in_step().get("run", "")).splitlines()
+        line
+        for line in str(_fan_in_step().get("run", "")).splitlines()
         if not line.strip().startswith("echo")
     )
     unread = sorted(var for var in bound if not _reads(var, body))
@@ -283,9 +282,7 @@ def test_every_lane_is_wired_into_the_fan_in(job: str) -> None:
 @pytest.mark.parametrize("job", NEEDS)
 def test_a_skipped_quality_lane_cannot_report_pass(job: str) -> None:
     body = str(_fan_in_step().get("run", ""))
-    results = [
-        var for var, expr in _bindings(job).items() if f"needs.{job}.result" in expr
-    ]
+    results = [var for var, expr in _bindings(job).items() if f"needs.{job}.result" in expr]
     checked = any(_tests_for_skipped(var, body) for var in results)
 
     if job in SKIP_IS_LEGITIMATE:

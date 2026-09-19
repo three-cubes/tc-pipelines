@@ -79,16 +79,13 @@ def _reusables() -> list[str]:
     return sorted(
         path.name
         for path in WORKFLOW_DIR.glob("*.yml")
-        if not path.name.startswith(EXAMPLE_PREFIX)
-        and "workflow_call" in _trigger_names(_load(path))
+        if not path.name.startswith(EXAMPLE_PREFIX) and "workflow_call" in _trigger_names(_load(path))
     )
 
 
 def _examples() -> list[str]:
     return sorted(
-        path.name
-        for path in WORKFLOW_DIR.glob(f"{EXAMPLE_PREFIX}*.yml")
-        if path.name != DISPATCHER
+        path.name for path in WORKFLOW_DIR.glob(f"{EXAMPLE_PREFIX}*.yml") if path.name != DISPATCHER
     )
 
 
@@ -209,9 +206,7 @@ def test_every_declared_exception_names_a_real_uncalled_reusable() -> None:
         f"explains."
     )
 
-    unexplained = sorted(
-        name for name, reason in NO_EXAMPLE_CALLER.items() if not reason.strip()
-    )
+    unexplained = sorted(name for name, reason in NO_EXAMPLE_CALLER.items() if not reason.strip())
     assert not unexplained, (
         f"NO_EXAMPLE_CALLER entries {unexplained} carry no reason, so a later "
         f"reader cannot tell a decision from an oversight. fix: state why an "

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Advance every tc-pipelines self-pin to one immutable released commit."""
 
 from __future__ import annotations
@@ -7,7 +6,6 @@ import argparse
 import re
 import sys
 from pathlib import Path
-
 
 SHA = re.compile(r"[0-9a-f]{40}")
 VERSION = re.compile(r"v[0-9]+(?:\.[0-9]+){2}(?:[-.][0-9A-Za-z]+)*")
@@ -29,10 +27,7 @@ def parse_args() -> argparse.Namespace:
 
 def source_files(root: Path) -> list[Path]:
     return sorted(
-        path
-        for target in TARGETS
-        if (root / target).is_dir()
-        for path in (root / target).rglob("*.yml")
+        path for target in TARGETS if (root / target).is_dir() for path in (root / target).rglob("*.yml")
     )
 
 
@@ -56,9 +51,7 @@ def main() -> int:
             if match.group("sha") != args.sha
         )
         updated = SELF_PIN.sub(
-            lambda match: (
-                f"{match.group('prefix')}{args.sha}{match.group('comment')}{args.version}"
-            ),
+            lambda match: f"{match.group('prefix')}{args.sha}{match.group('comment')}{args.version}",
             text,
         )
         if not args.check and updated != text:

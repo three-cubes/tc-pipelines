@@ -37,6 +37,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   docker-kairix:

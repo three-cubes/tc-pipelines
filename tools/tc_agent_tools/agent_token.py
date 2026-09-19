@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Mint a short-lived per-agent GitHub App installation token.
 
 This lower-level command is for a trusted off-CI host broker and restricted
@@ -117,8 +116,18 @@ def kv(name: str) -> str:
     """Read a secret value from the agent Key Vault via the local `az` login."""
     return subprocess.check_output(
         [
-            "az", "keyvault", "secret", "show",
-            "--vault-name", VAULT, "--name", name, "--query", "value", "-o", "tsv",
+            "az",
+            "keyvault",
+            "secret",
+            "show",
+            "--vault-name",
+            VAULT,
+            "--name",
+            name,
+            "--query",
+            "value",
+            "-o",
+            "tsv",
         ],
         text=True,
     ).strip()
@@ -127,7 +136,7 @@ def kv(name: str) -> str:
 def _api(path: str, token: str, *, bearer: bool = False) -> dict | list:
     """GET a GitHub API resource with an App JWT (bearer) or installation token."""
     scheme = "Bearer" if bearer else "token"
-    req = urllib.request.Request(  # noqa: S310 — fixed api.github.com base, not user input
+    req = urllib.request.Request(
         f"{API}{path}",
         headers={
             "Authorization": f"{scheme} {token}",
@@ -135,13 +144,13 @@ def _api(path: str, token: str, *, bearer: bool = False) -> dict | list:
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    with urllib.request.urlopen(req) as r:  # noqa: S310 — fixed api.github.com base
+    with urllib.request.urlopen(req) as r:
         return json.load(r)
 
 
 def _post(path: str, assertion: str, payload: dict) -> dict:
     """POST to a GitHub API resource with an App JWT bearer assertion."""
-    req = urllib.request.Request(  # noqa: S310 — fixed api.github.com base, not user input
+    req = urllib.request.Request(
         f"{API}{path}",
         method="POST",
         data=json.dumps(payload).encode("utf-8"),
@@ -152,7 +161,7 @@ def _post(path: str, assertion: str, payload: dict) -> dict:
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    with urllib.request.urlopen(req) as r:  # noqa: S310 — fixed api.github.com base
+    with urllib.request.urlopen(req) as r:
         return json.load(r)
 
 
@@ -166,9 +175,7 @@ def resolve_installation_id(agent: AgentApp, assertion: str, repo: str) -> str:
 def apply_git_config() -> None:
     """Set canonical agent commit metadata in the current repository."""
     try:
-        subprocess.run(
-            ["git", "config", "--local", "user.name", CANONICAL_GIT_NAME], check=True
-        )
+        subprocess.run(["git", "config", "--local", "user.name", CANONICAL_GIT_NAME], check=True)
         subprocess.run(
             ["git", "config", "--local", "user.email", CANONICAL_GIT_EMAIL],
             check=True,
@@ -179,8 +186,7 @@ def apply_git_config() -> None:
             f"run inside a git repo, or drop --git-config and set it by hand."
         ) from None
     print(
-        f"agent-token: git metadata set to {CANONICAL_GIT_NAME} "
-        f"<{CANONICAL_GIT_EMAIL}>",
+        f"agent-token: git metadata set to {CANONICAL_GIT_NAME} <{CANONICAL_GIT_EMAIL}>",
         file=sys.stderr,
     )
 

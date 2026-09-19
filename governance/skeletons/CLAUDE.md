@@ -17,18 +17,17 @@ Product runtime behaviour lives with the product artefact.
 
 ```bash
 make setup
-make fix
+make prepare
 make check
 ```
 
 The rendered compatibility Makefile provides these three targets today.
-`make setup` installs hooks, `make fix` performs deterministic preparation and
-`make check` runs the configured `tc-fitness` gate.
+`make setup` installs hooks, `make prepare` performs deterministic preparation
+and `make check` prepares then runs the configured `tc-fitness` gate.
 
 After the coordinated `tc-sdlc` adoption change replaces the compatibility
-Makefile, the stable product commands are `make bootstrap`, `make prepare`,
-`make check` and `make check-all`. The adoption change adds those aliases and
-the generated `tc-sdlc.lock` together; do not use them before they exist.
+Makefile, the stable product commands remain `make bootstrap`, `make prepare`,
+`make check` and `make check-all`.
 
 ## Commit and PR identity
 

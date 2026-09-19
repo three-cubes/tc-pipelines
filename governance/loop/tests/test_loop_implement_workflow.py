@@ -20,9 +20,7 @@ import unittest
 from pathlib import Path
 
 # Repo root: governance/loop/tests -> parents[3].
-_WORKFLOW = (
-    Path(__file__).resolve().parents[3] / ".github" / "workflows" / "loop-implement.yml"
-)
+_WORKFLOW = Path(__file__).resolve().parents[3] / ".github" / "workflows" / "loop-implement.yml"
 _DEFAULT_ALLOWED = "kairix kata tc-agent-zone tc-pipelines data-visualisation"
 
 
@@ -68,12 +66,17 @@ def _extract_run_block(text: str, name_substr: str) -> str:
 class ValidateStepAllowlistTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.script = _extract_run_block(
-            _WORKFLOW.read_text(encoding="utf-8"), "Validate inputs"
-        )
+        cls.script = _extract_run_block(_WORKFLOW.read_text(encoding="utf-8"), "Validate inputs")
 
-    def _run(self, repo_in, *, issue="SGO-76", branch="dan/sgo-76-x",
-             owner="three-cubes", allowed=_DEFAULT_ALLOWED):
+    def _run(
+        self,
+        repo_in,
+        *,
+        issue="SGO-76",
+        branch="dan/sgo-76-x",
+        owner="three-cubes",
+        allowed=_DEFAULT_ALLOWED,
+    ):
         env = dict(os.environ)
         with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as fh:
             github_env = fh.name
@@ -88,7 +91,10 @@ class ValidateStepAllowlistTest(unittest.TestCase):
         try:
             return subprocess.run(
                 ["bash", "-c", self.script],
-                env=env, capture_output=True, text=True,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
             )
         finally:
             os.unlink(github_env)

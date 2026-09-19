@@ -23,6 +23,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  pull-requests: write
 
 jobs:
   # Only the WIF identity triple is required: the reusable resolves the PR

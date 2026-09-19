@@ -1,0 +1,91 @@
+name: "Deterministic preparation receipt"
+description: "Create or verify a bounded deterministic-preparation receipt."
+inputs:
+  mode:
+    description: "snapshot, produce, apply, changed, push, artifact, or fetch"
+    required: true
+  repository:
+    required: false
+  pull-request:
+    required: false
+  head-sha:
+    required: false
+  head-ref:
+    required: false
+  head-repository:
+    required: false
+  workflow-run-id:
+    required: false
+  workflow-run-attempt:
+    required: false
+  snapshot:
+    required: false
+  receipt:
+    required: false
+  patch:
+    required: false
+  expected-policy:
+    description: "Closed preparation policy expected in apply mode."
+    default: "python-ruff-v1"
+  output:
+    required: false
+  archive:
+    required: false
+  root:
+    required: true
+  remote:
+    required: false
+  remote-url:
+    required: false
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        REPOSITORY: ${{ inputs.repository }}
+        PULL_REQUEST: ${{ inputs.pull-request }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        HEAD_REF: ${{ inputs.head-ref }}
+        HEAD_REPOSITORY: ${{ inputs.head-repository }}
+        WORKFLOW_RUN_ID: ${{ inputs.workflow-run-id }}
+        WORKFLOW_RUN_ATTEMPT: ${{ inputs.workflow-run-attempt }}
+        SNAPSHOT: ${{ inputs.snapshot }}
+        RECEIPT: ${{ inputs.receipt }}
+        PATCH: ${{ inputs.patch }}
+        EXPECTED_POLICY: ${{ inputs.expected-policy }}
+        OUTPUT: ${{ inputs.output }}
+        ARCHIVE: ${{ inputs.archive }}
+        ROOT: ${{ inputs.root }}
+        REMOTE: ${{ inputs.remote }}
+        REMOTE_URL: ${{ inputs.remote-url }}
+      run: |
+        set -euo pipefail
+        script="$GITHUB_ACTION_PATH/preparation_writeback.py"
+        case "$MODE" in
+          snapshot)
+            exec python3 "$script" snapshot --repository "$REPOSITORY" --pull-request "$PULL_REQUEST" --head-sha "$HEAD_SHA" --head-repository "$HEAD_REPOSITORY" --head-ref "$HEAD_REF" --workflow-run-id "$WORKFLOW_RUN_ID" --workflow-run-attempt "$WORKFLOW_RUN_ATTEMPT" --output "$OUTPUT" --root "$ROOT"
+            ;;
+          produce)
+            exec python3 "$script" produce --snapshot "$SNAPSHOT" --receipt "$RECEIPT" --patch "$PATCH" --root "$ROOT"
+            ;;
+          apply)
+            exec python3 "$script" apply --receipt "$RECEIPT" --patch "$PATCH" --repository "$REPOSITORY" --pull-request "$PULL_REQUEST" --expected-head "$HEAD_SHA" --expected-policy "$EXPECTED_POLICY" --expected-head-ref "$HEAD_REF" --workflow-run-id "$WORKFLOW_RUN_ID" --workflow-run-attempt "$WORKFLOW_RUN_ATTEMPT" --root "$ROOT"
+            ;;
+          changed)
+            exec python3 "$script" changed --root "$ROOT"
+            ;;
+          push)
+            exec python3 "$script" push --root "$ROOT" --remote "$REMOTE" --head-ref "$HEAD_REF" --expected-head "$HEAD_SHA"
+            ;;
+          artifact)
+            exec python3 "$script" artifact --archive "$ARCHIVE" --output "$OUTPUT"
+            ;;
+          fetch)
+            exec python3 "$script" fetch --root "$ROOT" --remote-url "$REMOTE_URL" --head-sha "$HEAD_SHA"
+            ;;
+          *)
+            echo "::error::preparation-writeback: unsupported mode" >&2
+            exit 2
+            ;;
+        esac

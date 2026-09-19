@@ -18,16 +18,17 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from typing import ClassVar
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import loop_dispatcher as disp  # noqa: E402 — path shim above
-import loop_state_machine as loop  # noqa: E402
-from loop_dispatcher import (  # noqa: E402
+import loop_dispatcher as disp
+import loop_state_machine as loop
+from loop_dispatcher import (
     Blocker,
     CandidateIssue,
-    Dispatcher,
     DispatchContract,
+    Dispatcher,
     HttpLinearSource,
     JsonIssueSource,
     StaticIssueSource,
@@ -182,9 +183,7 @@ class RepoInferenceTest(unittest.TestCase):
         self.assertEqual(infer_repo(issue), "tc-fitness")
 
     def test_repos_line_in_description(self):
-        issue = _issue(
-            description="**Repos:** tc-pipelines (workflows/actions) CORE + tc-fitness"
-        )
+        issue = _issue(description="**Repos:** tc-pipelines (workflows/actions) CORE + tc-fitness")
         self.assertEqual(infer_repo(issue), "tc-pipelines")
 
     def test_team_map_fallback(self):
@@ -248,9 +247,7 @@ class RepoResolutionFetchTest(unittest.TestCase):
         )
         issue = _issue(id="SGO-198", description="Long lead-in that the bulk")
         self.assertEqual(infer_repo(issue), "tc-agent-zone")  # truncated → fallback
-        self.assertEqual(
-            infer_repo(issue, description_resolver=lambda i: full), "tc-fitness"
-        )
+        self.assertEqual(infer_repo(issue, description_resolver=lambda i: full), "tc-fitness")
 
     def test_fallback_only_when_neither_label_nor_repos_line(self):
         # Full description ALSO carries no **Repos:** line and there is no label →
@@ -276,14 +273,10 @@ class BranchInferenceTest(unittest.TestCase):
 
     def test_synthesises_user_team_n_slug(self):
         issue = _issue(id="PLA-311", git_branch_name=None)
-        self.assertEqual(
-            branch_for(issue, default_user="dan"), "dan/pla-311-work-for-pla-311"
-        )
+        self.assertEqual(branch_for(issue, default_user="dan"), "dan/pla-311-work-for-pla-311")
 
     def test_slugify(self):
-        self.assertEqual(
-            slugify("SP-C-3: Advance the loop!"), "sp-c-3-advance-the-loop"
-        )
+        self.assertEqual(slugify("SP-C-3: Advance the loop!"), "sp-c-3-advance-the-loop")
         self.assertEqual(slugify("   Mixed  Case  "), "mixed-case")
 
 
@@ -327,9 +320,7 @@ class FromLinearTest(unittest.TestCase):
             {
                 "id": "PLA-1",
                 "statusType": "backlog",
-                "relations": {
-                    "blockedBy": [{"id": "PLA-2", "state": {"type": "started"}}]
-                },
+                "relations": {"blockedBy": [{"id": "PLA-2", "state": {"type": "started"}}]},
             }
         )
         self.assertTrue(issue.is_blocked)
@@ -339,9 +330,7 @@ class FromLinearTest(unittest.TestCase):
             {
                 "id": "PLA-1",
                 "statusType": "backlog",
-                "relations": {
-                    "blockedBy": [{"id": "PLA-2", "state": {"type": "completed"}}]
-                },
+                "relations": {"blockedBy": [{"id": "PLA-2", "state": {"type": "completed"}}]},
             }
         )
         self.assertFalse(issue.is_blocked)
@@ -385,9 +374,7 @@ class DispatchGateTest(unittest.TestCase):
 
     def test_global_budget_circuit_breaker_halts_emission(self):
         issues = [_issue(id=f"PLA-{n}", labels=("adp-wave-1",)) for n in range(5)]
-        d = _armed_dispatcher(
-            issues, config=loop.GuardrailConfig(global_budget=2.0, per_issue_budget=1e9)
-        )
+        d = _armed_dispatcher(issues, config=loop.GuardrailConfig(global_budget=2.0, per_issue_budget=1e9))
         plan = d.plan(limit=5, cost_per_issue=1.0)
         # Only two fit under the global cap; the breaker then halts the cycle.
         self.assertEqual(len(plan.contracts), 2)
@@ -410,9 +397,7 @@ class DispatchGateTest(unittest.TestCase):
         self.assertEqual(c.repo, "tc-pipelines")
         self.assertEqual(c.branch, "dan/pla-311-sp-c-3")
         self.assertEqual(c.wave, 3)
-        self.assertEqual(
-            c.acceptance_criteria, "https://linear.app/three-cubes/issue/PLA-311"
-        )
+        self.assertEqual(c.acceptance_criteria, "https://linear.app/three-cubes/issue/PLA-311")
 
     def test_plan_never_mutates_or_spawns(self):
         # The plan is a pure transform: emitting a contract has no external side
@@ -427,7 +412,7 @@ class DispatchGateTest(unittest.TestCase):
 # GraphQL snapshot parser (pure — no network)
 # --------------------------------------------------------------------------- #
 class ParseInitiativeTest(unittest.TestCase):
-    PAYLOAD = {
+    PAYLOAD: ClassVar = {
         "data": {
             "initiative": {
                 "projects": {
@@ -505,9 +490,7 @@ class ParseInitiativeTest(unittest.TestCase):
                                                         "type": "related",
                                                         "relatedIssue": {
                                                             "identifier": "PLA-2",
-                                                            "state": {
-                                                                "type": "started"
-                                                            },
+                                                            "state": {"type": "started"},
                                                         },
                                                     }
                                                 ]
@@ -558,9 +541,7 @@ class ParseIssueDescriptionTest(unittest.TestCase):
         self.assertEqual(parse_issue_description({}), "")
 
     def test_null_description_is_empty_string(self):
-        self.assertEqual(
-            parse_issue_description({"data": {"issue": {"description": None}}}), ""
-        )
+        self.assertEqual(parse_issue_description({"data": {"issue": {"description": None}}}), "")
 
     def test_graphql_errors_raise(self):
         with self.assertRaises(ValueError):
@@ -574,9 +555,7 @@ class HttpSourceFetchDescriptionTest(unittest.TestCase):
         def fake_opener(req, timeout=None):
             captured["body"] = json.loads(req.data.decode("utf-8"))
             return _FakeResponse(
-                json.dumps(
-                    {"data": {"issue": {"description": "**Repos:** tc-fitness CORE"}}}
-                ).encode("utf-8")
+                json.dumps({"data": {"issue": {"description": "**Repos:** tc-fitness CORE"}}}).encode("utf-8")
             )
 
         src = HttpLinearSource("lin_api_x", opener=fake_opener)
@@ -586,8 +565,10 @@ class HttpSourceFetchDescriptionTest(unittest.TestCase):
         self.assertEqual(captured["body"]["variables"], {"id": "SGO-198"})
         # ... and that description resolves to the right repo via infer_repo.
         self.assertEqual(
-            infer_repo(_issue(id="SGO-198", description=""),
-                       description_resolver=lambda i: desc),
+            infer_repo(
+                _issue(id="SGO-198", description=""),
+                description_resolver=lambda i: desc,
+            ),
             "tc-fitness",
         )
 
@@ -640,13 +621,7 @@ class HttpSourcePaginatedFetchTest(unittest.TestCase):
                 page = pages[(variables["pid"], variables["after"])]
                 data = {"data": {"project": {"issues": page}}}
             else:  # the cheap project-ids hop
-                data = {
-                    "data": {
-                        "initiative": {
-                            "projects": {"nodes": [{"id": "projA"}, {"id": "projB"}]}
-                        }
-                    }
-                }
+                data = {"data": {"initiative": {"projects": {"nodes": [{"id": "projA"}, {"id": "projB"}]}}}}
             return _FakeResponse(json.dumps(data).encode("utf-8"))
 
         return fake_opener
@@ -657,9 +632,7 @@ class HttpSourcePaginatedFetchTest(unittest.TestCase):
         got = src.fetch("INIT")
 
         # candidates come from BOTH projects and ALL of project A's pages.
-        self.assertEqual(
-            [i.id for i in got], ["PLA-1", "PLA-2", "PLA-3", "SGO-9"]
-        )
+        self.assertEqual([i.id for i in got], ["PLA-1", "PLA-2", "PLA-3", "SGO-9"])
 
         # and match the pure parser fed the equivalent assembled payload shape.
         assembled = {
@@ -703,13 +676,9 @@ class HttpSourcePaginatedFetchTest(unittest.TestCase):
 
         # the page requests, in order: A page-1, A page-2 (endCursor), then B.
         page_calls = [
-            (c["variables"]["pid"], c["variables"]["after"])
-            for c in calls
-            if "pid" in c["variables"]
+            (c["variables"]["pid"], c["variables"]["after"]) for c in calls if "pid" in c["variables"]
         ]
-        self.assertEqual(
-            page_calls, [("projA", None), ("projA", "curA1"), ("projB", None)]
-        )
+        self.assertEqual(page_calls, [("projA", None), ("projA", "curA1"), ("projB", None)])
 
         # NO single over-complex 250-wide initiative query is ever sent, and every
         # page request bounds the fetch by the module page-size constant.
@@ -745,9 +714,7 @@ class DescriptionResolverWiringTest(unittest.TestCase):
                 self.fetched = []
 
             def fetch(self, initiative_id):
-                return [
-                    _issue(id="SGO-198", labels=("adp-wave-0",), description="lead-in")
-                ]
+                return [_issue(id="SGO-198", labels=("adp-wave-0",), description="lead-in")]
 
             def fetch_description(self, identifier):
                 self.fetched.append(identifier)
@@ -760,9 +727,7 @@ class DescriptionResolverWiringTest(unittest.TestCase):
 
     def test_explicit_resolver_wins_over_source(self):
         issue = _issue(id="SGO-9", labels=("adp-wave-0",), description="lead-in")
-        d = _armed_dispatcher(
-            [issue], description_resolver=lambda i: "**Repos:** tc-fitness"
-        )
+        d = _armed_dispatcher([issue], description_resolver=lambda i: "**Repos:** tc-fitness")
         self.assertEqual(d.plan(limit=1).contracts[0].repo, "tc-fitness")
 
     def test_no_resolver_falls_back_to_team_map(self):
@@ -781,9 +746,7 @@ class JsonSourceTest(unittest.TestCase):
     def test_reads_issues_wrapper_and_bare_list(self):
         items = [{"id": "PLA-1", "statusType": "backlog", "labels": ["adp-wave-1"]}]
         for doc in ({"issues": items}, items):
-            with tempfile.NamedTemporaryFile(
-                "w", suffix=".json", delete=False, encoding="utf-8"
-            ) as fh:
+            with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
                 json.dump(doc, fh)
                 path = fh.name
             got = JsonIssueSource(Path(path)).fetch("init")
@@ -792,12 +755,9 @@ class JsonSourceTest(unittest.TestCase):
 
 class CliTest(unittest.TestCase):
     def _snapshot(self, items) -> str:
-        fh = tempfile.NamedTemporaryFile(
-            "w", suffix=".json", delete=False, encoding="utf-8"
-        )
-        json.dump({"issues": items}, fh)
-        fh.close()
-        return fh.name
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+            json.dump({"issues": items}, fh)
+            return fh.name
 
     def test_dry_run_prints_queue_no_side_effects(self):
         path = self._snapshot(

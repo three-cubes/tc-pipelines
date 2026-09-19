@@ -14,6 +14,7 @@ pytestmark = pytest.mark.contract
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "actions" / "python-gate-body" / "declared_osv_contract.py"
 ACTION = REPO_ROOT / "actions" / "python-gate-body" / "action.yml"
+PROVISIONER = REPO_ROOT / "actions" / "python-gate-body" / "provision-scanners.sh"
 
 
 def _lane_owns_provisioning(value: bool | str, *, shard_tier: str) -> bool:
@@ -110,7 +111,9 @@ lockfiles = ["uv.lock", "pnpm-lock.yaml"]
     assert result.stdout.splitlines() == ["required=true", "version=2.2.4"]
 
 
-def test_dedicated_config_wins_over_pyproject_for_required_contract(tmp_path: Path) -> None:
+def test_dedicated_config_wins_over_pyproject_for_required_contract(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "pyproject.toml").write_text(
         "[tool.tc_fitness.core_checks.osv_scanner_sca]\nrequired = false\n",
         encoding="utf-8",
@@ -158,9 +161,7 @@ lockfiles = [
         ),
     ],
 )
-def test_required_contract_accepts_multiline_lockfiles(
-    tmp_path: Path, name: str, contract: str
-) -> None:
+def test_required_contract_accepts_multiline_lockfiles(tmp_path: Path, name: str, contract: str) -> None:
     (tmp_path / name).write_text(contract.strip(), encoding="utf-8")
 
     result = _run(tmp_path)
@@ -221,8 +222,7 @@ def test_required_contract_rejects_missing_or_malformed_lockfiles(
     (tmp_path / "pyproject.toml").write_text(
         "[tool.tc_fitness.core_checks.osv_scanner_sca]\n"
         "required = true\n"
-        'scanner_version = "2.2.4"\n'
-        + lockfiles_line,
+        'scanner_version = "2.2.4"\n' + lockfiles_line,
         encoding="utf-8",
     )
 
@@ -256,28 +256,23 @@ def test_composite_installs_and_verifies_only_when_lane_owns_provisioning() -> N
     assert "uv pip install --python python --no-deps tomli==2.3.0" in detect["run"]
     assert detect["if"] == "inputs.provision-osv-scanner == 'true'"
     assert install["if"] == "steps.osv-contract.outputs.required == 'true'"
-    assert "osv-scanner_SHA256SUMS" in install["run"]
-    assert '"$install_dir/osv-scanner" --version' in install["run"]
+    assert "provision-scanners.sh" in install["run"]
+    provisioner = PROVISIONER.read_text(encoding="utf-8")
+    assert "osv-scanner_SHA256SUMS" in provisioner
+    assert '"$install_dir/osv-scanner" --version' in provisioner
     assert "steps.osv-contract.outputs.version" in install["env"]["OSV_SCANNER_VERSION"]
 
 
 def test_full_and_partitioned_sharded_workflow_provision_scanner_exactly_once() -> None:
     workflow = yaml.safe_load(
-        (REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml").read_text(
-            encoding="utf-8"
-        )
+        (REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml").read_text(encoding="utf-8")
     )
     jobs = workflow["jobs"]
 
-    unsharded_count = int(
-        jobs["quality"]["steps"][0]["with"]["provision-osv-scanner"] is True
-    )
+    unsharded_count = int(jobs["quality"]["steps"][0]["with"]["provision-osv-scanner"] is True)
     shard_owner = jobs["quality-shard"]["steps"][0]["with"]["provision-osv-scanner"]
-    partitioned_sharded_count = (
-        4 * int(_lane_owns_provisioning(shard_owner, shard_tier="matrix"))
-        + int(
-            jobs["quality-non-shard"]["steps"][1]["with"]["provision-osv-scanner"] is True
-        )
+    partitioned_sharded_count = 4 * int(_lane_owns_provisioning(shard_owner, shard_tier="matrix")) + int(
+        jobs["quality-non-shard"]["steps"][1]["with"]["provision-osv-scanner"] is True
     )
 
     assert unsharded_count == 1
@@ -286,12 +281,8 @@ def test_full_and_partitioned_sharded_workflow_provision_scanner_exactly_once() 
 
 def test_unpartitioned_shards_keep_required_scanner_available() -> None:
     workflow = yaml.safe_load(
-        (REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml").read_text(
-            encoding="utf-8"
-        )
+        (REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml").read_text(encoding="utf-8")
     )
 
-    shard_owner = workflow["jobs"]["quality-shard"]["steps"][0]["with"][
-        "provision-osv-scanner"
-    ]
+    shard_owner = workflow["jobs"]["quality-shard"]["steps"][0]["with"]["provision-osv-scanner"]
     assert _lane_owns_provisioning(shard_owner, shard_tier="") is True

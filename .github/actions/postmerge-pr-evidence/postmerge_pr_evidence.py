@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping, Sequence
 import json
-from pathlib import Path
 import re
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
-
 
 SCHEMA = "postmerge-pr-quality-evidence/v1"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -51,19 +50,13 @@ def _git(repo_root: Path, *args: str) -> str:
             ["git", *args], cwd=repo_root, check=True, capture_output=True, text=True
         ).stdout.strip()
     except subprocess.CalledProcessError as error:
-        raise ValueError(
-            "Git history does not contain the required merge evidence"
-        ) from error
+        raise ValueError("Git history does not contain the required merge evidence") from error
 
 
 def _merge_identity(repo_root: Path, merge_sha: str) -> tuple[tuple[str, str], str]:
-    header = (
-        _git(repo_root, "cat-file", "-p", merge_sha).partition("\n\n")[0].splitlines()
-    )
+    header = _git(repo_root, "cat-file", "-p", merge_sha).partition("\n\n")[0].splitlines()
     trees = [line.removeprefix("tree ") for line in header if line.startswith("tree ")]
-    parents = [
-        line.removeprefix("parent ") for line in header if line.startswith("parent ")
-    ]
+    parents = [line.removeprefix("parent ") for line in header if line.startswith("parent ")]
     if len(trees) != 1 or len(parents) != 2:
         raise ValueError("evidence requires one two-parent merge commit")
     tree = _sha(trees[0], "merge tree SHA")
@@ -131,7 +124,7 @@ def verify_document(
     if parents != (before, head):
         raise ValueError("merge parents do not match the associated PR")
     if not isinstance(document, Mapping):
-        raise ValueError("PR evidence must be an object")
+        raise TypeError("PR evidence must be an object")
     expected = {
         "schema": SCHEMA,
         "repository": expected_repository,
@@ -165,13 +158,10 @@ def _capture(args: argparse.Namespace) -> int:
         head_sha=args.head_sha,
         workflow_run_id=args.workflow_run_id,
         workflow_run_attempt=args.workflow_run_attempt,
-        tested_merge_sha=args.tested_merge_sha
-        or _git(args.repo_root, "rev-parse", "HEAD"),
+        tested_merge_sha=args.tested_merge_sha or _git(args.repo_root, "rev-parse", "HEAD"),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(document, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    args.output.write_text(json.dumps(document, sort_keys=True) + "\n", encoding="utf-8")
     return 0
 
 
@@ -191,9 +181,7 @@ def _verify(args: argparse.Namespace) -> int:
         with args.github_output.open("a", encoding="utf-8") as stream:
             stream.write("verified=true\n")
             stream.write(f"pull_request_number={result['pull_request_number']}\n")
-    print(
-        f"PASS postmerge-pr-evidence pr={result['pull_request_number']} tree={result['tested_tree_sha']}"
-    )
+    print(f"PASS postmerge-pr-evidence pr={result['pull_request_number']} tree={result['tested_tree_sha']}")
     return 0
 
 

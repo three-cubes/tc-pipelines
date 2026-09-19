@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-
 FATAL_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(^|\n)FAIL(?:\s|:)", re.IGNORECASE),
     re.compile(r"(^|\n)✗\s+"),
@@ -44,7 +43,11 @@ def _read_message(path: str | None) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("message_file", nargs="?", help="File containing az vm run-command value[0].message output")
+    parser.add_argument(
+        "message_file",
+        nargs="?",
+        help="File containing az vm run-command value[0].message output",
+    )
     parser.add_argument("--label", default="run-command", help="Human-readable label for error output")
     args = parser.parse_args(argv)
 
@@ -52,7 +55,10 @@ def main(argv: list[str] | None = None) -> int:
     if not result.failed:
         return 0
 
-    print(f"{args.label}: fatal marker(s) found in Azure run-command output:", file=sys.stderr)
+    print(
+        f"{args.label}: fatal marker(s) found in Azure run-command output:",
+        file=sys.stderr,
+    )
     for match in result.matches:
         print(f"  - {match}", file=sys.stderr)
     return 1

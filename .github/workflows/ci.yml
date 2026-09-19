@@ -1,7 +1,6 @@
 ---
 name: tc-pipelines self-check
 on:
-  push: {branches: [main]}
   pull_request:
   # Inert until this repository enables GitHub merge queue. Keeping the
   # subscriber present means the fan-in check is available on the synthetic
@@ -10,12 +9,22 @@ on:
 permissions:
   contents: read
 
-# A newer commit supersedes an in-flight PR validation. Exact-main validation
-# has its own ref-scoped group, so it is never coalesced with a PR run.
+# A newer commit supersedes an in-flight PR validation. Merge-queue integration
+# candidates have their own ref-scoped group.
 concurrency:
   group: tc-pipelines-self-check-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
+  hosted:
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    uses: ./.github/workflows/hosted-assurance.yml
+    with:
+      base: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      head: ${{ github.sha }}
+      candidate-head: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
   # Dogfood: tc-pipelines runs the very meta gate it ships. A local-path
   # `uses:` (./.github/workflows/meta-quality-gate.yml) wires this self-check to
   # the reusable's actionlint / yamllint / license / branch-naming legs, so a
@@ -60,7 +69,7 @@ jobs:
           # clone has none of those objects, so they would skip rather than check.
           fetch-depth: 0
       - name: Set up uv + Python
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@02bc49afcffb7e0d01fc8c2dadc0352791a46046 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@8c4d058013b911b80177ac73636a925d911dc1ed # v2.2.1 candidate
       - name: Run the contract tests
         run: make check
 
@@ -70,7 +79,7 @@ jobs:
   # points at.
   quality-gate:
     name: Quality gate
-    needs: [meta, tests]
+    needs: [meta, tests, hosted]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -78,6 +87,8 @@ jobs:
         run: test "${{ needs.meta.result }}" = "success"
       - name: Assert the contract tests succeeded
         run: test "${{ needs.tests.result }}" = "success"
+      - name: Assert hosted assurance succeeded
+        run: test "${{ needs.hosted.result }}" = "success"
 
   # no-attribution — the BARE required status context org-main-core gates on.
   # Runs the shared tc-fitness detector over the PR commit range + title/body

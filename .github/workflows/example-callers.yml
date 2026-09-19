@@ -81,11 +81,18 @@ jobs:
   # conflicts). Each is a static call-graph check in its own right (see header).
   docker-build-publish:
     uses: ./.github/workflows/example-docker-build-publish.yml
+    permissions:
+      contents: read
+      id-token: write
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
   event-dispatch:
     uses: ./.github/workflows/example-event-dispatch.yml
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
@@ -106,6 +113,9 @@ jobs:
 
   publish-pypi:
     uses: ./.github/workflows/example-publish-pypi.yml
+    permissions:
+      contents: read
+      id-token: write
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
@@ -121,21 +131,37 @@ jobs:
 
   release:
     uses: ./.github/workflows/example-release.yml
+    permissions:
+      actions: write
+      contents: write
+      id-token: write
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
   require-work-item:
     uses: ./.github/workflows/example-require-work-item.yml
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
   security-scan:
     uses: ./.github/workflows/example-security-scan.yml
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
   verify-and-close:
     uses: ./.github/workflows/example-verify-and-close.yml
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
@@ -146,20 +172,35 @@ jobs:
 
   capability-health-probe:
     uses: ./.github/workflows/example-capability-health-probe.yml
+    permissions:
+      contents: read
+      id-token: write
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
   dependabot-automerge:
     uses: ./.github/workflows/example-dependabot-automerge.yml
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
   independent-verifier:
     uses: ./.github/workflows/example-independent-verifier.yml
+    permissions:
+      checks: write
+      contents: read
+      id-token: write
+      pull-requests: read
     with:
       run-for-real: ${{ inputs.run-for-real }}
 
   loop-implement:
     uses: ./.github/workflows/example-loop-implement.yml
+    permissions:
+      contents: read
+      id-token: write
     with:
       run-for-real: ${{ inputs.run-for-real }}

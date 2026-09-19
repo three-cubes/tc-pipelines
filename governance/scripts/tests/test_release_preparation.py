@@ -13,16 +13,12 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-PREPARE_RELEASE = (
-    REPO_ROOT / "actions" / "prepare-release-metadata" / "prepare_release.py"
-)
+PREPARE_RELEASE = REPO_ROOT / "actions" / "prepare-release-metadata" / "prepare_release.py"
 PREPARE_ACTION = REPO_ROOT / "actions" / "prepare-release-metadata" / "action.yml"
 
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [*args], capture_output=True, text=True, cwd=cwd, check=False
-    )
+    return subprocess.run([*args], capture_output=True, text=True, cwd=cwd, check=False)
 
 
 def _project(tmp_path: Path) -> Path:
@@ -71,15 +67,11 @@ def test_semantic_bump_updates_project_lock_changelog_and_receipt(
 
     assert prepared.returncode == 0, prepared.stderr
     assert "version=v1.2.4" in prepared.stdout
-    assert 'version = "1.2.4"' in (project / "pyproject.toml").read_text(
-        encoding="utf-8"
-    )
+    assert 'version = "1.2.4"' in (project / "pyproject.toml").read_text(encoding="utf-8")
     assert 'version = "1.2.4"' in (project / "uv.lock").read_text(encoding="utf-8")
     changelog = (project / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "## [Unreleased]\n\n## [1.2.4] — 2099-09-18" in changelog
-    receipt = json.loads(
-        (project / ".release-prepared.json").read_text(encoding="utf-8")
-    )
+    receipt = json.loads((project / ".release-prepared.json").read_text(encoding="utf-8"))
     assert receipt["version"] == "v1.2.4"
     assert receipt["version_file"] == ""
 
@@ -113,9 +105,7 @@ def test_action_empty_version_file_skips_plain_file_binding(tmp_path: Path) -> N
 
     assert prepared.returncode == 0, prepared.stderr
     assert not (project / "VERSION").exists()
-    receipt = json.loads(
-        (project / ".release-prepared.json").read_text(encoding="utf-8")
-    )
+    receipt = json.loads((project / ".release-prepared.json").read_text(encoding="utf-8"))
     assert receipt["version_file"] == ""
 
 
@@ -137,9 +127,7 @@ def test_explicit_tag_updates_pyproject_when_plain_version_file_is_empty(
     )
 
     assert prepared.returncode == 0, prepared.stderr
-    assert 'version = "1.4.0"' in (project / "pyproject.toml").read_text(
-        encoding="utf-8"
-    )
+    assert 'version = "1.4.0"' in (project / "pyproject.toml").read_text(encoding="utf-8")
     assert 'version = "1.4.0"' in (project / "uv.lock").read_text(encoding="utf-8")
 
 

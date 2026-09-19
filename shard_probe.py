@@ -43,7 +43,7 @@ if cov_file:
         cov.stop()
         cov.save()
         print(f"SHARD-PROBE wrote coverage data to {cov_file}")
-    except Exception as exc:  # noqa: BLE001 - probe is best-effort on coverage
+    except Exception as exc:
         print(f"SHARD-PROBE coverage skipped: {exc}")
 
 print("SHARD-PROBE OK")

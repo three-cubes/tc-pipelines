@@ -62,6 +62,7 @@ jobs:
     uses: ./.github/workflows/require-work-item.yml
     permissions:
       contents: read
+      id-token: write
       pull-requests: read
     with:
       # taz-shaped, fallback secret path: require an already-started item (drop

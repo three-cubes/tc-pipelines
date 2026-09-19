@@ -55,10 +55,7 @@ def _reusable_contracts() -> dict[str, dict]:
 
 
 def _action_contracts() -> dict[str, dict]:
-    return {
-        path.parent.name: (_load(path).get("inputs") or {})
-        for path in ACTION_DIR.glob("*/action.yml")
-    }
+    return {path.parent.name: (_load(path).get("inputs") or {}) for path in ACTION_DIR.glob("*/action.yml")}
 
 
 def _pinned_action_contract(action: str, sha: str) -> dict:
@@ -71,8 +68,7 @@ def _pinned_action_contract(action: str, sha: str) -> dict:
         check=False,
     )
     assert result.returncode == 0, (
-        f"cannot read actions/{action}/action.yml at self-pin {sha}: "
-        f"{result.stderr.strip()}"
+        f"cannot read actions/{action}/action.yml at self-pin {sha}: {result.stderr.strip()}"
     )
     return (yaml.safe_load(result.stdout) or {}).get("inputs") or {}
 
@@ -120,6 +116,42 @@ def _calls() -> list[tuple[str, str, dict, dict]]:
 CALLS = _calls()
 
 
+def _permission_calls() -> list[tuple[str, str, dict, dict]]:
+    """Return explicit caller permission ceilings and nested job requirements."""
+    found = []
+    for source_path in WORKFLOW_DIR.glob("*.yml"):
+        source = _load(source_path)
+        source_permissions = source.get("permissions")
+        for caller_name, caller in (source.get("jobs") or {}).items():
+            if not isinstance(caller, dict):
+                continue
+            match = LOCAL_REUSABLE.match(str(caller.get("uses", "")))
+            if not match or not (WORKFLOW_DIR / match.group(1)).exists():
+                continue
+            ceiling = caller.get("permissions", source_permissions)
+            if not isinstance(ceiling, dict):
+                continue
+            target = _load(WORKFLOW_DIR / match.group(1))
+            target_permissions = target.get("permissions") or {}
+            for nested_name, nested in (target.get("jobs") or {}).items():
+                if not isinstance(nested, dict):
+                    continue
+                required = nested.get("permissions", target_permissions)
+                if isinstance(required, dict):
+                    found.append(
+                        (
+                            source_path.name,
+                            f"{caller_name} -> {match.group(1)}:{nested_name}",
+                            ceiling,
+                            required,
+                        )
+                    )
+    return found
+
+
+PERMISSION_CALLS = _permission_calls()
+
+
 def test_the_scan_found_calls_to_check() -> None:
     """A scan that silently matches nothing would pass every assertion below."""
     assert len(CALLS) >= 10, (
@@ -133,14 +165,8 @@ def test_the_scan_found_calls_to_check() -> None:
     CALLS,
     ids=[f"{source}:{label}" for source, label, _, _ in CALLS],
 )
-def test_call_passes_every_required_input(
-    source: str, label: str, declared: dict, passed: dict
-) -> None:
-    required = {
-        name
-        for name, spec in declared.items()
-        if spec.get("required") and "default" not in spec
-    }
+def test_call_passes_every_required_input(source: str, label: str, declared: dict, passed: dict) -> None:
+    required = {name for name, spec in declared.items() if spec.get("required") and "default" not in spec}
     missing = sorted(required - set(passed))
     assert not missing, (
         f"{source}: `{label}` omits required input(s) {missing}. A reusable "
@@ -156,13 +182,32 @@ def test_call_passes_every_required_input(
     CALLS,
     ids=[f"{source}:{label}" for source, label, _, _ in CALLS],
 )
-def test_call_passes_no_unknown_input(
-    source: str, label: str, declared: dict, passed: dict
-) -> None:
+def test_call_passes_no_unknown_input(source: str, label: str, declared: dict, passed: dict) -> None:
     unknown = sorted(set(passed) - set(declared))
     assert not unknown, (
         f"{source}: `{label}` passes input(s) {unknown} the target does not "
         f"declare. fix: correct the name, or declare it on the target."
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "label", "ceiling", "required"),
+    PERMISSION_CALLS,
+    ids=[f"{source}:{label}" for source, label, _, _ in PERMISSION_CALLS],
+)
+def test_reusable_caller_grants_every_nested_job_permission(
+    source: str, label: str, ceiling: dict, required: dict
+) -> None:
+    rank = {"none": 0, "read": 1, "write": 2}
+    missing = {
+        permission: {"required": level, "caller": ceiling.get(permission, "none")}
+        for permission, level in required.items()
+        if rank.get(str(ceiling.get(permission, "none")), 0) < rank.get(str(level), 0)
+    }
+    assert not missing, (
+        f"{source}: `{label}` requests permissions above its caller ceiling: "
+        f"{missing}. GitHub rejects the complete workflow as startup_failure. "
+        "fix: grant only the listed permission on the calling job."
     )
 
 
@@ -171,9 +216,7 @@ def _gate_body_calls() -> dict[str, dict]:
     calls = {}
     for job_name, job in (document.get("jobs") or {}).items():
         for step in (job.get("steps") or []) if isinstance(job, dict) else []:
-            if isinstance(step, dict) and "python-gate-body" in str(
-                step.get("uses", "")
-            ):
+            if isinstance(step, dict) and "python-gate-body" in str(step.get("uses", "")):
                 calls[job_name] = step.get("with") or {}
     return calls
 
@@ -183,7 +226,6 @@ def _gate_body_calls() -> dict[str, dict]:
 # same fan-in context. Inputs a lane sets deliberately per-lane (tier, sharding,
 # coverage upload, the attribution scan) are excluded.
 CONSUMER_FORWARDED = (
-    "pre-evaluation-normalize",
     "pre-steps",
     "post-steps",
     "python-version",

@@ -48,9 +48,7 @@ pytestmark = pytest.mark.contract
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 RELEASE = REPO_ROOT / ".github" / "workflows" / "release.yml"
-PREPARE_RELEASE = (
-    REPO_ROOT / "actions" / "prepare-release-metadata" / "prepare_release.py"
-)
+PREPARE_RELEASE = REPO_ROOT / "actions" / "prepare-release-metadata" / "prepare_release.py"
 
 EXTRACT_STEP = "Extract release notes from CHANGELOG"
 PREPARE_STEP = "Validate prepared release metadata"
@@ -186,9 +184,7 @@ def _prepare_step_run() -> str:
 
 
 def _git(cwd: Path, *args: str) -> None:
-    result = subprocess.run(
-        ["git", *args], capture_output=True, text=True, cwd=cwd, check=False
-    )
+    result = subprocess.run(["git", *args], capture_output=True, text=True, cwd=cwd, check=False)
     assert result.returncode == 0, result.stderr
 
 
@@ -293,8 +289,7 @@ def test_release_validation_preserves_an_explicit_empty_version_file(
                 'export VERSION="$1"\n'
                 'export CHANGELOG_FILE="CHANGELOG.md"\n'
                 'export VERSION_FILE=""\n'
-                'export PREPARATION_FILE=".release-prepared.json"\n'
-                + step
+                'export PREPARATION_FILE=".release-prepared.json"\n' + step
             ),
             "guard",
             "v2099.9.9",
@@ -367,9 +362,7 @@ RELEASE_LABEL = RELEASE_VERSION.removeprefix("v")
 
 # A further heading after the labelled section, so extraction has to stop
 # somewhere rather than running to end-of-file.
-TRAILING_SECTION = (
-    "## [9.9.9] — 1970-01-01\n\n### Added\n\n- an entry outside the label.\n"
-)
+TRAILING_SECTION = "## [9.9.9] — 1970-01-01\n\n### Added\n\n- an entry outside the label.\n"
 EMPTY_BODY = "\n"
 POPULATED_BODY = f"\n### Added\n\n- {NOTES_SENTINEL}.\n\n"
 
@@ -410,9 +403,7 @@ def _extract_step_against(tmp_path: Path, body: str) -> tuple[int, str]:
         f"fix: point NOTES_REDIRECT at the step's current notes path."
     )
     notes = tmp_path / "release-notes.md"
-    (tmp_path / "CHANGELOG.md").write_text(
-        _changelog_fixture(RELEASE_LABEL, body), encoding="utf-8"
-    )
+    (tmp_path / "CHANGELOG.md").write_text(_changelog_fixture(RELEASE_LABEL, body), encoding="utf-8")
     script = step.replace(redirect.group(1), str(notes))
     result = _bash(script, tmp_path, RELEASE_VERSION)
     written = notes.read_text(encoding="utf-8") if notes.exists() else ""

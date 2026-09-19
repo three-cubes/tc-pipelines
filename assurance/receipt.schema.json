@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tc.sdlc/assurance/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "subject", "case_id", "expected", "actual", "candidate", "consumer", "execution", "evidence"],
+  "properties": {
+    "schema": {"const": "tc.sdlc/assurance/v1"},
+    "subject": {"enum": ["engine", "pipeline-adapter", "consumer-composition"]},
+    "case_id": {"$ref": "#/$defs/id"},
+    "expected": {"$ref": "#/$defs/outcome"},
+    "actual": {"$ref": "#/$defs/outcome"},
+    "candidate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["fitness_digest", "pipeline_commit", "pipeline_package_digest", "pipeline_image_digest"],
+      "properties": {
+        "fitness_digest": {"$ref": "#/$defs/nullableDigest"},
+        "pipeline_commit": {"$ref": "#/$defs/commit"},
+        "pipeline_head_commit": {"$ref": "#/$defs/commit"},
+        "pipeline_package_digest": {"$ref": "#/$defs/nullableDigest"},
+        "pipeline_image_digest": {"$ref": "#/$defs/nullableDigest"}
+      }
+    },
+    "consumer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repository", "commit", "sdlc_lock_digest"],
+      "properties": {
+        "repository": {"type": "string", "pattern": "^[^/ ]+/[^/ ]+$"},
+        "commit": {"$ref": "#/$defs/commit"},
+        "sdlc_lock_digest": {"$ref": "#/$defs/nullableDigest"}
+      }
+    },
+    "execution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["execution_id", "workflow_run_id", "attempt", "command", "tasks", "executor", "started_at", "finished_at", "exit_code"],
+      "properties": {
+        "execution_id": {"type": "string", "format": "uuid"},
+        "workflow_run_id": {"type": ["string", "null"], "pattern": "^[1-9][0-9]*$"},
+        "attempt": {"type": "integer", "minimum": 1},
+        "command": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/id"}},
+        "tasks": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "additionalProperties": false, "required": ["id", "input_digest"],
+          "properties": {"id": {"$ref": "#/$defs/id"}, "input_digest": {"$ref": "#/$defs/digest"}}
+        }},
+        "executor": {"enum": ["local", "github-actions", "live-boundary"]},
+        "started_at": {"type": "string", "format": "date-time"},
+        "finished_at": {"type": "string", "format": "date-time"},
+        "exit_code": {"type": "integer", "minimum": 0, "maximum": 255}
+      }
+    },
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["fitness_ledger_digest", "runtime_receipt_digest", "outputs", "finding"],
+      "properties": {
+        "fitness_ledger_digest": {"$ref": "#/$defs/nullableDigest"},
+        "runtime_receipt_digest": {"$ref": "#/$defs/nullableDigest"},
+        "finding": {"type": ["string", "null"], "minLength": 1},
+        "outputs": {"type": "array", "minItems": 2, "items": {
+          "type": "object", "additionalProperties": false, "required": ["id", "path", "digest"],
+          "properties": {"id": {"$ref": "#/$defs/id"}, "path": {"$ref": "#/$defs/id"}, "digest": {"$ref": "#/$defs/digest"}}
+        }}
+      }
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "outcome": {"enum": ["pass", "fail", "deny", "error"]}
+  }
+}

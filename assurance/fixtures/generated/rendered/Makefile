@@ -1,0 +1,28 @@
+# three-cubes/assurance-generated compatibility Makefile. The executable-foundation migration replaces
+# these internals with tc-sdlc while retaining the stable command names.
+
+.PHONY: check prepare assert-clean fix setup
+
+# Current compatibility verifier. tc-fitness is a core evaluation component;
+# tc-sdlc will schedule it with the repository's other language and build tasks.
+check: prepare
+	@$(MAKE) --no-print-directory assert-clean
+	uv run tc-fitness run
+
+# Deterministic preparation runs before every local evaluation.
+prepare:
+	uvx --from uv==0.12.5 uv lock
+	uv run ruff check --force-exclude --select E,F,I,UP,B,S,RUF --target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero .
+	uv run ruff format --force-exclude --line-length 110 --target-version py312 .
+
+assert-clean:
+	@test -z "$$(git status --porcelain --untracked-files=all)" || { git status --short; echo "preparation changed committed state; commit the prepared files before evaluation" >&2; exit 1; }
+
+# Compatibility alias for existing consumers.
+fix: prepare
+
+# One-time dev setup: install the commit-msg strip hook + the pre-push gate replay
+# so the fitness gate fires locally before the CI round-trip.
+setup:
+	uv run pre-commit install --hook-type commit-msg --hook-type pre-push
+	uv run pre-commit install

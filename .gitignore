@@ -9,6 +9,8 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+.assurance-build/
+.assurance-hosted/
 
 # macOS Finder metadata
 .DS_Store

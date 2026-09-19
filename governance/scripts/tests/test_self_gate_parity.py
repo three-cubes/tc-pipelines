@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+
 from conftest import pytest_xdist_auto_num_workers
 
 pytestmark = pytest.mark.contract
@@ -25,6 +26,20 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 MAKEFILE = REPO_ROOT / "Makefile"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+PREPARE_AND_CHECK_COMMANDS = [
+    "uvx --from uv==0.12.5 uv lock",
+    "uv sync --locked",
+    "uv run --no-sync ruff check --force-exclude --select E,F,I,UP,B,S,RUF "
+    "--target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes "
+    "--exit-zero .",
+    "uv run --no-sync ruff format --force-exclude --line-length 110 --target-version py312 .",
+    "uv run --no-sync python assurance/run.py prepare",
+    "make --no-print-directory assert-clean",
+    'test -z "$(git status --porcelain --untracked-files=all)" || { git status --short; '
+    'echo "preparation changed committed state; commit the prepared files before evaluation" '
+    ">&2; exit 1; }",
+    "uv run --no-sync tc-fitness run",
+]
 
 
 def _project_config() -> dict:
@@ -48,15 +63,20 @@ def _make_check_commands(*, outer_make: bool = False) -> list[str]:
         env=env,
     )
     assert result.returncode == 0, (
-        f"{MAKEFILE.name}: cannot dry-run the local check target: "
-        f"{result.stderr.strip()}"
+        f"{MAKEFILE.name}: cannot dry-run the local check target: {result.stderr.strip()}"
     )
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    commands = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return [
+        "make --no-print-directory assert-clean"
+        if command.endswith("/make --no-print-directory assert-clean")
+        else command
+        for command in commands
+    ]
 
 
 def test_self_gate_declares_the_contract_test_command() -> None:
     """Changing the gate's pytest argv would otherwise leave CI on another command."""
-    steps = (_project_config().get("tool", {}).get("tc_fitness", {}).get("steps", []))
+    steps = _project_config().get("tool", {}).get("tc_fitness", {}).get("steps", [])
     contract_steps = [step for step in steps if step.get("id") == "contract-tests"]
     assert len(contract_steps) == 1, (
         f"{PYPROJECT.name}: expected exactly one `contract-tests` tc-fitness step, "
@@ -72,22 +92,28 @@ def test_self_gate_declares_the_contract_test_command() -> None:
 
 def test_make_check_runs_the_declared_fitness_gate() -> None:
     """Replacing the engine command would make local success diverge from CI."""
-    assert _make_check_commands() == [
-        "uv sync --locked",
-        "uv run --no-sync tc-fitness run",
-    ], (
-        f"{MAKEFILE.name}: `check` must synchronise the locked environment then run "
-        "the configured tc-fitness gate. fix: use `uv sync --locked` followed by "
-        "`uv run --no-sync tc-fitness run`."
+    assert _make_check_commands() == PREPARE_AND_CHECK_COMMANDS, (
+        f"{MAKEFILE.name}: `check` must prepare deterministic mechanical and "
+        "generated state before running the configured tc-fitness gate."
     )
 
 
 def test_make_check_dry_run_is_stable_inside_an_outer_make() -> None:
     """GNU make directory notices must not become part of the command contract."""
-    assert _make_check_commands(outer_make=True) == [
-        "uv sync --locked",
-        "uv run --no-sync tc-fitness run",
-    ]
+    assert _make_check_commands(outer_make=True) == PREPARE_AND_CHECK_COMMANDS
+
+
+def test_assert_clean_rejects_a_real_dirty_git_checkout(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "contract"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "contract@example.invalid"], cwd=tmp_path, check=True)
+    (tmp_path / "tracked.txt").write_text("clean\n")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=tmp_path, check=True)
+    command = ["make", "--no-print-directory", "-f", str(MAKEFILE), "assert-clean"]
+    assert subprocess.run(command, cwd=tmp_path, check=False).returncode == 0
+    (tmp_path / "tracked.txt").write_text("dirty\n")
+    assert subprocess.run(command, cwd=tmp_path, check=False).returncode != 0
 
 
 def test_ci_contract_tests_run_make_check() -> None:
@@ -117,8 +143,7 @@ def test_every_direct_ci_fitness_install_matches_the_locked_engine_tag() -> None
         )
     ]
     assert len(locked_refs) == 1, (
-        f"{PYPROJECT.name}: expected one immutable three-cubes-fitness dependency, "
-        f"found {locked_refs!r}."
+        f"{PYPROJECT.name}: expected one immutable three-cubes-fitness dependency, found {locked_refs!r}."
     )
     direct_refs = re.findall(
         r"git\+https://github\.com/three-cubes/tc-fitness@"

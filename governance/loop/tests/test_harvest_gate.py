@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from harvest_gate import (  # noqa: E402 — path shim above
+from harvest_gate import (
     Issue,
     MissingHarvest,
     assert_closed_carries_harvest,
@@ -51,9 +51,7 @@ class HarvestPredicateTest(unittest.TestCase):
         self.assertFalse(has_harvest([], "PLA-314"))
 
     def test_a_plain_comment_is_not_a_harvest(self):
-        self.assertFalse(
-            has_harvest(["lgtm, merging", "verification-confirmed on abc123"], "PLA-314")
-        )
+        self.assertFalse(has_harvest(["lgtm, merging", "verification-confirmed on abc123"], "PLA-314"))
 
     def test_provenance_checked_a_harvest_for_another_issue_does_not_satisfy(self):
         # A harvest stamped for a DIFFERENT issue must never count for this one.
@@ -79,7 +77,9 @@ class HarvestPredicateTest(unittest.TestCase):
 class CloseInvariantTest(unittest.TestCase):
     def test_closed_with_harvest_passes(self):
         issue = Issue(
-            id="PLA-314", state_type="completed", comments=(_harvest_comment("PLA-314"),)
+            id="PLA-314",
+            state_type="completed",
+            comments=(_harvest_comment("PLA-314"),),
         )
         assert_closed_carries_harvest(issue)  # no raise
 
@@ -120,7 +120,9 @@ class CloseInvariantTest(unittest.TestCase):
     def test_a_harvest_for_a_sibling_issue_does_not_unlock_this_close(self):
         # Provenance is load-bearing at the boundary, not just in the predicate.
         issue = Issue(
-            id="PLA-314", state_type="completed", comments=(_harvest_comment("PLA-999"),)
+            id="PLA-314",
+            state_type="completed",
+            comments=(_harvest_comment("PLA-999"),),
         )
         with self.assertRaises(MissingHarvest):
             assert_closed_carries_harvest(issue)

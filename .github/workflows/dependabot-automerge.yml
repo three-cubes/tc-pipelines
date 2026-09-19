@@ -90,6 +90,10 @@ jobs:
     # resolves within tc-pipelines at whatever ref a consumer pins this reusable
     # to, so the two templates version together.
     uses: ./.github/workflows/auto-merge-on-green.yml
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
     with:
       fan-in-check-name: ${{ inputs.fan-in-check-name }}
       merge-method: ${{ inputs.merge-method }}

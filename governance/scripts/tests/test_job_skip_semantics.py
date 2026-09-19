@@ -54,11 +54,7 @@ def _load(path: Path) -> dict:
 
 
 def _jobs(document: dict) -> dict[str, dict]:
-    return {
-        name: job
-        for name, job in (document.get("jobs") or {}).items()
-        if isinstance(job, dict)
-    }
+    return {name: job for name, job in (document.get("jobs") or {}).items() if isinstance(job, dict)}
 
 
 def _needs(job: dict) -> list[str]:
@@ -137,11 +133,7 @@ def _consumes(job: dict, lane: str) -> bool:
     deciding = _deciding_lines(job)
     if any(reference in line for line in deciding):
         return True
-    return any(
-        re.search(rf"\$\{{?{re.escape(name)}\b", line)
-        for name in bound
-        for line in deciding
-    )
+    return any(re.search(rf"\$\{{?{re.escape(name)}\b", line) for name in bound for line in deciding)
 
 
 def _closure(jobs: dict[str, dict], root: str) -> set[str]:
@@ -155,11 +147,7 @@ def _closure(jobs: dict[str, dict], root: str) -> set[str]:
 
 
 FAN_INS = _fan_ins()
-LANES = [
-    (workflow, name, lane)
-    for workflow, name, job in FAN_INS
-    for lane in _needs(job)
-]
+LANES = [(workflow, name, lane) for workflow, name, job in FAN_INS for lane in _needs(job)]
 
 
 # ── the scan matched something ───────────────────────────────────────────────
@@ -207,9 +195,7 @@ def test_both_ways_of_carrying_a_lane_result_are_still_exercised() -> None:
     LANES,
     ids=[f"{w}:{j}:{lane}" for w, j, lane in LANES],
 )
-def test_fan_in_consumes_every_lane_it_waits_for(
-    workflow: str, job_name: str, lane: str
-) -> None:
+def test_fan_in_consumes_every_lane_it_waits_for(workflow: str, job_name: str, lane: str) -> None:
     job = _jobs(_load(WORKFLOW_DIR / workflow))[job_name]
     assert _consumes(job, lane), (
         f"{workflow}: fan-in `{job_name}` waits for `{lane}` but no line that "

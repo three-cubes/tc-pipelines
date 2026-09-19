@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -51,9 +51,7 @@ def _resolver_script() -> str:
     return _yaml(ACTION)["runs"]["steps"][0]["run"]
 
 
-def _resolve(
-    tmp_path: Path, *, uv_version: str = "", python_version: str = ""
-) -> dict[str, str]:
+def _resolve(tmp_path: Path, *, uv_version: str = "", python_version: str = "") -> dict[str, str]:
     output_path = tmp_path / "github-output"
     completed = subprocess.run(
         ["bash", "-c", _resolver_script()],
@@ -69,24 +67,16 @@ def _resolve(
         text=True,
     )
     assert completed.returncode == 0, completed.stderr
-    return dict(
-        line.split("=", maxsplit=1)
-        for line in output_path.read_text(encoding="utf-8").splitlines()
-    )
+    return dict(line.split("=", maxsplit=1) for line in output_path.read_text(encoding="utf-8").splitlines())
 
 
-def test_org_action_resolves_repository_toolchain_files_before_legacy_fallback() -> (
-    None
-):
+def test_org_action_resolves_repository_toolchain_files_before_legacy_fallback() -> None:
     """One source file drives local bootstrap and every reusable gate lane."""
 
     action = ACTION.read_text(encoding="utf-8")
     assert _action_uv_default() == ""
     assert _yaml(ACTION)["inputs"]["python-version"]["default"] == ""
-    assert (
-        'resolve_version uv_version "$INPUT_UV_VERSION" .uv-version 0.12.5 valid_uv_version'
-        in action
-    )
+    assert 'resolve_version uv_version "$INPUT_UV_VERSION" .uv-version 0.12.5 valid_uv_version' in action
     assert (
         'resolve_version python_version "$INPUT_PYTHON_VERSION" .python-version 3.12 valid_python_request'
         in action
@@ -144,9 +134,7 @@ def test_org_action_installs_only_the_uv_locked_project_environment() -> None:
 def test_default_ci_sync_installs_the_explicit_dev_dependency_group() -> None:
     """The published default installs CI tools declared in the locked dev group."""
     action = _yaml(ACTION)
-    assert action["inputs"]["sync-args"]["default"] == (
-        "--locked --all-packages --group dev"
-    )
+    assert action["inputs"]["sync-args"]["default"] == ("--locked --all-packages --group dev")
     workflow = _yaml(REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml")
     triggers = workflow.get(True) or workflow["on"]
     assert triggers["workflow_call"]["inputs"]["sync-args"]["default"] == (
@@ -154,9 +142,7 @@ def test_default_ci_sync_installs_the_explicit_dev_dependency_group() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "path", PYTHON_INSTALL_SURFACES, ids=lambda path: str(path.relative_to(REPO_ROOT))
-)
+@pytest.mark.parametrize("path", PYTHON_INSTALL_SURFACES, ids=lambda path: str(path.relative_to(REPO_ROOT)))
 def test_python_install_surfaces_have_no_ci_requirements_overlay(path: Path) -> None:
     """Every published install surface must derive Python tools from uv.lock."""
     text = path.read_text(encoding="utf-8")

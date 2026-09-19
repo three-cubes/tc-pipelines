@@ -35,14 +35,14 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import loop_runner as runner_mod  # noqa: E402 — path shim above
-from loop_dispatcher import (  # noqa: E402
+import loop_runner as runner_mod
+from loop_dispatcher import (
     CandidateIssue,
     Dispatcher,
     StaticIssueSource,
 )
-from loop_governor import Governor  # noqa: E402
-from loop_runner import (  # noqa: E402
+from loop_governor import Governor
+from loop_runner import (
     AgentPlatformSink,
     DispatchResult,
     DispatchSink,
@@ -53,7 +53,7 @@ from loop_runner import (  # noqa: E402
     RunDecision,
     Runner,
 )
-from loop_state_machine import GuardrailConfig  # noqa: E402
+from loop_state_machine import GuardrailConfig, GuardrailTripped
 
 
 # --------------------------------------------------------------------------- #
@@ -84,9 +84,7 @@ def _issue(
 
 def _runner(issues, *, config=None, validator=lambda: True):
     """A runner + its governor over a static source, harness proof stubbed."""
-    dispatcher = Dispatcher(
-        StaticIssueSource(issues), config=config, guardrails_validator=validator
-    )
+    dispatcher = Dispatcher(StaticIssueSource(issues), config=config, guardrails_validator=validator)
     governor = Governor(config)
     runner = Runner(dispatcher, governor, guardrails_validator=validator)
     return runner, governor
@@ -106,9 +104,7 @@ class _CountingSink:
 
     def dispatch(self, contract) -> DispatchResult:
         self.calls.append(contract.issue_id)
-        return DispatchResult(
-            spawned=True, sink="counting", issue_id=contract.issue_id, ref="spawn-1"
-        )
+        return DispatchResult(spawned=True, sink="counting", issue_id=contract.issue_id, ref="spawn-1")
 
 
 # --------------------------------------------------------------------------- #
@@ -143,7 +139,7 @@ class HarnessGateTest(unittest.TestCase):
     def test_unvalidated_harness_refuses_and_selects_nothing(self):
         runner, gov = _runner([_issue(id="PLA-1")], validator=lambda: False)
         # Even attempting to arm is refused when the harness is red.
-        with self.assertRaises(Exception):
+        with self.assertRaises(GuardrailTripped):
             gov.arm(guardrails_validated=False)
         sink = LoggingDispatchSink()
         res = runner.run_once(sink, dry_run=False)
@@ -197,12 +193,10 @@ class BudgetGateTest(unittest.TestCase):
         # A mis-wired source that returns the SAME item forever must not loop:
         # the governor's retry ceiling stops re-dispatch after N attempts.
         cfg = GuardrailConfig(retry_ceiling=3, per_issue_budget=1e9, global_budget=1e9)
-        runner, gov = _armed_runner([_issue(id="PLA-1")], config=cfg)
+        runner, _ = _armed_runner([_issue(id="PLA-1")], config=cfg)
         sink = LoggingDispatchSink()
         for _ in range(3):
-            self.assertEqual(
-                runner.run_once(sink, dry_run=False).decision, RunDecision.DISPATCHED
-            )
+            self.assertEqual(runner.run_once(sink, dry_run=False).decision, RunDecision.DISPATCHED)
         # 4th tick: attempts have hit the ceiling -> escalate/skip -> no dispatch.
         res = runner.run_once(sink, dry_run=False)
         self.assertEqual(res.decision, RunDecision.IDLE)
@@ -291,18 +285,14 @@ class IdleTest(unittest.TestCase):
 class SinkTest(unittest.TestCase):
     def test_logging_sink_records_and_reports_no_spawn(self):
         sink = LoggingDispatchSink()
-        contract = _armed_runner([_issue(id="PLA-1")])[0]._dispatcher.contract_for(
-            _issue(id="PLA-1")
-        )
+        contract = _armed_runner([_issue(id="PLA-1")])[0]._dispatcher.contract_for(_issue(id="PLA-1"))
         result = sink.dispatch(contract)
         self.assertFalse(result.spawned)
         self.assertEqual(result.sink, "logging")
         self.assertEqual(sink.records, [contract])
 
     def test_stub_sinks_are_not_implemented(self):
-        contract = _armed_runner([_issue(id="PLA-1")])[0]._dispatcher.contract_for(
-            _issue(id="PLA-1")
-        )
+        contract = _armed_runner([_issue(id="PLA-1")])[0]._dispatcher.contract_for(_issue(id="PLA-1"))
         for sink in (
             GitHubActionsHeadlessSink(),
             AgentPlatformSink(),
@@ -341,12 +331,9 @@ class RunResultTest(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 class CliTest(unittest.TestCase):
     def _snapshot(self, items) -> str:
-        fh = tempfile.NamedTemporaryFile(
-            "w", suffix=".json", delete=False, encoding="utf-8"
-        )
-        json.dump({"issues": items}, fh)
-        fh.close()
-        return fh.name
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+            json.dump({"issues": items}, fh)
+            return fh.name
 
     def _issue_doc(self, id="SGO-198", state="backlog"):
         return {
@@ -364,9 +351,11 @@ class CliTest(unittest.TestCase):
     def test_dry_run_default_records_no_side_effects(self):
         path = self._snapshot([self._issue_doc()])
         buf = io.StringIO()
-        with mock.patch.object(runner_mod, "guardrails_validated", lambda: True):
-            with redirect_stdout(buf):
-                rc = runner_mod.main(["--issues-file", path])
+        with (
+            mock.patch.object(runner_mod, "guardrails_validated", lambda: True),
+            redirect_stdout(buf),
+        ):
+            rc = runner_mod.main(["--issues-file", path])
         out = buf.getvalue()
         self.assertEqual(rc, 0)
         self.assertIn("RECORDED", out)
@@ -376,9 +365,11 @@ class CliTest(unittest.TestCase):
     def test_json_output_is_machine_readable(self):
         path = self._snapshot([self._issue_doc()])
         buf = io.StringIO()
-        with mock.patch.object(runner_mod, "guardrails_validated", lambda: True):
-            with redirect_stdout(buf):
-                rc = runner_mod.main(["--json", "--issues-file", path])
+        with (
+            mock.patch.object(runner_mod, "guardrails_validated", lambda: True),
+            redirect_stdout(buf),
+        ):
+            rc = runner_mod.main(["--json", "--issues-file", path])
         self.assertEqual(rc, 0)
         doc = json.loads(buf.getvalue())
         self.assertEqual(doc["decision"], "recorded")
@@ -390,14 +381,23 @@ class CliTest(unittest.TestCase):
         path = self._snapshot([self._issue_doc()])
         state = os.path.join(tempfile.mkdtemp(), "loop-state.json")
         buf = io.StringIO()
-        with mock.patch.object(runner_mod, "guardrails_validated", lambda: True):
-            with redirect_stdout(buf):
-                # A durable --state-file is REQUIRED for an armed+live tick (else
-                # the guardrails would be inert). soak_ticks defaults to 0 here.
-                rc = runner_mod.main(
-                    ["--json", "--armed", "--live", "--issues-file", path,
-                     "--state-file", state]
-                )
+        with (
+            mock.patch.object(runner_mod, "guardrails_validated", lambda: True),
+            redirect_stdout(buf),
+        ):
+            # A durable --state-file is REQUIRED for an armed+live tick (else
+            # the guardrails would be inert). soak_ticks defaults to 0 here.
+            rc = runner_mod.main(
+                [
+                    "--json",
+                    "--armed",
+                    "--live",
+                    "--issues-file",
+                    path,
+                    "--state-file",
+                    state,
+                ]
+            )
         self.assertEqual(rc, 0)
         doc = json.loads(buf.getvalue())
         self.assertEqual(doc["decision"], "dispatched")
@@ -411,11 +411,11 @@ class CliTest(unittest.TestCase):
         # up front (a non-durable ledger resets every tick -> inert guardrails).
         path = self._snapshot([self._issue_doc()])
         buf = io.StringIO()
-        with mock.patch.object(runner_mod, "guardrails_validated", lambda: True):
-            with redirect_stdout(buf):
-                rc = runner_mod.main(
-                    ["--json", "--armed", "--live", "--issues-file", path]
-                )
+        with (
+            mock.patch.object(runner_mod, "guardrails_validated", lambda: True),
+            redirect_stdout(buf),
+        ):
+            rc = runner_mod.main(["--json", "--armed", "--live", "--issues-file", path])
         self.assertEqual(rc, 3)
         doc = json.loads(buf.getvalue())
         self.assertEqual(doc["decision"], "refused")
@@ -424,9 +424,11 @@ class CliTest(unittest.TestCase):
     def test_armed_live_refused_when_harness_red_exits_nonzero(self):
         path = self._snapshot([self._issue_doc()])
         buf = io.StringIO()
-        with mock.patch.object(runner_mod, "guardrails_validated", lambda: False):
-            with redirect_stdout(buf):
-                rc = runner_mod.main(["--json", "--armed", "--live", "--issues-file", path])
+        with (
+            mock.patch.object(runner_mod, "guardrails_validated", lambda: False),
+            redirect_stdout(buf),
+        ):
+            rc = runner_mod.main(["--json", "--armed", "--live", "--issues-file", path])
         self.assertEqual(rc, 3)  # a closed gate surfaces to the schedule
         doc = json.loads(buf.getvalue())
         self.assertEqual(doc["decision"], "refused")
@@ -476,8 +478,12 @@ class _FakeTransport:
 
 def _gha_sink(transport, *, token="tok-abc", repo="three-cubes/tc-pipelines"):
     return GitHubActionsDispatchSink(
-        token=token, repo=repo, workflow="loop-implement.yml", ref="main",
-        api_url="https://api.github.com", transport=transport,
+        token=token,
+        repo=repo,
+        workflow="loop-implement.yml",
+        ref="main",
+        api_url="https://api.github.com",
+        transport=transport,
     )
 
 
@@ -491,9 +497,7 @@ class GitHubActionsDispatchSinkTest(unittest.TestCase):
     def test_dispatch_posts_workflow_dispatch_payload(self):
         fake = _FakeTransport(status=204)
         sink = _gha_sink(fake)
-        contract = _contract_for(
-            _issue(id="SGO-76", description="**Repos:** tc-fitness")
-        )
+        contract = _contract_for(_issue(id="SGO-76", description="**Repos:** tc-fitness"))
         result = sink.dispatch(contract)
 
         self.assertTrue(result.spawned)
@@ -517,9 +521,7 @@ class GitHubActionsDispatchSinkTest(unittest.TestCase):
     def test_dispatch_maps_contract_fields_to_inputs(self):
         fake = _FakeTransport()
         sink = _gha_sink(fake)
-        contract = _contract_for(
-            _issue(id="SGO-88", description="**Repos:** kairix")
-        )
+        contract = _contract_for(_issue(id="SGO-88", description="**Repos:** kairix"))
         sink.dispatch(contract)
         inputs = json.loads(fake.calls[0]["body"].decode())["inputs"]
         self.assertEqual(inputs["issue-id"], contract.issue_id)
@@ -540,9 +542,12 @@ class GitHubActionsDispatchSinkTest(unittest.TestCase):
         # explicitly built with the opt-in (the armed+live path — see _build_sink).
         fake = _FakeTransport()
         sink = GitHubActionsDispatchSink(
-            token="tok-abc", repo="three-cubes/tc-pipelines",
-            workflow="loop-implement.yml", ref="main",
-            api_url="https://api.github.com", transport=fake,
+            token="tok-abc",
+            repo="three-cubes/tc-pipelines",
+            workflow="loop-implement.yml",
+            ref="main",
+            api_url="https://api.github.com",
+            transport=fake,
             enable_auto_merge=True,
         )
         sink.dispatch(_contract_for(_issue(id="SGO-76", description="**Repos:** kairix")))
@@ -617,31 +622,47 @@ class BuildSinkAutoMergeTest(unittest.TestCase):
 
     def test_armed_live_opt_in_enables_auto_merge(self):
         with mock.patch.dict(os.environ, {"LOOP_DISPATCH_TOKEN": "tok"}, clear=False):
-            sink = self._sink_for([
-                "--sink", "github-actions",
-                "--dispatch-repo", "three-cubes/tc-pipelines",
-                "--armed", "--live", "--enable-auto-merge",
-            ])
+            sink = self._sink_for(
+                [
+                    "--sink",
+                    "github-actions",
+                    "--dispatch-repo",
+                    "three-cubes/tc-pipelines",
+                    "--armed",
+                    "--live",
+                    "--enable-auto-merge",
+                ]
+            )
         self.assertIsInstance(sink, GitHubActionsDispatchSink)
         self.assertTrue(sink.enable_auto_merge)
 
     def test_opt_in_without_live_does_not_enable_auto_merge(self):
         # --enable-auto-merge passed, but NOT live: must NOT propagate.
         with mock.patch.dict(os.environ, {"LOOP_DISPATCH_TOKEN": "tok"}, clear=False):
-            sink = self._sink_for([
-                "--sink", "github-actions",
-                "--dispatch-repo", "three-cubes/tc-pipelines",
-                "--armed", "--enable-auto-merge",
-            ])
+            sink = self._sink_for(
+                [
+                    "--sink",
+                    "github-actions",
+                    "--dispatch-repo",
+                    "three-cubes/tc-pipelines",
+                    "--armed",
+                    "--enable-auto-merge",
+                ]
+            )
         self.assertFalse(sink.enable_auto_merge)
 
     def test_armed_live_without_opt_in_does_not_enable_auto_merge(self):
         with mock.patch.dict(os.environ, {"LOOP_DISPATCH_TOKEN": "tok"}, clear=False):
-            sink = self._sink_for([
-                "--sink", "github-actions",
-                "--dispatch-repo", "three-cubes/tc-pipelines",
-                "--armed", "--live",
-            ])
+            sink = self._sink_for(
+                [
+                    "--sink",
+                    "github-actions",
+                    "--dispatch-repo",
+                    "three-cubes/tc-pipelines",
+                    "--armed",
+                    "--live",
+                ]
+            )
         self.assertFalse(sink.enable_auto_merge)
 
     def test_logging_sink_never_carries_auto_merge(self):
@@ -659,14 +680,9 @@ def _real_sink_runner(issues, *, soak_ticks=0, validator=lambda: True, armed=Tru
     keeps the workflow_dispatch from firing."""
     dispatcher = Dispatcher(StaticIssueSource(issues), guardrails_validator=validator)
     governor = Governor(None)
-    if armed:
-        try:
-            governor.arm(guardrails_validated=validator())
-        except Exception:
-            pass
-    runner = Runner(
-        dispatcher, governor, guardrails_validator=validator, soak_ticks=soak_ticks
-    )
+    if armed and validator():
+        governor.arm(guardrails_validated=True)
+    runner = Runner(dispatcher, governor, guardrails_validator=validator, soak_ticks=soak_ticks)
     fake = _FakeTransport(status=204)
     sink = _gha_sink(fake)
     return runner, sink, fake
@@ -687,9 +703,7 @@ class RealSinkGatingTest(unittest.TestCase):
         self.assertEqual(fake.calls, [])
 
     def test_red_harness_refuses_before_real_sink(self):
-        runner, sink, fake = _real_sink_runner(
-            [_issue(id="SGO-76")], validator=lambda: False, armed=False
-        )
+        runner, sink, fake = _real_sink_runner([_issue(id="SGO-76")], validator=lambda: False, armed=False)
         res = runner.run_once(sink, dry_run=False)
         self.assertEqual(res.decision, RunDecision.REFUSED)
         self.assertEqual(fake.calls, [])

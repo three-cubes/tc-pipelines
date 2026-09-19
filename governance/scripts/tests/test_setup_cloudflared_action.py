@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 import yaml
@@ -28,7 +28,7 @@ class _AssetServer(ThreadingHTTPServer):
 
 
 class _AssetHandler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         server = self.server
         assert isinstance(server, _AssetServer)
         if self.path == "/cloudflared-linux-amd64":
@@ -81,13 +81,9 @@ def _catalogue(tmp_path: Path, server: _AssetServer, **updates: str) -> Path:
     return path
 
 
-def _run_installer(
-    tmp_path: Path, server: _AssetServer, catalogue: Path
-) -> subprocess.CompletedProcess[str]:
+def _run_installer(tmp_path: Path, server: _AssetServer, catalogue: Path) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
-    environment["INSTALLER_AMBIENT_SECRET"] = (
-        "fixture-must-not-leak"  # pragma: allowlist secret
-    )
+    environment["INSTALLER_AMBIENT_SECRET"] = "fixture-must-not-leak"  # pragma: allowlist secret
     return subprocess.run(
         [
             sys.executable,
@@ -146,9 +142,7 @@ def test_rejects_each_digest_mismatch(
     assert not (tmp_path / "bin" / "cloudflared").exists()
 
 
-def test_rejects_executable_reporting_another_version(
-    tmp_path: Path, asset_server: _AssetServer
-) -> None:
+def test_rejects_executable_reporting_another_version(tmp_path: Path, asset_server: _AssetServer) -> None:
     asset_server.asset = b"#!/bin/sh\necho 'cloudflared version 2026.8.2'\n"
     result = _run_installer(tmp_path, asset_server, _catalogue(tmp_path, asset_server))
     assert result.returncode != 0
@@ -159,9 +153,7 @@ def test_rejects_executable_reporting_another_version(
 def test_reviewed_catalogue_pins_current_release_and_all_supported_platforms() -> None:
     document = json.loads(CATALOGUE.read_text())
     assert document["version"] == "2026.8.3"
-    assert document["source"] == (
-        "https://github.com/cloudflare/cloudflared/releases/tag/2026.8.3"
-    )
+    assert document["source"] == ("https://github.com/cloudflare/cloudflared/releases/tag/2026.8.3")
     assert set(document["assets"]) == {
         "darwin-amd64",
         "darwin-arm64",
@@ -178,9 +170,7 @@ def test_rejects_catalogue_source_that_does_not_bind_the_version(
 ) -> None:
     catalogue = _catalogue(tmp_path, asset_server)
     document = json.loads(catalogue.read_text())
-    document["source"] = (
-        "https://github.com/cloudflare/cloudflared/releases/tag/2026.8.2"
-    )
+    document["source"] = "https://github.com/cloudflare/cloudflared/releases/tag/2026.8.2"
     catalogue.write_text(json.dumps(document))
 
     result = _run_installer(tmp_path, asset_server, catalogue)

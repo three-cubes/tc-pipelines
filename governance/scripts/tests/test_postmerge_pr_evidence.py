@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[3]
-MODULE_PATH = (
-    ROOT / ".github" / "actions" / "postmerge-pr-evidence" / "postmerge_pr_evidence.py"
-)
+MODULE_PATH = ROOT / ".github" / "actions" / "postmerge-pr-evidence" / "postmerge_pr_evidence.py"
 SPEC = importlib.util.spec_from_file_location("postmerge_pr_evidence", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 evidence = importlib.util.module_from_spec(SPEC)
@@ -60,13 +58,9 @@ def merged_tree(tmp_path: Path) -> dict[str, str | Path]:
     _git(repo, "switch", "-c", "feature")
     head = _commit(repo, "feature.txt", "feature\n")
     tree = _git(repo, "merge-tree", "--write-tree", base, head)
-    tested_merge = _git(
-        repo, "commit-tree", tree, "-p", base, "-p", head, stdin="tested\n"
-    )
+    tested_merge = _git(repo, "commit-tree", tree, "-p", base, "-p", head, stdin="tested\n")
     _git(repo, "switch", "main")
-    landed_merge = _git(
-        repo, "commit-tree", tree, "-p", base, "-p", head, stdin="landed\n"
-    )
+    landed_merge = _git(repo, "commit-tree", tree, "-p", base, "-p", head, stdin="landed\n")
     _git(repo, "reset", "--hard", landed_merge)
     return {
         "repo": repo,
@@ -115,9 +109,7 @@ def test_capture_reads_merge_headers_at_a_shallow_boundary(
 ) -> None:
     shallow = _shallow_clone(merged_tree["repo"], tmp_path / "shallow-capture")
     assert _git(shallow, "rev-parse", "--is-shallow-repository") == "true"
-    assert _git(shallow, "rev-list", "--parents", "-n", "1", "HEAD").split() == [
-        merged_tree["landed"]
-    ]
+    assert _git(shallow, "rev-list", "--parents", "-n", "1", "HEAD").split() == [merged_tree["landed"]]
 
     document = evidence.capture_document(
         repo_root=shallow,
@@ -173,32 +165,25 @@ def test_evaluated_tree_guard_rejects_tracked_and_untracked_normalizer_changes(
     _git(repo, "config", "user.email", "contract@example.invalid")
     _commit(repo, "tracked.txt", "before\n")
 
-    clean = subprocess.run(
-        ["bash", str(guard)], cwd=repo, capture_output=True, text=True, check=False
-    )
+    clean = subprocess.run(["bash", str(guard)], cwd=repo, capture_output=True, text=True, check=False)
     assert clean.returncode == 0, clean.stderr
 
     (repo / "tracked.txt").write_text("after\n", encoding="utf-8")
-    tracked = subprocess.run(
-        ["bash", str(guard)], cwd=repo, capture_output=True, text=True, check=False
-    )
+    tracked = subprocess.run(["bash", str(guard)], cwd=repo, capture_output=True, text=True, check=False)
     assert tracked.returncode != 0
     assert "tracked.txt" in tracked.stderr
     assert "commit" in tracked.stderr
+    assert "evaluation withheld" in tracked.stderr
 
     _git(repo, "reset", "--hard", "HEAD")
     (repo / "generated.txt").write_text("generated\n", encoding="utf-8")
-    untracked = subprocess.run(
-        ["bash", str(guard)], cwd=repo, capture_output=True, text=True, check=False
-    )
+    untracked = subprocess.run(["bash", str(guard)], cwd=repo, capture_output=True, text=True, check=False)
     assert untracked.returncode != 0
     assert "generated.txt" in untracked.stderr
 
 
 @pytest.mark.parametrize("mutation", ["before", "head", "run", "tree"])
-def test_stale_or_changed_evidence_fails_closed(
-    merged_tree: dict[str, str | Path], mutation: str
-) -> None:
+def test_stale_or_changed_evidence_fails_closed(merged_tree: dict[str, str | Path], mutation: str) -> None:
     document = _evidence(merged_tree)
     if mutation == "before":
         before = "f" * 40
@@ -317,10 +302,7 @@ def test_capture_and_verify_cli_round_trip_emits_a_verified_output(
         )
         == 0
     )
-    assert (
-        json.loads(document.read_text(encoding="utf-8"))["tested_tree_sha"]
-        == merged_tree["tree"]
-    )
+    assert json.loads(document.read_text(encoding="utf-8"))["tested_tree_sha"] == merged_tree["tree"]
     assert output.read_text(encoding="utf-8").splitlines() == [
         "verified=true",
         "pull_request_number=116",

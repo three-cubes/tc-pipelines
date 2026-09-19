@@ -20,16 +20,16 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import tree_reconciler as tr  # noqa: E402 — path shim above
-from tree_reconciler import (  # noqa: E402
+import tree_reconciler as tr
+from tree_reconciler import (
     AgentBranch,
     Delegation,
-    Finding,
     FindingKind,
     HttpTreeSource,
     ReconcilerInput,
@@ -40,7 +40,7 @@ from tree_reconciler import (  # noqa: E402
     reconcile,
 )
 
-NOW = datetime(2026, 7, 2, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 2, 12, 0, 0, tzinfo=UTC)
 
 
 # --------------------------------------------------------------------------- #
@@ -94,14 +94,10 @@ def _for(report, kind):
 # --------------------------------------------------------------------------- #
 class BranchParseTest(unittest.TestCase):
     def test_org_convention_user_branch(self):
-        self.assertEqual(
-            issue_id_from_branch("dan/pla-311-sp-c-3-advance-the-loop"), "PLA-311"
-        )
+        self.assertEqual(issue_id_from_branch("dan/pla-311-sp-c-3-advance-the-loop"), "PLA-311")
 
     def test_agent_branch(self):
-        self.assertEqual(
-            issue_id_from_branch("agent/pla-315-delegation-tree-mirror"), "PLA-315"
-        )
+        self.assertEqual(issue_id_from_branch("agent/pla-315-delegation-tree-mirror"), "PLA-315")
 
     def test_takes_first_team_number_not_slug_digits(self):
         # sp-c-3 in the slug must not be mistaken for the work item.
@@ -121,9 +117,7 @@ class TwoLevelMirrorTest(unittest.TestCase):
         root_issue = _issue(id="PLA-1", parent_id=None)
         sub_issue = _issue(id="PLA-2", parent_id="PLA-1")
         root_deleg = _deleg("d-root", "PLA-1", parent_id=None, branch="dan/pla-1-root")
-        sub_deleg = _deleg(
-            "d-sub", "PLA-2", parent_id="d-root", branch="agent/pla-2-sub"
-        )
+        sub_deleg = _deleg("d-sub", "PLA-2", parent_id="d-root", branch="agent/pla-2-sub")
         return [root_issue, sub_issue], [root_deleg, sub_deleg]
 
     def test_matching_two_level_tree_is_clean(self):
@@ -136,9 +130,7 @@ class TwoLevelMirrorTest(unittest.TestCase):
         # The AC: killing a delegation marks its sub-issue stale in one pass.
         issues, delegations = self._two_level()
         # kill the sub delegation
-        delegations[1] = _deleg(
-            "d-sub", "PLA-2", parent_id="d-root", branch="agent/pla-2-sub", live=False
-        )
+        delegations[1] = _deleg("d-sub", "PLA-2", parent_id="d-root", branch="agent/pla-2-sub", live=False)
         report = reconcile(issues, delegations, now=NOW)
         stale = _for(report, FindingKind.STALE)
         self.assertEqual([f.issue_id for f in stale], ["PLA-2"])
@@ -301,9 +293,7 @@ class OverdueTest(unittest.TestCase):
         self.assertEqual([f.issue_id for f in _for(report, FindingKind.OVERDUE)], ["PLA-1"])
 
     def test_in_progress_under_three_days_is_ok(self):
-        issue = _issue(
-            id="PLA-1", status_name="In Progress", started_at="2026-07-01T00:00:00.000Z"
-        )
+        issue = _issue(id="PLA-1", status_name="In Progress", started_at="2026-07-01T00:00:00.000Z")
         report = reconcile([issue], [self._healthy_deleg("PLA-1")], now=NOW)
         self.assertEqual(_for(report, FindingKind.OVERDUE), [])
 
@@ -317,9 +307,7 @@ class OverdueTest(unittest.TestCase):
         self.assertEqual([f.issue_id for f in _for(report, FindingKind.OVERDUE)], ["PLA-1"])
 
     def test_in_review_under_two_days_is_ok(self):
-        issue = _issue(
-            id="PLA-1", status_name="In Review", updated_at="2026-07-01T06:00:00.000Z"
-        )
+        issue = _issue(id="PLA-1", status_name="In Review", updated_at="2026-07-01T06:00:00.000Z")
         report = reconcile([issue], [self._healthy_deleg("PLA-1")], now=NOW)
         self.assertEqual(_for(report, FindingKind.OVERDUE), [])
 
@@ -398,7 +386,7 @@ class TreeIssueFromLinearTest(unittest.TestCase):
 # GraphQL tree parser (pure — no network)
 # --------------------------------------------------------------------------- #
 class ParseTreeTest(unittest.TestCase):
-    PAYLOAD = {
+    PAYLOAD: ClassVar = {
         "data": {
             "initiative": {
                 "projects": {
@@ -412,20 +400,22 @@ class ParseTreeTest(unittest.TestCase):
                                         "url": "https://linear.app/x/PLA-1",
                                         "startedAt": "2026-07-01T00:00:00.000Z",
                                         "updatedAt": "2026-07-01T00:00:00.000Z",
-                                        "state": {"type": "started", "name": "In Progress"},
+                                        "state": {
+                                            "type": "started",
+                                            "name": "In Progress",
+                                        },
                                         "parent": None,
                                         "attachments": {"nodes": []},
                                     },
                                     {
                                         "identifier": "PLA-2",
                                         "title": "sub",
-                                        "state": {"type": "started", "name": "In Review"},
-                                        "parent": {"identifier": "PLA-1"},
-                                        "attachments": {
-                                            "nodes": [
-                                                {"url": "https://github.com/o/r/pull/9"}
-                                            ]
+                                        "state": {
+                                            "type": "started",
+                                            "name": "In Review",
                                         },
+                                        "parent": {"identifier": "PLA-1"},
+                                        "attachments": {"nodes": [{"url": "https://github.com/o/r/pull/9"}]},
                                     },
                                 ]
                             }
@@ -484,11 +474,15 @@ class HttpTreeSourceTest(unittest.TestCase):
 # Snapshot loading + combined ReconcilerInput
 # --------------------------------------------------------------------------- #
 class SnapshotTest(unittest.TestCase):
-    SNAP = {
+    SNAP: ClassVar = {
         "issues": [
             {"id": "PLA-1", "statusType": "started", "status": "In Progress"},
-            {"id": "PLA-2", "statusType": "started", "status": "In Progress",
-             "parent": {"identifier": "PLA-1"}},
+            {
+                "id": "PLA-2",
+                "statusType": "started",
+                "status": "In Progress",
+                "parent": {"identifier": "PLA-1"},
+            },
         ],
         "delegations": [
             {"id": "d1", "issue_id": "PLA-1", "branch": "b1"},
@@ -515,18 +509,13 @@ class SnapshotTest(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 class CliTest(unittest.TestCase):
     def _write(self, doc) -> str:
-        fh = tempfile.NamedTemporaryFile(
-            "w", suffix=".json", delete=False, encoding="utf-8"
-        )
-        json.dump(doc, fh)
-        fh.close()
-        return fh.name
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+            json.dump(doc, fh)
+            return fh.name
 
     def test_dry_run_reports_findings_no_side_effects(self):
         snap = {
-            "issues": [
-                {"id": "PLA-9", "statusType": "started", "status": "In Progress"}
-            ],
+            "issues": [{"id": "PLA-9", "statusType": "started", "status": "In Progress"}],
             "delegations": [],
             "branches": [{"name": "experiment/scratch"}],
         }
@@ -543,9 +532,7 @@ class CliTest(unittest.TestCase):
 
     def test_json_output_is_machine_report(self):
         snap = {
-            "issues": [
-                {"id": "PLA-9", "statusType": "started", "status": "In Progress"}
-            ],
+            "issues": [{"id": "PLA-9", "statusType": "started", "status": "In Progress"}],
             "delegations": [],
             "branches": [],
         }
@@ -568,9 +555,7 @@ class CliTest(unittest.TestCase):
 
     def test_fail_on_findings_sets_exit_code(self):
         snap = {
-            "issues": [
-                {"id": "PLA-9", "statusType": "started", "status": "In Progress"}
-            ],
+            "issues": [{"id": "PLA-9", "statusType": "started", "status": "In Progress"}],
             "delegations": [],
             "branches": [],
         }

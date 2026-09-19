@@ -1,0 +1,3 @@
+[[tool.tc_fitness.steps]]
+id = "workspace-tests"
+run = ["corepack", "pnpm@10.17.1", "--filter", "consumer-web", "test"]

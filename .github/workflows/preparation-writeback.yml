@@ -1,0 +1,265 @@
+name: "Deterministic preparation writeback"
+
+# This reusable privileged job is called by the existing default-branch
+# workflow_run consumer. It never checks out or invokes PR code.
+on:
+  workflow_call:
+    inputs:
+      repository:
+        required: true
+        type: string
+      workflow-run-id:
+        required: true
+        type: string
+      trusted-validator-ref:
+        description: >-
+          Immutable tc-pipelines commit containing the validator. Consumer
+          callers pass their pinned revision; tc-pipelines passes the trusted
+          default-branch workflow_run SHA for its local reusable call.
+        required: true
+        type: string
+      repository-owner:
+        required: true
+        type: string
+      repository-name:
+        required: true
+        type: string
+      azure-client-id:
+        required: true
+        type: string
+      azure-tenant-id:
+        required: true
+        type: string
+      azure-subscription-id:
+        required: true
+        type: string
+    outputs:
+      result:
+        description: "changed, no-artifact, or ineligible"
+        value: ${{ jobs.write-preparation.outputs.result }}
+
+permissions: {}
+
+jobs:
+  write-preparation:
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.result.outputs.result }}
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      pull-requests: read
+    steps:
+      # github.token is scoped to the consumer and cannot read a private
+      # tc-pipelines repository.  Mint a separately scoped token only for this
+      # immutable validator checkout; it has no consumer write authority.
+      - id: bootstrap
+        name: Mint scoped token for private tc-pipelines tools
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@8c4d058013b911b80177ac73636a925d911dc1ed # v2.2.1
+        with:
+          client-id: ${{ inputs.azure-client-id }}
+          tenant-id: ${{ inputs.azure-tenant-id }}
+          subscription-id: ${{ inputs.azure-subscription-id }}
+          owner: three-cubes
+          repositories: tc-pipelines
+      - name: Require an immutable trusted-validator revision
+        shell: bash
+        env:
+          REF: ${{ inputs.trusted-validator-ref }}
+        run: |
+          set -euo pipefail
+          [[ "$REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::trusted-validator-ref must be a full immutable SHA."
+            exit 1
+          }
+      # The validator comes from the immutable tc-pipelines revision, never the
+      # PR checkout.  This checkout is the only source code this job executes.
+      - name: Checkout trusted receipt validator
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: three-cubes/tc-pipelines
+          ref: ${{ inputs.trusted-validator-ref }}
+          path: .tc-pipelines-tools
+          token: ${{ steps.bootstrap.outputs.token }}
+          persist-credentials: false
+      - name: Install the trusted preparation toolchain
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.12.5"
+          python-version: "3.12"
+          enable-cache: true
+
+      - id: source
+        name: Select one current same-repository receipt artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ inputs.repository }}
+          RUN_ID: ${{ inputs.workflow-run-id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$RUNNER_TEMP/preparation-writeback"
+          mkdir -p "$root"
+          gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}" > "$root/workflow-run.json"
+          source_identity="$(jq -r --argjson run "$RUN_ID" '
+              if .id == $run and .event == "pull_request"
+                and (.run_attempt | type == "number" and . >= 1)
+                and (.pull_requests | type == "array" and length == 1)
+              then [.pull_requests[0].number, .head_sha, .head_repository.full_name,
+                    .head_branch, .run_attempt] | @tsv
+              else empty end
+            ' "$root/workflow-run.json")"
+          if [[ -z "$source_identity" ]]; then
+            {
+              echo "available=false"
+              echo "ineligible=true"
+              echo "root=$root"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          IFS=$'\t' read -r pr head_sha head_repository head_ref attempt <<< "$source_identity"
+          name="preparation-receipt-pr${pr}-run${RUN_ID}-attempt${attempt}"
+          gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}/artifacts?name=${name}&per_page=100" \
+            > "$root/artifacts.json"
+          artifact_count="$(jq -er --arg name "$name" '[.artifacts[] | select(.name == $name)] | length' "$root/artifacts.json")"
+          if [[ "$artifact_count" == 0 ]]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "root=$root" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          artifact_id="$(jq -er --arg name "$name" --argjson run "$RUN_ID" --arg head "$head_sha" '
+            [.artifacts[] | select(.name == $name and .expired == false
+              and .workflow_run.id == $run and .workflow_run.head_sha == $head
+              and (.digest | type == "string" and startswith("sha256:"))
+              and (.size_in_bytes | type == "number" and . >= 0 and . <= 3145728))]
+            | if length == 1 then .[0].id else error("one current receipt artifact is required") end
+          ' "$root/artifacts.json")"
+          [[ "$head_repository" == "$REPOSITORY" ]] || {
+            echo "::error::fork preparation receipts are never written back"
+            exit 1
+          }
+          gh api "repos/${REPOSITORY}/pulls/${pr}" > "$root/pull-request.json"
+          jq -er --arg head "$head_sha" --arg ref "$head_ref" --arg repository "$REPOSITORY" '
+            if .state == "open" and .head.sha == $head and .head.ref == $ref
+              and .head.repo.full_name == $repository
+            then true else error("pull request moved, closed, or is a fork") end
+          ' "$root/pull-request.json" >/dev/null
+          git check-ref-format --branch "$head_ref" >/dev/null
+          {
+            echo "available=true"
+            echo "pull_request=$pr"
+            echo "head_sha=$head_sha"
+            echo "head_ref=$head_ref"
+            echo "workflow_run_id=$RUN_ID"
+            echo "workflow_run_attempt=$attempt"
+            echo "artifact_id=$artifact_id"
+            echo "root=$root"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download the bounded receipt and patch
+        if: steps.source.outputs.available == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ inputs.repository }}
+          ARTIFACT_ID: ${{ steps.source.outputs.artifact_id }}
+          ROOT: ${{ steps.source.outputs.root }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > "$ROOT/receipt.zip"
+          python3 .tc-pipelines-tools/actions/preparation-writeback/preparation_writeback.py artifact \
+            --archive "$ROOT/receipt.zip" --output "$ROOT"
+
+      - id: apply
+        if: steps.source.outputs.available == 'true'
+        name: Validate and apply without executing PR code
+        shell: bash
+        env:
+          REPOSITORY: ${{ inputs.repository }}
+          PULL_REQUEST: ${{ steps.source.outputs.pull_request }}
+          HEAD_SHA: ${{ steps.source.outputs.head_sha }}
+          HEAD_REF: ${{ steps.source.outputs.head_ref }}
+          WORKFLOW_RUN_ID: ${{ steps.source.outputs.workflow_run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ steps.source.outputs.workflow_run_attempt }}
+          ROOT: ${{ steps.source.outputs.root }}
+          GITHUB_READ_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          worktree="$ROOT/worktree"
+          git init -q "$worktree"
+          python3 .tc-pipelines-tools/actions/preparation-writeback/preparation_writeback.py fetch \
+            --root "$worktree" \
+            --remote-url "https://github.com/${REPOSITORY}.git" \
+            --head-sha "$HEAD_SHA"
+          git -C "$worktree" remote add origin "https://github.com/${REPOSITORY}.git"
+          git -C "$worktree" -c core.hooksPath=/dev/null checkout --detach -q "$HEAD_SHA"
+          python3 .tc-pipelines-tools/actions/preparation-writeback/preparation_writeback.py apply \
+            --receipt "$ROOT/preparation-receipt.json" \
+            --patch "$ROOT/preparation-patch.json" \
+            --repository "$REPOSITORY" \
+            --pull-request "$PULL_REQUEST" \
+            --expected-head "$HEAD_SHA" \
+            --expected-policy "python-ruff-v1" \
+            --expected-head-ref "$HEAD_REF" \
+            --workflow-run-id "$WORKFLOW_RUN_ID" \
+            --workflow-run-attempt "$WORKFLOW_RUN_ATTEMPT" \
+            --root "$worktree"
+          changed="$(python3 .tc-pipelines-tools/actions/preparation-writeback/preparation_writeback.py changed --root "$worktree")"
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "worktree=$worktree" >> "$GITHUB_OUTPUT"
+
+      # No App credential exists before the immutable receipt has been checked
+      # and applied in the fresh detached repository above.
+      - id: app
+        if: steps.source.outputs.available == 'true' && steps.apply.outputs.changed == 'true'
+        name: Mint writeback token after receipt validation
+        uses: ./.tc-pipelines-tools/.github/actions/github-app-token
+        with:
+          client-id: ${{ inputs.azure-client-id }}
+          tenant-id: ${{ inputs.azure-tenant-id }}
+          subscription-id: ${{ inputs.azure-subscription-id }}
+          owner: ${{ inputs.repository-owner }}
+          repositories: ${{ inputs.repository-name }}
+
+      - name: Commit as the canonical bot and push only the exact lease
+        if: steps.source.outputs.available == 'true' && steps.apply.outputs.changed == 'true'
+        shell: bash
+        env:
+          GITHUB_APP_TOKEN: ${{ steps.app.outputs.token }}
+          HEAD_SHA: ${{ steps.source.outputs.head_sha }}
+          HEAD_REF: ${{ steps.source.outputs.head_ref }}
+          PULL_REQUEST: ${{ steps.source.outputs.pull_request }}
+          WORKTREE: ${{ steps.apply.outputs.worktree }}
+        run: |
+          set -euo pipefail
+          git -C "$WORKTREE" -c core.hooksPath=/dev/null config user.name 'three-cubes-agent[bot]'
+          git -C "$WORKTREE" -c core.hooksPath=/dev/null config user.email '295831460+three-cubes-agent[bot]@users.noreply.github.com'
+          git -C "$WORKTREE" -c core.hooksPath=/dev/null add --all
+          git -C "$WORKTREE" -c core.hooksPath=/dev/null commit -m "chore: apply deterministic preparation for PR #${PULL_REQUEST}"
+          python3 .tc-pipelines-tools/actions/preparation-writeback/preparation_writeback.py push \
+            --root "$WORKTREE" \
+            --remote origin \
+            --head-ref "$HEAD_REF" \
+            --expected-head "$HEAD_SHA"
+
+      - id: result
+        if: always()
+        shell: bash
+        env:
+          AVAILABLE: ${{ steps.source.outputs.available }}
+          INELIGIBLE: ${{ steps.source.outputs.ineligible }}
+          CHANGED: ${{ steps.apply.outputs.changed }}
+        run: |
+          set -euo pipefail
+          if [[ "$INELIGIBLE" == true ]]; then
+            result=ineligible
+          elif [[ "$AVAILABLE" != true ]]; then
+            result=no-artifact
+          elif [[ "$CHANGED" == true ]]; then
+            result=changed
+          else
+            result=no-artifact
+          fi
+          echo "result=$result" >> "$GITHUB_OUTPUT"

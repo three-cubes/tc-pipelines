@@ -1,0 +1,8 @@
+{
+  "name": "consumer-web",
+  "private": true,
+  "scripts": {
+    "generate": "node generate.mjs",
+    "test": "node --test --test-reporter=tap --test-reporter-destination=../../artifacts/workspace.tap test.mjs"
+  }
+}

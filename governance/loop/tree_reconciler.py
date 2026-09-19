@@ -61,10 +61,11 @@ import os
 import re
 import sys
 import urllib.request
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Optional, Protocol, Sequence
+from typing import Protocol
 
 # ``loop_dispatcher`` is a sibling module (this dir is not a package — the tests
 # use the same path shim). Reuse its tolerant issue parser so the delegation
@@ -111,12 +112,12 @@ _PR_URL_RE = re.compile(r"github\.com/.+/pull/\d+", re.IGNORECASE)
 class FindingKind:
     """The reconciliation finding kinds (the drift/orphan/stale vocabulary)."""
 
-    ORPHAN_WORK = "orphan-work"          # (a) started issue: no delegation / no link
+    ORPHAN_WORK = "orphan-work"  # (a) started issue: no delegation / no link
     UNLINKED_BRANCH = "unlinked-branch"  # (b) agent branch/PR with no work item
-    DRIFT = "drift"                      # (c) sub-issue parent != delegation parent
-    STALE = "stale"                      # started sub-issue whose delegation is dead
+    DRIFT = "drift"  # (c) sub-issue parent != delegation parent
+    STALE = "stale"  # started sub-issue whose delegation is dead
     MISSING_SUBISSUE = "missing-subissue"  # in-flight delegation with no mirror
-    OVERDUE = "overdue"                  # In Progress >3d / For Review >2d
+    OVERDUE = "overdue"  # In Progress >3d / For Review >2d
 
 
 #: Report ordering — most-actionable / most-structural first.
@@ -136,12 +137,12 @@ class Finding:
     annotation that *would* be posted; it never carries out a mutation."""
 
     kind: str
-    subject: str                         # the id/name the finding is anchored to
-    detail: str = ""                     # human-readable explanation
-    reason: str = ""                     # short machine sub-reason code
-    issue_id: Optional[str] = None
-    delegation_id: Optional[str] = None
-    branch: Optional[str] = None
+    subject: str  # the id/name the finding is anchored to
+    detail: str = ""  # human-readable explanation
+    reason: str = ""  # short machine sub-reason code
+    issue_id: str | None = None
+    delegation_id: str | None = None
+    branch: str | None = None
 
     @property
     def severity(self) -> int:
@@ -185,9 +186,7 @@ class ReconciliationReport:
 
         Pure data — nothing is written. Only findings anchored to an issue get an
         annotation (a branch-only finding has no issue to comment on)."""
-        return tuple(
-            (f.issue_id, f.annotation()) for f in self.findings if f.issue_id
-        )
+        return tuple((f.issue_id, f.annotation()) for f in self.findings if f.issue_id)
 
     def to_dict(self) -> dict:
         return {
@@ -221,7 +220,7 @@ class TreeIssue:
     id: str
     state_type: str = ""
     status_name: str = ""
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     started_at: str = ""
     updated_at: str = ""
     pr_urls: tuple[str, ...] = ()
@@ -234,7 +233,7 @@ class TreeIssue:
         return self.state_type == STARTED_STATE_TYPE
 
     @classmethod
-    def from_linear(cls, raw: dict) -> "TreeIssue":
+    def from_linear(cls, raw: dict) -> TreeIssue:
         base = dispatcher.CandidateIssue.from_linear(raw)  # reuse tolerant parse
         return cls(
             id=base.id,
@@ -259,18 +258,18 @@ class Delegation:
 
     id: str
     issue_id: str = ""
-    parent_id: Optional[str] = None
-    agent: Optional[str] = None
+    parent_id: str | None = None
+    agent: str | None = None
     live: bool = True
-    branch: Optional[str] = None
-    pr: Optional[str] = None
+    branch: str | None = None
+    pr: str | None = None
 
     @property
     def has_link(self) -> bool:
         return bool(self.branch or self.pr)
 
     @classmethod
-    def from_dict(cls, raw: dict) -> "Delegation":
+    def from_dict(cls, raw: dict) -> Delegation:
         return cls(
             id=str(raw.get("id") or ""),
             issue_id=str(raw.get("issue_id") or raw.get("issueId") or ""),
@@ -290,10 +289,10 @@ class AgentBranch:
     from the branch name via the org convention (:func:`issue_id_from_branch`)."""
 
     name: str
-    pr_url: Optional[str] = None
-    issue_id: Optional[str] = None
+    pr_url: str | None = None
+    issue_id: str | None = None
 
-    def linked_issue_id(self) -> Optional[str]:
+    def linked_issue_id(self) -> str | None:
         """The work item this branch/PR maps to — explicit id wins, else parsed
         from the branch name, else ``None`` (nothing to close)."""
         if self.issue_id:
@@ -301,7 +300,7 @@ class AgentBranch:
         return issue_id_from_branch(self.name)
 
     @classmethod
-    def from_dict(cls, raw: dict) -> "AgentBranch":
+    def from_dict(cls, raw: dict) -> AgentBranch:
         return cls(
             name=str(raw.get("name") or raw.get("branch") or ""),
             pr_url=raw.get("pr_url") or raw.get("prUrl") or raw.get("url"),
@@ -321,7 +320,7 @@ class ReconcilerInput:
 # --------------------------------------------------------------------------- #
 # Pure helpers — parsing (deterministic, no side effects)
 # --------------------------------------------------------------------------- #
-def issue_id_from_branch(name: str) -> Optional[str]:
+def issue_id_from_branch(name: str) -> str | None:
     """``"dan/pla-311-sp-c-3-…"`` → ``"PLA-311"`` (the first ``<team>-<n>`` token).
 
     Returns ``None`` when the branch carries no work-item identifier (e.g.
@@ -346,7 +345,7 @@ def _status_name(raw: dict) -> str:
     return ""
 
 
-def _parent_identifier(raw: dict) -> Optional[str]:
+def _parent_identifier(raw: dict) -> str | None:
     """The parent issue's identifier, from any of the shapes Linear/MCP emit."""
     parent = raw.get("parent")
     if isinstance(parent, dict):
@@ -393,25 +392,25 @@ def _as_live(raw: dict) -> bool:
     return status not in {"killed", "dead", "done", "complete", "completed", "closed"}
 
 
-def _parse_ts(value: str) -> Optional[datetime]:
+def _parse_ts(value: str) -> datetime | None:
     """Parse a Linear ISO-8601 timestamp; ``None`` if missing/garbage."""
     if not value:
         return None
     try:
-        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(value)
     except ValueError:
         return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
-def _age_days(value: str, now: datetime) -> Optional[float]:
+def _age_days(value: str, now: datetime) -> float | None:
     ts = _parse_ts(value)
     if ts is None:
         return None
     return (now - ts).total_seconds() / 86400.0
 
 
-def _overdue_reason(issue: TreeIssue, now: datetime) -> Optional[str]:
+def _overdue_reason(issue: TreeIssue, now: datetime) -> str | None:
     """The overdue reason for an in-flight issue, or ``None`` if within SLA.
 
     In Review keys off the last-update time (~ time in review); In Progress (the
@@ -430,7 +429,7 @@ def _overdue_reason(issue: TreeIssue, now: datetime) -> Optional[str]:
 
 def _issue_has_link(
     issue: TreeIssue,
-    deleg: Optional[Delegation],
+    deleg: Delegation | None,
     branch_index: dict[str, list[AgentBranch]],
 ) -> bool:
     """Whether any real code artifact ties to the issue: a PR attachment, the
@@ -451,7 +450,7 @@ def reconcile(
     *,
     branches: Sequence[AgentBranch] = (),
     initiative: str = ADP_INITIATIVE_ID,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> ReconciliationReport:
     """Reconcile the Linear issue tree against the delegation state + branch list.
 
@@ -459,7 +458,7 @@ def reconcile(
     returns a :class:`ReconciliationReport`. It never mutates the inputs, never
     writes to Linear, and never reparents/relabels/deletes: findings are reported,
     annotations are only *proposed*."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
 
     issue_by_id: dict[str, TreeIssue] = {i.id: i for i in issues}
     deleg_by_id: dict[str, Delegation] = {d.id: d for d in delegations}
@@ -536,8 +535,7 @@ def reconcile(
                     issue_id=i.id,
                     reason="no-link",
                     detail=(
-                        f"{i.id} is {i.status_name or 'in-flight'} but has no linked "
-                        "PR/branch behind it"
+                        f"{i.id} is {i.status_name or 'in-flight'} but has no linked PR/branch behind it"
                     ),
                 )
             )
@@ -598,10 +596,7 @@ def reconcile(
                     branch=b.name,
                     issue_id=linked,
                     reason="unknown-issue",
-                    detail=(
-                        f"branch/PR {b.name!r} points at {linked}, which is not in "
-                        "the reconciled tree"
-                    ),
+                    detail=(f"branch/PR {b.name!r} points at {linked}, which is not in the reconciled tree"),
                 )
             )
 
@@ -622,12 +617,8 @@ def load_snapshot(data: dict) -> ReconcilerInput:
     """Build a :class:`ReconcilerInput` from a combined ``{issues, delegations,
     branches}`` snapshot (the shape the dry-run reads and the tests fixture)."""
     issues = tuple(TreeIssue.from_linear(i) for i in data.get("issues", ()) or ())
-    delegations = tuple(
-        Delegation.from_dict(d) for d in data.get("delegations", ()) or ()
-    )
-    branches = tuple(
-        AgentBranch.from_dict(b) for b in data.get("branches", ()) or ()
-    )
+    delegations = tuple(Delegation.from_dict(d) for d in data.get("delegations", ()) or ())
+    branches = tuple(AgentBranch.from_dict(b) for b in data.get("branches", ()) or ())
     return ReconcilerInput(issues=issues, delegations=delegations, branches=branches)
 
 
@@ -755,9 +746,7 @@ def _load_input(args: argparse.Namespace) -> ReconcilerInput:
             "export) to reconcile the Linear tree against."
         )
     issues = tuple(HttpTreeSource(api_key).fetch(args.initiative))
-    delegations = tuple(
-        Delegation.from_dict(d) for d in _read_json_list(args.delegations_file)
-    )
+    delegations = tuple(Delegation.from_dict(d) for d in _read_json_list(args.delegations_file))
     branches = (
         tuple(AgentBranch.from_dict(b) for b in _read_json_list(args.branches_file))
         if args.branches_file
@@ -818,8 +807,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--delegations-file",
-        help="Delegation-ledger export (JSON list or {'delegations': [...]}). "
-        "Required on the live path.",
+        help="Delegation-ledger export (JSON list or {'delegations': [...]}). Required on the live path.",
     )
     parser.add_argument(
         "--branches-file",
@@ -849,7 +837,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     inp = _load_input(args)
     now = _parse_ts(args.now) if args.now else None

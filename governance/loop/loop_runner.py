@@ -85,31 +85,29 @@ import json
 import os
 import re
 import sys
-import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional, Protocol, Tuple, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 # ``loop_dispatcher`` / ``loop_governor`` / ``loop_state_machine`` are sibling
 # modules (this dir is not a package — the tests use the same path shim). Import
 # them whether we run as ``-m loop_runner`` (cwd on path) or as a script from the
 # repo root.
 try:  # pragma: no cover - exercised both ways depending on invocation
-    import loop_dispatcher as dispatch_mod
     import loop_governor as governor_mod
 except ModuleNotFoundError:  # pragma: no cover
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import loop_dispatcher as dispatch_mod
     import loop_governor as governor_mod
 
 from loop_dispatcher import (
     ADP_INITIATIVE_ID,
     CandidateIssue,
-    Dispatcher,
     DispatchContract,
+    Dispatcher,
     HttpLinearSource,
     IssueSource,
     JsonIssueSource,
@@ -142,7 +140,7 @@ class DispatchResult:
     sink: str
     issue_id: str
     detail: str = ""
-    ref: Optional[str] = None  # a run URL / spawn id / delegate id, when a real sink sets one
+    ref: str | None = None  # a run URL / spawn id / delegate id, when a real sink sets one
 
     def to_dict(self) -> dict:
         return {
@@ -214,7 +212,7 @@ class LoggingDispatchSink:
 #: Injectable HTTP transport seam: ``(url, body_bytes, headers) -> (status, text)``.
 #: The default (:func:`_default_dispatch_transport`) uses stdlib ``urllib``; tests
 #: inject a fake so the dispatch is fully exercisable offline (no network).
-DispatchTransport = Callable[[str, bytes, dict], Tuple[int, str]]
+DispatchTransport = Callable[[str, bytes, dict], tuple[int, str]]
 
 # INJECTION-SAFE validation: every value that reaches the GitHub REST call (the
 # contract's issue id / branch / repo AND the orchestrator repo + workflow file)
@@ -232,17 +230,15 @@ _TARGET_REPO_RE = re.compile(r"^(?:[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+$")
 _WORKFLOW_RE = re.compile(r"^[A-Za-z0-9._-]+\.ya?ml$")  # a workflow file name
 
 
-def _default_dispatch_transport(url: str, body: bytes, headers: dict) -> Tuple[int, str]:
+def _default_dispatch_transport(url: str, body: bytes, headers: dict) -> tuple[int, str]:
     """POST ``body`` to ``url`` via stdlib ``urllib`` (no third-party deps).
 
     Returns ``(status, text)``. An ``HTTPError`` is caught and surfaced as its
     status code so the caller decides how to treat a non-2xx (the sink fails
     CLOSED on anything but 201/204)."""
-    req = urllib.request.Request(  # noqa: S310 - fixed GitHub API host, values validated
-        url, data=body, headers=headers, method="POST"
-    )
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req) as resp:  # noqa: S310 - fixed GitHub API host
+        with urllib.request.urlopen(req) as resp:
             return resp.status, resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:  # pragma: no cover - network error shape
         return exc.code, exc.read().decode("utf-8", "replace")
@@ -287,7 +283,9 @@ class GitHubActionsDispatchSink:
         if not _BRANCH_RE.match(contract.branch or ""):
             raise ValueError(f"GitHubActionsDispatchSink: refusing unsafe branch {contract.branch!r}")
         if (contract.repo or "") == "unknown" or not _TARGET_REPO_RE.match(contract.repo or ""):
-            raise ValueError(f"GitHubActionsDispatchSink: refusing unresolved/unsafe target repo {contract.repo!r}")
+            raise ValueError(
+                f"GitHubActionsDispatchSink: refusing unresolved/unsafe target repo {contract.repo!r}"
+            )
         if not _REPO_RE.match(self.repo or ""):
             raise ValueError(f"GitHubActionsDispatchSink: refusing unsafe orchestrator repo {self.repo!r}")
         if not _WORKFLOW_RE.match(self.workflow or ""):
@@ -446,9 +444,7 @@ class RunDecision(str, Enum):
 
 
 #: Decisions in which the spawn seam (``sink.dispatch``) was definitely NOT reached.
-_NO_SEAM = frozenset(
-    {RunDecision.REFUSED, RunDecision.HALTED, RunDecision.IDLE, RunDecision.RECORDED}
-)
+_NO_SEAM = frozenset({RunDecision.REFUSED, RunDecision.HALTED, RunDecision.IDLE, RunDecision.RECORDED})
 
 
 @dataclass(frozen=True)
@@ -470,8 +466,8 @@ class RunResult:
     dry_run: bool
     dispatched: bool
     initiative: str
-    contract: Optional[DispatchContract] = None
-    dispatch_result: Optional[DispatchResult] = None
+    contract: DispatchContract | None = None
+    dispatch_result: DispatchResult | None = None
     ready: tuple[str, ...] = ()
     skipped: tuple[tuple[str, str], ...] = ()
 
@@ -491,9 +487,7 @@ class RunResult:
             "spawned": self.spawned,
             "initiative": self.initiative,
             "contract": self.contract.to_dict() if self.contract else None,
-            "dispatch_result": (
-                self.dispatch_result.to_dict() if self.dispatch_result else None
-            ),
+            "dispatch_result": (self.dispatch_result.to_dict() if self.dispatch_result else None),
             "ready": list(self.ready),
             "skipped": [{"id": i, "reason": r} for i, r in self.skipped],
         }
@@ -522,10 +516,10 @@ class Runner:
         dispatcher: Dispatcher,
         governor: Governor,
         *,
-        guardrails_validator: Optional[Callable[[], bool]] = None,
+        guardrails_validator: Callable[[], bool] | None = None,
         initiative: str = ADP_INITIATIVE_ID,
         cost_per_issue: float = 1.0,
-        state_store: Optional[StateStore] = None,
+        state_store: StateStore | None = None,
         soak_ticks: int = 0,
     ) -> None:
         self._dispatcher = dispatcher
@@ -533,9 +527,7 @@ class Runner:
         # Default to the dispatcher's proof so the two never diverge; an explicit
         # override is honoured (the tests inject a stub, the CLI a memoised one).
         self._validator: Callable[[], bool] = (
-            guardrails_validator
-            if guardrails_validator is not None
-            else dispatcher.guardrails_validator
+            guardrails_validator if guardrails_validator is not None else dispatcher.guardrails_validator
         )
         self._initiative = initiative
         self._cost = cost_per_issue
@@ -543,9 +535,7 @@ class Runner:
         # (in-process only) — fine for a single long-lived Governor and for unit
         # tests, but an armed + live tick requires a durable store (the CLI
         # refuses the non-durable combination). See FIX 1 / ARMING.md.
-        self._state_store: StateStore = (
-            state_store if state_store is not None else NullStateStore()
-        )
+        self._state_store: StateStore = state_store if state_store is not None else NullStateStore()
         # Soak gate (FIX 3): the first ``soak_ticks`` armed ticks stay record-only
         # even when live is requested, so a cold armed tick never dispatches.
         self._soak_required = max(0, int(soak_ticks))
@@ -569,9 +559,7 @@ class Runner:
         self._state_store.save(snap)
 
     # -- the tick ----------------------------------------------------------- #
-    def run_once(
-        self, sink: DispatchSink, *, dry_run: bool = True
-    ) -> RunResult:
+    def run_once(self, sink: DispatchSink, *, dry_run: bool = True) -> RunResult:
         """Run one fail-safe dispatch tick.
 
         Order (each earlier gate short-circuits, so a breach can never reach the
@@ -641,8 +629,7 @@ class Runner:
         if self._governor.halted:
             return self._result(
                 RunDecision.HALTED,
-                "fleet-wide breaker is open (global budget / cross-issue "
-                "circuit) — all dispatch halted",
+                "fleet-wide breaker is open (global budget / cross-issue circuit) — all dispatch halted",
                 armed=armed,
                 harness_ok=True,
                 dry_run=dry_run,
@@ -752,7 +739,7 @@ class Runner:
     # -- selection ---------------------------------------------------------- #
     def _select(
         self, queue: list[CandidateIssue], armed: bool
-    ) -> tuple[Optional[CandidateIssue], list[tuple[str, str]], Optional[str]]:
+    ) -> tuple[CandidateIssue | None, list[tuple[str, str]], str | None]:
         """Pick the next dispatchable item, applying the governor's runtime gate.
 
         Returns ``(selected, skipped, halt_reason)``. ``halt_reason`` is non-None
@@ -796,8 +783,8 @@ class Runner:
         dry_run: bool,
         ready: tuple[str, ...] = (),
         skipped: tuple[tuple[str, str], ...] = (),
-        contract: Optional[DispatchContract] = None,
-        dispatch_result: Optional[DispatchResult] = None,
+        contract: DispatchContract | None = None,
+        dispatch_result: DispatchResult | None = None,
         dispatched: bool = False,
     ) -> RunResult:
         # Defence in depth: only a DISPATCHED decision may report dispatched=True.
@@ -821,7 +808,7 @@ class Runner:
 # --------------------------------------------------------------------------- #
 # CLI — dry-run + record-only by default; arming is a deliberate, extra act
 # --------------------------------------------------------------------------- #
-def _source_from(issues_file: Optional[str]) -> Optional[IssueSource]:
+def _source_from(issues_file: str | None) -> IssueSource | None:
     """Resolve the Linear-adapter source: a snapshot file, else live Linear via
     ``LINEAR_API_KEY``, else ``None`` (the caller reports a documented skip so a
     scheduled dry-run stays green in a bootstrap repo with no source wired)."""
@@ -844,7 +831,7 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _state_store_from(state_file: Optional[str]) -> StateStore:
+def _state_store_from(state_file: str | None) -> StateStore:
     """A DURABLE :class:`JsonFileStateStore` when a state file is configured, else
     the non-durable :class:`NullStateStore`. The workflow always passes a state
     file (materialised from the ``loop-state`` git ref), so a scheduled tick is
@@ -954,8 +941,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dispatch-ref",
         default=os.environ.get("LOOP_DISPATCH_REF", "main"),
-        help="Git ref the dispatched workflow runs on. Env: LOOP_DISPATCH_REF "
-        "(default main).",
+        help="Git ref the dispatched workflow runs on. Env: LOOP_DISPATCH_REF (default main).",
     )
     parser.add_argument(
         "--dispatch-api-url",
@@ -1059,8 +1045,7 @@ def render_result(result: RunResult) -> str:
     lines: list[str] = []
     lines.append(f"loop-runner tick — Autonomous Delivery Platform ({result.initiative})")
     lines.append(
-        f"  armed={result.armed}  harness_validated={result.harness_validated}  "
-        f"dry_run={result.dry_run}"
+        f"  armed={result.armed}  harness_validated={result.harness_validated}  dry_run={result.dry_run}"
     )
     lines.append(f"  decision: {result.decision.value.upper()}  —  {result.reason}")
     lines.append(f"  READY ({len(result.ready)}): {', '.join(result.ready) or '(none)'}")
@@ -1081,7 +1066,7 @@ def render_result(result: RunResult) -> str:
     return "\n".join(lines)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     dry_run = not args.live
 
@@ -1122,7 +1107,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Run the guardrail harness AT MOST ONCE this tick and share the result with
     # both the dispatcher (its arming proof) and the runner (its live self-check).
     harness_ok = guardrails_validated()
-    validator: Callable[[], bool] = lambda: harness_ok  # noqa: E731 - a tiny memoised proof
+    validator: Callable[[], bool] = lambda: harness_ok
 
     runner, governor = _build_runner(args, source, validator, state_store)
 

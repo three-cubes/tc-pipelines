@@ -86,7 +86,11 @@ def _run_body(job: dict) -> str:
 def _assert_local_meta_steps() -> dict[str, dict]:
     steps = _steps_by_id()
     for step_id, expected in LOCAL_META_STEPS.items():
-        assert steps.get(step_id) == {"id": step_id, "summary": steps.get(step_id, {}).get("summary"), **expected}, (
+        assert steps.get(step_id) == {
+            "id": step_id,
+            "summary": steps.get(step_id, {}).get("summary"),
+            **expected,
+        }, (
             f"{PYPROJECT.name}: local `{step_id}` is {steps.get(step_id)!r}, not the "
             f"configured equivalent of CI's `{step_id}` meta leg. fix: declare the "
             "exact local command and environment in [tool.tc_fitness]."
@@ -136,14 +140,18 @@ def test_ci_meta_tools_are_pinned_to_the_local_tool_versions() -> None:
 
     actionlint_job = meta["jobs"]["actionlint"]
     actionlint_body = _run_body(actionlint_job)
-    assert (actionlint_job.get("steps") or [])[-1].get("env", {}).get("ACTIONLINT_VERSION") == "${{ inputs.actionlint-version }}"
+    assert (actionlint_job.get("steps") or [])[-1].get("env", {}).get(
+        "ACTIONLINT_VERSION"
+    ) == "${{ inputs.actionlint-version }}"
     assert "raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/" in actionlint_body
     assert '"$ACTIONLINT_VERSION" .' in actionlint_body
     assert "/main/" not in actionlint_body
 
     yamllint_job = meta["jobs"]["yamllint"]
     yamllint_body = _run_body(yamllint_job)
-    assert (yamllint_job.get("steps") or [])[-1].get("env", {}).get("YAMLLINT_VERSION") == "${{ inputs.yamllint-version }}"
+    assert (yamllint_job.get("steps") or [])[-1].get("env", {}).get(
+        "YAMLLINT_VERSION"
+    ) == "${{ inputs.yamllint-version }}"
     assert 'pipx install "yamllint==${YAMLLINT_VERSION}"' in yamllint_body
 
     dev_dependencies = _project_config()["dependency-groups"]["dev"]
@@ -201,8 +209,7 @@ def test_each_local_meta_equivalent_rejects_a_bad_input(tmp_path: Path, step_id:
 
     result = subprocess.run(command, cwd=REPO_ROOT, env=env, check=False, capture_output=True, text=True)
     assert result.returncode != 0, (
-        f"local `{step_id}` accepted its sabotaged input. stdout: {result.stdout}\n"
-        f"stderr: {result.stderr}"
+        f"local `{step_id}` accepted its sabotaged input. stdout: {result.stdout}\nstderr: {result.stderr}"
     )
 
 

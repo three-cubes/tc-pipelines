@@ -1,0 +1,27 @@
+---
+name: example - live scanner qualification
+
+# Resolve the reusable workflow contract in this repository without spending a
+# hosted runner by default. A coordinated release may explicitly enable it for
+# the exact candidate commit under qualification.
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: Run the native scanner qualification instead of shape-checking it.
+        type: boolean
+        default: false
+      candidate:
+        description: Exact tc-pipelines commit to qualify when enabled.
+        type: string
+        default: "0000000000000000000000000000000000000000"
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/live-scanner-qualification.yml
+    with:
+      candidate: ${{ inputs.candidate }}

@@ -95,11 +95,7 @@ def _outside_the_contract(document: dict) -> dict:
     The `workflow_call` block declares the contract. Scanning it would read a
     secret's own declaration as a use of that secret.
     """
-    return {
-        key: value
-        for key, value in document.items()
-        if key is not True and key != "on"
-    }
+    return {key: value for key, value in document.items() if key is not True and key != "on"}
 
 
 def _scalars(node: object, path: tuple[str, ...] = ()) -> list[tuple[str, str]]:
@@ -207,9 +203,7 @@ def _lane_cases() -> list[tuple[str, str, str, str, bool]]:
             carried = Counter(name for forwarded in lanes.values() for name in forwarded)
             for secret in sorted(name for name, seen in carried.items() if seen > 1):
                 for lane in sorted(lanes):
-                    cases.append(
-                        (path.name, target, lane, secret, secret in lanes[lane])
-                    )
+                    cases.append((path.name, target, lane, secret, secret in lanes[lane]))
     return cases
 
 
@@ -228,9 +222,7 @@ def _conditions() -> dict[str, list[tuple[str, str]]]:
 REUSABLES = _reusables()
 REFERENCES = {workflow: _references(WORKFLOW_DIR / workflow) for workflow in REUSABLES}
 DECLARED_PAIRS = [
-    (workflow, secret)
-    for workflow, declared in REUSABLES.items()
-    for secret in sorted(declared)
+    (workflow, secret) for workflow, declared in REUSABLES.items() for secret in sorted(declared)
 ]
 LANE_CASES = _lane_cases()
 CONDITIONS = _conditions()
@@ -241,14 +233,10 @@ def test_the_scan_found_a_secrets_contract_to_check() -> None:
     """A drifted expression pattern would pass every assertion below vacuously."""
     declaring = [workflow for workflow, declared in REUSABLES.items() if declared]
     sites = sum(len(paths) for refs in REFERENCES.values() for paths in refs.values())
-    gate_lanes = {
-        lane for _, target, lane, _, _ in LANE_CASES if "python-gate-body" in target
-    }
+    gate_lanes = {lane for _, target, lane, _, _ in LANE_CASES if "python-gate-body" in target}
     conditions = sum(len(found) for found in CONDITIONS.values())
     illustrative = [
-        path.name
-        for path in WORKFLOW_DIR.glob("*.yml")
-        if path.name.startswith(ILLUSTRATIVE_PREFIX)
+        path.name for path in WORKFLOW_DIR.glob("*.yml") if path.name.startswith(ILLUSTRATIVE_PREFIX)
     ]
 
     assert len(REUSABLES) >= 25, (
@@ -275,8 +263,7 @@ def test_the_scan_found_a_secrets_contract_to_check() -> None:
         f"drifted, so a secret read from an unresolvable context would go unseen."
     )
     assert len(ACTIONS) >= 4, (
-        f"only {len(ACTIONS)} composite actions found — the "
-        f"`actions/*/action.yml` glob has drifted."
+        f"only {len(ACTIONS)} composite actions found — the `actions/*/action.yml` glob has drifted."
     )
     assert illustrative, (
         f"no workflow starts with {ILLUSTRATIVE_PREFIX!r}, so that exemption "
@@ -322,10 +309,7 @@ def test_every_declared_secret_is_referenced(workflow: str, secret: str) -> None
 @pytest.mark.parametrize(
     ("workflow", "target", "lane", "secret", "forwarded"),
     LANE_CASES,
-    ids=[
-        f"{workflow}:{lane}->{target}:{secret}"
-        for workflow, target, lane, secret, _ in LANE_CASES
-    ],
+    ids=[f"{workflow}:{lane}->{target}:{secret}" for workflow, target, lane, secret, _ in LANE_CASES],
 )
 def test_every_lane_forwards_the_same_shared_secret(
     workflow: str, target: str, lane: str, secret: str, forwarded: bool
@@ -355,9 +339,7 @@ def test_every_lane_forwards_the_same_shared_secret(
 @pytest.mark.parametrize("workflow", sorted(CONDITIONS))
 def test_no_condition_reads_the_secrets_context(workflow: str) -> None:
     offenders = sorted(
-        location
-        for location, scalar in CONDITIONS[workflow]
-        if SECRETS_CONTEXT.search(scalar)
+        location for location, scalar in CONDITIONS[workflow] if SECRETS_CONTEXT.search(scalar)
     )
     assert not offenders, (
         f"{workflow} reads the `secrets` context from an `if:` at {offenders}. "
@@ -398,9 +380,7 @@ def test_every_lane_exemption_names_a_real_lane() -> None:
 
 def test_every_implicit_secret_carries_its_reason() -> None:
     """An exemption without a reason is indistinguishable from an oversight."""
-    bare = sorted(
-        name for name, reason in IMPLICIT_SECRETS.items() if not str(reason).strip()
-    )
+    bare = sorted(name for name, reason in IMPLICIT_SECRETS.items() if not str(reason).strip())
     assert not bare, (
         f"IMPLICIT_SECRETS entries {bare} exempt a name with no stated reason. "
         f"fix: state why the name cannot be declared, or drop the exemption."

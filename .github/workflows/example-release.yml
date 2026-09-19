@@ -35,7 +35,9 @@ on:
         default: false
 
 permissions:
-  contents: read
+  actions: write
+  contents: write
+  id-token: write
 
 jobs:
   release-kairix:

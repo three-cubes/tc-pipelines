@@ -122,7 +122,7 @@ jobs:
 
       - name: Mint three-cubes-agent token for release
         id: app
-        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@c10c77b30ad489390ed71714db3a032f68d6c812 # v2.2.1
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@8c4d058013b911b80177ac73636a925d911dc1ed # v2.2.1
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}

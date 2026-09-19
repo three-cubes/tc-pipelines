@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   # A probe-shaped call: the WIF identity triple, one target VM, and the

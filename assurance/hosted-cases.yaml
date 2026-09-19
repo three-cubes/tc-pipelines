@@ -1,0 +1,40 @@
+# Exact required jobs and steps; optional adapter branches are outside these cases.
+schema: tc.sdlc/hosted-cases/v1
+cases:
+  workflow-meta-quality-gate:
+    jobs: [actionlint, yamllint, license, branch-naming]
+    steps: [Install + run actionlint, yamllint, Assert LICENSE present, Assert branch name matches the org shape]
+  workflow-python-quality-gate:
+    jobs: [Python quality gate, Python quality gate result]
+    steps: [Run the gate (unsharded), Aggregate the quality lanes]
+  workflow-fresh-install-smoke:
+    jobs: [Fresh install smoke]
+    steps: [Build candidate image, Run fresh-install smoke]
+  workflow-mutation-gate:
+    native_artifact: mutation-result
+    jobs: ['Mutation — diff-scoped, ratcheted (non-blocking)']
+    steps: [Resolve diff base, 'Mutation parity (diff-scoped, ratcheted)', Upload surviving-mutant baseline]
+  workflow-security-scan:
+    jobs: [gitleaks, semgrep]
+    steps: [Gitleaks scan, Run Semgrep OSS, Upload gitleaks SARIF (artifact), Upload Semgrep SARIF (artifact)]
+  workflow-fitness-engine-canary:
+    jobs: [Fitness engine canary]
+    steps: [Checkout consumer repo, Checkout canary driver, Canary the candidate engine against the consumer gate]
+  action-actions-detect-code-changes:
+    jobs: [Adapter]
+    steps: [Detect changes, Verify observed outputs]
+  action-actions-license-present:
+    jobs: [Adapter]
+    steps: [Verify license, Verify observed outputs]
+  action-actions-pre-commit-cached:
+    jobs: [Adapter]
+    steps: [Run pre-commit, Verify observed outputs]
+  action-actions-python-gate-body:
+    jobs: [Adapter]
+    steps: [Run Python gate body, Verify observed outputs]
+  action-actions-setup-cloudflared:
+    jobs: [Adapter]
+    steps: [Install cloudflared, Verify observed outputs]
+  action-actions-setup-uv-cached:
+    jobs: [Adapter]
+    steps: [Install locked environment, Verify observed outputs]

@@ -16,9 +16,7 @@ TAG_STEP = "Ensure exact release tag"
 
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [*args], capture_output=True, text=True, cwd=cwd, check=False
-    )
+    return subprocess.run([*args], capture_output=True, text=True, cwd=cwd, check=False)
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -53,16 +51,11 @@ def _tag_step() -> str:
     return ""
 
 
-def _tag(
-    repository: Path, target: str, output_file: Path
-) -> subprocess.CompletedProcess[str]:
+def _tag(repository: Path, target: str, output_file: Path) -> subprocess.CompletedProcess[str]:
     _git(repository, "checkout", "--detach", "-q", target)
     step = _tag_step()
     assert step, f"release.yml has no `{TAG_STEP}` step"
-    prelude = (
-        'export VERSION="$1" RELEASE_TARGET_SHA="$2" TAG_MESSAGE="$3" '
-        'GITHUB_OUTPUT="$4"\n'
-    )
+    prelude = 'export VERSION="$1" RELEASE_TARGET_SHA="$2" TAG_MESSAGE="$3" GITHUB_OUTPUT="$4"\n'
     return _run(
         repository,
         "bash",

@@ -1,0 +1,8 @@
+rules:
+  - id: fixture-no-eval
+    languages: [python]
+    severity: ERROR
+    message: Dynamic eval is forbidden in the hosted product fixture.
+    pattern: eval(...)
+    paths:
+      include: [assurance/fixtures/python/project/src/**]

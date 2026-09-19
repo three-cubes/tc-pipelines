@@ -63,6 +63,7 @@ jobs:
     uses: ./.github/workflows/verify-and-close.yml
     permissions:
       contents: read
+      id-token: write
       pull-requests: read
     with:
       # kairix-shaped, fallback secret path: an in-repo smoke script over the
@@ -77,6 +78,7 @@ jobs:
     uses: ./.github/workflows/verify-and-close.yml
     permissions:
       contents: read
+      id-token: write
       pull-requests: read
     with:
       # taz-shaped: a remote deploy-verify with no working tree (checkout off),
