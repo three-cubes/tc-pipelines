@@ -27,13 +27,17 @@ PYPROJECT = REPO_ROOT / "pyproject.toml"
 MAKEFILE = REPO_ROOT / "Makefile"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 PREPARE_AND_CHECK_COMMANDS = [
-    "uv lock",
+    "uvx --from uv==0.12.5 uv lock",
     "uv sync --locked",
     "uv run --no-sync ruff check --force-exclude --select E,F,I,UP,B,S,RUF "
     "--target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes "
     "--exit-zero .",
     "uv run --no-sync ruff format --force-exclude --line-length 110 --target-version py312 .",
     "uv run --no-sync python assurance/run.py prepare",
+    "make --no-print-directory assert-clean",
+    'test -z "$(git status --porcelain --untracked-files=all)" || { git status --short; '
+    'echo "preparation changed committed state; commit the prepared files before evaluation" '
+    ">&2; exit 1; }",
     "uv run --no-sync tc-fitness run",
 ]
 
@@ -61,7 +65,13 @@ def _make_check_commands(*, outer_make: bool = False) -> list[str]:
     assert result.returncode == 0, (
         f"{MAKEFILE.name}: cannot dry-run the local check target: {result.stderr.strip()}"
     )
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    commands = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return [
+        "make --no-print-directory assert-clean"
+        if command.endswith("/make --no-print-directory assert-clean")
+        else command
+        for command in commands
+    ]
 
 
 def test_self_gate_declares_the_contract_test_command() -> None:
@@ -91,6 +101,19 @@ def test_make_check_runs_the_declared_fitness_gate() -> None:
 def test_make_check_dry_run_is_stable_inside_an_outer_make() -> None:
     """GNU make directory notices must not become part of the command contract."""
     assert _make_check_commands(outer_make=True) == PREPARE_AND_CHECK_COMMANDS
+
+
+def test_assert_clean_rejects_a_real_dirty_git_checkout(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "contract"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "contract@example.invalid"], cwd=tmp_path, check=True)
+    (tmp_path / "tracked.txt").write_text("clean\n")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=tmp_path, check=True)
+    command = ["make", "--no-print-directory", "-f", str(MAKEFILE), "assert-clean"]
+    assert subprocess.run(command, cwd=tmp_path, check=False).returncode == 0
+    (tmp_path / "tracked.txt").write_text("dirty\n")
+    assert subprocess.run(command, cwd=tmp_path, check=False).returncode != 0
 
 
 def test_ci_contract_tests_run_make_check() -> None:

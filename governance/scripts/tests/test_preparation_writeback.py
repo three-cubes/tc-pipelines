@@ -19,6 +19,7 @@ pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[3]
 CLI = ROOT / "actions/preparation-writeback/preparation_writeback.py"
 WRITER = ROOT / ".github/workflows/preparation-writeback.yml"
+ACTION = ROOT / "actions/preparation-writeback/action.yml"
 
 
 def git(root: Path, *args: str) -> str:
@@ -193,6 +194,32 @@ def test_writer_accepts_only_the_declared_trusted_transformation(
     assert (target / "module.py").read_text() == "value = 1\n"
 
 
+def test_trusted_policy_repairs_a_stale_uv_lock_and_replays_it(tmp_path: Path) -> None:
+    source, _ = repository(tmp_path)
+    pyproject = source / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "fixture"\nversion = "0.1.0"\nrequires-python = ">=3.12"\n')
+    (source / "module.py").write_text("value = 1\n")
+    subprocess.run(["uvx", "--from", "uv==0.12.5", "uv", "lock"], cwd=source, check=True)
+    git(source, "add", "module.py", "pyproject.toml", "uv.lock")
+    git(source, "commit", "-qm", "add locked project")
+    pyproject.write_text(pyproject.read_text().replace('version = "0.1.0"', 'version = "0.2.0"'))
+    git(source, "add", "pyproject.toml")
+    git(source, "commit", "-qm", "change project without lock")
+    head = git(source, "rev-parse", "HEAD")
+    out = tmp_path / "evidence"
+    out.mkdir()
+    pre = snapshot(source, head, out)
+    subprocess.run(["uvx", "--from", "uv==0.12.5", "uv", "lock"], cwd=source, check=True)
+    receipt, patch = produce_after(source, pre, out)
+    assert "uv.lock" in {entry["path"] for entry in json.loads(patch.read_text())["entries"]}
+
+    target = clone_at_head(source, tmp_path / "locked-target")
+    result = apply(target, receipt, patch, head)
+
+    assert result.returncode == 0, result.stderr
+    assert 'version = "0.2.0"' in (target / "uv.lock").read_text()
+
+
 def test_snapshot_scales_with_repository_identity_not_repository_content(
     tmp_path: Path,
 ) -> None:
@@ -321,6 +348,70 @@ def test_producer_accepts_tracked_python_under_dot_prefixed_source_directory(
     assert [entry["path"] for entry in json.loads(patch.read_text())["entries"]] == [
         ".github/actions/check.py"
     ]
+
+
+@pytest.mark.parametrize("relative", ["pkg/__init__.py", "pkg/_helpers.py"])
+def test_producer_accepts_standard_underscored_python_module_paths(tmp_path: Path, relative: str) -> None:
+    source, _ = repository(tmp_path)
+    module = source / relative
+    module.parent.mkdir(parents=True, exist_ok=True)
+    module.write_text("value = 1  \n")
+    git(source, "add", relative)
+    git(source, "commit", "-qm", "add module")
+    head = git(source, "rev-parse", "HEAD")
+    out = tmp_path / "evidence"
+    out.mkdir()
+    pre = snapshot(source, head, out)
+    module.write_text("value = 1\n")
+
+    _, patch = produce_after(source, pre, out)
+
+    assert [entry["path"] for entry in json.loads(patch.read_text())["entries"]] == [relative]
+
+
+def test_snapshot_accepts_tracked_symlink_without_making_it_a_patch_target(
+    tmp_path: Path,
+) -> None:
+    source, _ = repository(tmp_path)
+    (source / "target.txt").write_text("target\n")
+    (source / "linked.txt").symlink_to("target.txt")
+    git(source, "add", "target.txt", "linked.txt")
+    git(source, "commit", "-qm", "add tracked link")
+    head = git(source, "rev-parse", "HEAD")
+    out = tmp_path / "evidence"
+    out.mkdir()
+
+    pre = snapshot(source, head, out)
+    document = json.loads(pre.read_text())
+
+    assert document["head_tree"] == git(source, "rev-parse", "HEAD^{tree}")
+    assert "linked.txt" not in {entry["path"] for entry in document["entries"]}
+
+
+def test_snapshot_accepts_a_tracked_gitlink_without_making_it_a_patch_target(
+    tmp_path: Path,
+) -> None:
+    source, head = repository(tmp_path)
+    git(source, "update-index", "--add", "--cacheinfo", f"160000,{head},vendor/component")
+    git(source, "commit", "-qm", "add gitlink")
+    (source / "vendor/component").mkdir(parents=True)
+    head = git(source, "rev-parse", "HEAD")
+    out = tmp_path / "evidence"
+    out.mkdir()
+
+    pre = snapshot(source, head, out)
+    document = json.loads(pre.read_text())
+
+    assert document["head_tree"] == git(source, "rev-parse", "HEAD^{tree}")
+    assert "vendor/component" not in {entry["path"] for entry in document["entries"]}
+
+
+def test_composite_apply_mode_supplies_the_required_policy() -> None:
+    action = yaml.safe_load(ACTION.read_text())
+    assert action["inputs"]["expected-policy"]["default"] == "python-ruff-v1"
+    step = action["runs"]["steps"][0]
+    assert step["env"]["EXPECTED_POLICY"] == "${{ inputs.expected-policy }}"
+    assert '--expected-policy "$EXPECTED_POLICY"' in step["run"]
 
 
 def test_authenticated_fetch_uses_real_git_without_persistent_credentials(

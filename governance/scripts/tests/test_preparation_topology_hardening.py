@@ -15,7 +15,7 @@ def _steps(path: Path, job: str) -> list[dict]:
     return yaml.safe_load(path.read_text())["jobs"][job]["steps"]
 
 
-def test_quality_checkout_is_bound_to_the_pr_head_not_the_merge_candidate() -> None:
+def test_preparation_uses_branch_head_but_evaluation_uses_integration_commit() -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/python-quality-gate.yml").read_text())
     assert "candidate-head-sha" not in workflow[True]["workflow_call"]["inputs"]
     preparation = workflow["jobs"]["preparation"]
@@ -31,7 +31,7 @@ def test_quality_checkout_is_bound_to_the_pr_head_not_the_merge_candidate() -> N
         step = next(
             step for step in workflow["jobs"][name]["steps"] if "python-gate-body" in step.get("uses", "")
         )
-        assert step["with"]["candidate-head-sha"] == ("${{ needs.preparation.outputs.candidate-head-sha }}")
+        assert step["with"]["candidate-head-sha"] == "${{ github.sha }}"
 
 
 def test_preparation_uses_only_the_closed_trusted_ruff_policy() -> None:
@@ -41,6 +41,7 @@ def test_preparation_uses_only_the_closed_trusted_ruff_policy() -> None:
         step for step in workflow["jobs"]["preparation"]["steps"] if step["name"] == "Prepare candidate"
     )
     assert "ruff check --force-exclude --select E,F,I,UP,B,S,RUF" in prepare["run"]
+    assert "[[ ! -f pyproject.toml ]] || uvx --from uv==0.12.5 uv lock" in prepare["run"]
     assert "--ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero" in prepare["run"]
     assert "ruff format --force-exclude --line-length 110 --target-version py312" in prepare["run"]
     assert prepare["run"].count("uvx --from ruff==0.16.8 ruff") == 2

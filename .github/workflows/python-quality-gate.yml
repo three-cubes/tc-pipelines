@@ -315,6 +315,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ ! -f pyproject.toml ]] || uvx --from uv==0.12.5 uv lock
           mapfile -d '' -t paths < <(git ls-files -z -- '*.py' '*.pyi')
           (( ${#paths[@]} == 0 )) && exit 0
           uvx --from ruff==0.16.8 ruff check --force-exclude --select E,F,I,UP,B,S,RUF --target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero -- "${paths[@]}"
@@ -344,6 +345,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ ! -f pyproject.toml ]] || uvx --from uv==0.12.5 uv lock
           mapfile -d '' -t paths < <(git ls-files -z -- '*.py' '*.pyi')
           (( ${#paths[@]} == 0 )) && exit 0
           uvx --from ruff==0.16.8 ruff check --force-exclude --select E,F,I,UP,B,S,RUF --target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero -- "${paths[@]}"
@@ -469,7 +471,7 @@ jobs:
           write-changed-files: ${{ inputs.write-changed-files }}
           changed-files-path: ${{ inputs.changed-files-path }}
           run-no-attribution: ${{ inputs.run-no-attribution }}
-          candidate-head-sha: ${{ needs.preparation.outputs.candidate-head-sha }}
+          candidate-head-sha: ${{ github.sha }}
           pre-steps: ${{ inputs.pre-steps }}
           post-steps: ${{ inputs.post-steps }}
           run-node: ${{ inputs.run-node }}
@@ -532,7 +534,7 @@ jobs:
           write-changed-files: ${{ inputs.write-changed-files }}
           changed-files-path: ${{ inputs.changed-files-path }}
           run-no-attribution: ${{ inputs.run-no-attribution }}
-          candidate-head-sha: ${{ needs.preparation.outputs.candidate-head-sha }}
+          candidate-head-sha: ${{ github.sha }}
           pre-steps: ${{ inputs.pre-steps }}
           post-steps: ${{ inputs.post-steps }}
           run-node: ${{ inputs.run-node }}
@@ -753,7 +755,7 @@ jobs:
           write-changed-files: ${{ inputs.write-changed-files }}
           changed-files-path: ${{ inputs.changed-files-path }}
           run-no-attribution: false
-          candidate-head-sha: ${{ needs.preparation.outputs.candidate-head-sha }}
+          candidate-head-sha: ${{ github.sha }}
           pre-steps: ${{ inputs.pre-steps }}
           post-steps: ${{ inputs.post-steps }}
           run-node: ${{ inputs.run-node }}

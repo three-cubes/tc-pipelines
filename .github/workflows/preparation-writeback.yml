@@ -83,6 +83,12 @@ jobs:
           path: .tc-pipelines-tools
           token: ${{ steps.bootstrap.outputs.token }}
           persist-credentials: false
+      - name: Install the trusted preparation toolchain
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.12.5"
+          python-version: "3.12"
+          enable-cache: true
 
       - id: source
         name: Select one current same-repository receipt artifact

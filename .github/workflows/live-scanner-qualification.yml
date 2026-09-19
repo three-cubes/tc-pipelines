@@ -32,26 +32,44 @@ jobs:
             echo "::error::candidate must be an exact 40-hex commit" >&2
             exit 1
           }
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Check out the immutable trusted validator
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .tc-pipelines-trusted
+          fetch-depth: 1
+      - name: Check out candidate data separately
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.candidate }}
+          path: candidate
           fetch-depth: 1
-      - uses: ./actions/setup-uv-cached
+      - name: Install the trusted Python toolchain
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          sync-args: --locked
+          version: "0.12.5"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: .tc-pipelines-trusted/uv.lock
+      - name: Install the immutable validator environment
+        run: uv sync --project .tc-pipelines-trusted --locked
       - name: Provision pinned native scanners
         env:
           INSTALL_OSV_SCANNER: "true"
           OSV_SCANNER_VERSION: "2.2.4"
           INSTALL_CHECKOV_SCANNER: "true"
           CHECKOV_VERSION: "3.2.531"
-        run: bash actions/python-gate-body/provision-scanners.sh
+        run: |
+          cd .tc-pipelines-trusted
+          bash actions/python-gate-body/provision-scanners.sh
       - name: Execute compliant and violation scanner fixtures
         env:
           CANDIDATE: ${{ inputs.candidate }}
         run: >-
-          uv run --no-sync python assurance/live_scanners.py qualify
-          --candidate "$CANDIDATE" --output .assurance-live-scanners
+          .tc-pipelines-trusted/.venv/bin/python
+          .tc-pipelines-trusted/assurance/live_scanners.py qualify
+          --root candidate --candidate "$CANDIDATE"
+          --output "$GITHUB_WORKSPACE/.assurance-live-scanners"
       - name: Summarise immutable scanner receipts
         run: |
           set -euo pipefail

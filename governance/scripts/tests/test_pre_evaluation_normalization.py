@@ -62,6 +62,7 @@ def test_reusable_prepares_once_and_proves_a_fixed_point_before_evaluation() -> 
     first = next(step for step in steps if step.get("name") == "Prepare candidate")
     second = next(step for step in steps if step.get("name") == "Prove preparation is a fixed point")
     assert first["run"] == second["run"]
+    assert "[[ ! -f pyproject.toml ]] || uvx --from uv==0.12.5 uv lock" in first["run"]
     assert "ruff check --force-exclude" in first["run"]
     assert "--no-unsafe-fixes --exit-zero" in first["run"]
     assert "ruff format --force-exclude --line-length 110 --target-version py312" in first["run"]

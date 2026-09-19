@@ -21,6 +21,7 @@ from assurance.live_scanners import (
     WORKFLOW_PATH,
     ReceiptError,
     digest,
+    scanner_outcome,
     validate_receipt,
 )
 
@@ -97,6 +98,28 @@ def test_live_scanner_receipt_binds_native_fixture_tool_and_rule_database(tmp_pa
     validate_receipt(value, tmp_path, candidate="a" * 40)
 
 
+@pytest.mark.parametrize(
+    ("returncode", "report", "finding", "expected"),
+    [
+        (0, '{"results": {"failed_checks": []}}', "CKV_AWS_20", "clean"),
+        (
+            1,
+            '{"results": {"failed_checks": [{"check_id": "CKV_AWS_20"}]}}',
+            "CKV_AWS_20",
+            "finding",
+        ),
+        (
+            1,
+            '{"results": [{"packages": [{"vulnerabilities": [{"id": "GHSA-35jh-r3h4-6jhm"}]}]}]}',
+            "GHSA-35jh-r3h4-6jhm",
+            "finding",
+        ),
+    ],
+)
+def test_scanner_outcome_parses_native_json_before_matching_findings(returncode, report, finding, expected):
+    assert scanner_outcome(returncode, report, finding) == expected
+
+
 def test_live_scanner_receipt_binds_repo_fixture_and_separate_retained_outputs(
     tmp_path,
 ):
@@ -161,8 +184,18 @@ def test_receipt_rejects_an_unlisted_tc_fitness_ledger_even_with_matching_hashes
 def test_live_workflow_uses_the_one_pinned_scanner_provisioner_and_retains_receipts():
     workflow = yaml.safe_load((ROOT / WORKFLOW_PATH).read_text())
     steps = workflow["jobs"]["qualify"]["steps"]
+    checkouts = [step for step in steps if "actions/checkout@" in str(step.get("uses", ""))]
+    assert [step["with"]["path"] for step in checkouts] == [
+        ".tc-pipelines-trusted",
+        "candidate",
+    ]
+    assert checkouts[0]["with"]["ref"] == "${{ github.workflow_sha }}"
+    assert checkouts[1]["with"]["ref"] == "${{ inputs.candidate }}"
     provision = next(step for step in steps if step.get("name") == "Provision pinned native scanners")
-    assert provision["run"] == "bash actions/python-gate-body/provision-scanners.sh"
+    assert provision["run"].splitlines() == [
+        "cd .tc-pipelines-trusted",
+        "bash actions/python-gate-body/provision-scanners.sh",
+    ]
     assert provision["env"] == {
         "INSTALL_OSV_SCANNER": "true",
         "OSV_SCANNER_VERSION": "2.2.4",
@@ -172,7 +205,9 @@ def test_live_workflow_uses_the_one_pinned_scanner_provisioner_and_retains_recei
     execute = next(
         step for step in steps if step.get("name") == "Execute compliant and violation scanner fixtures"
     )
-    assert "live_scanners.py qualify" in execute["run"]
+    assert ".tc-pipelines-trusted/.venv/bin/python" in execute["run"]
+    assert ".tc-pipelines-trusted/assurance/live_scanners.py qualify" in execute["run"]
+    assert "--root candidate" in execute["run"]
     retained = next(
         step for step in steps if step.get("name") == "Retain native scanner qualification evidence"
     )

@@ -34,12 +34,15 @@ ALLOWED_MODES = {0o644, 0o755}
 # exact tool version are owned here, never by a candidate's workflow command.
 POLICY = "python-ruff-v1"
 RUFF_VERSION = "0.16.8"
+UV_VERSION = "0.12.5"
 
 
 def permitted_policy_path(path: str) -> bool:
+    if path == "uv.lock":
+        return True
     return bool(
         re.fullmatch(
-            r"(?:\.?[A-Za-z0-9][A-Za-z0-9_.-]*/)*[A-Za-z0-9][A-Za-z0-9_.-]*\.pyi?",
+            r"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.pyi?",
             path,
         )
     )
@@ -59,6 +62,17 @@ def replay_trusted_policy(root: Path) -> tuple[list[dict[str, Any]], str]:
         for key, value in os.environ.items()
         if key not in {"GH_TOKEN", "GITHUB_APP_TOKEN", "GITHUB_READ_TOKEN"}
     }
+    if (root / "pyproject.toml").is_file():
+        locked = subprocess.run(
+            ["uvx", "--from", f"uv=={UV_VERSION}", "uv", "lock"],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+        if locked.returncode:
+            fail(f"trusted uv lock failed: {locked.stderr.strip()}")
     for arguments in (
         [
             "check",
@@ -179,6 +193,12 @@ def visible_paths(root: Path) -> list[str]:
 def manifest(root: Path, *, include_content: bool) -> tuple[list[dict[str, Any]], str]:
     entries: list[dict[str, Any]] = []
     for relative in visible_paths(root):
+        relative_path = validate_relative_path(relative)
+        candidate = root.joinpath(*relative_path.parts)
+        if candidate.is_symlink() or (candidate.exists() and candidate.is_dir()):
+            # The committed head tree binds symlink/gitlink identity. They are
+            # never inputs to, or writable targets of, the preparation policy.
+            continue
         path = checked_file(root, relative)
         if not path.exists():
             # `git ls-files` retains deleted tracked paths.  A content-state

@@ -307,6 +307,19 @@ def _contains(value: Any, expected: str) -> bool:
     return False
 
 
+def scanner_outcome(returncode: int, report: str, finding: str | None) -> str:
+    """Classify a native JSON report and require the declared finding on failure."""
+    try:
+        parsed = json.loads(report)
+    except json.JSONDecodeError as error:
+        raise ReceiptError("scanner did not produce JSON") from error
+    contains_expected = bool(finding and _contains(parsed, finding))
+    actual = "clean" if returncode == 0 and not contains_expected else "finding"
+    if actual == "finding" and not contains_expected:
+        raise ReceiptError("scanner failure did not contain the declared finding")
+    return actual
+
+
 def _command(case: dict[str, str | None], executable: Path) -> list[str]:
     fixture = Path(case["fixture"])
     if case["tool"] == "checkov":
@@ -343,10 +356,8 @@ def _qualify_case(root: Path, destination: Path, candidate: str, case_id: str) -
         )
         + "\n"
     )
-    finding = case["finding"]
-    contains_expected = bool(finding and _contains(report, str(finding)))
-    actual = "clean" if result.returncode == 0 and not contains_expected else "finding"
-    if actual != case["expected"] or (actual == "finding" and not contains_expected):
+    actual = scanner_outcome(result.returncode, report, case["finding"])
+    if actual != case["expected"]:
         raise ReceiptError(f"{case_id} did not produce its declared scanner outcome")
     rule_kind, rule_identity, rule_data = _rule_database(str(case["tool"]), report)
     (destination / "rule-database.json").write_text(json.dumps(rule_data, sort_keys=True, indent=2) + "\n")

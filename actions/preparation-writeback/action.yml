@@ -24,6 +24,9 @@ inputs:
     required: false
   patch:
     required: false
+  expected-policy:
+    description: "Closed preparation policy expected in apply mode."
+    default: "python-ruff-v1"
   output:
     required: false
   archive:
@@ -50,6 +53,7 @@ runs:
         SNAPSHOT: ${{ inputs.snapshot }}
         RECEIPT: ${{ inputs.receipt }}
         PATCH: ${{ inputs.patch }}
+        EXPECTED_POLICY: ${{ inputs.expected-policy }}
         OUTPUT: ${{ inputs.output }}
         ARCHIVE: ${{ inputs.archive }}
         ROOT: ${{ inputs.root }}
@@ -66,7 +70,7 @@ runs:
             exec python3 "$script" produce --snapshot "$SNAPSHOT" --receipt "$RECEIPT" --patch "$PATCH" --root "$ROOT"
             ;;
           apply)
-            exec python3 "$script" apply --receipt "$RECEIPT" --patch "$PATCH" --repository "$REPOSITORY" --pull-request "$PULL_REQUEST" --expected-head "$HEAD_SHA" --expected-head-ref "$HEAD_REF" --workflow-run-id "$WORKFLOW_RUN_ID" --workflow-run-attempt "$WORKFLOW_RUN_ATTEMPT" --root "$ROOT"
+            exec python3 "$script" apply --receipt "$RECEIPT" --patch "$PATCH" --repository "$REPOSITORY" --pull-request "$PULL_REQUEST" --expected-head "$HEAD_SHA" --expected-policy "$EXPECTED_POLICY" --expected-head-ref "$HEAD_REF" --workflow-run-id "$WORKFLOW_RUN_ID" --workflow-run-attempt "$WORKFLOW_RUN_ATTEMPT" --root "$ROOT"
             ;;
           changed)
             exec python3 "$script" changed --root "$ROOT"
