@@ -268,8 +268,8 @@ jobs:
     name: Prepare exact candidate once
     runs-on: ubuntu-latest
     outputs:
-      evaluated: ${{ steps.result.outputs.evaluated || steps.classify.outputs.evaluated }}
-      receipt-created: ${{ steps.result.outputs.receipt-created || steps.classify.outputs.receipt-created }}
+      evaluated: ${{ steps.result.outputs.evaluated }}
+      receipt-created: ${{ steps.result.outputs.receipt-created }}
       candidate-head-sha: ${{ steps.candidate.outputs.sha }}
     steps:
       - id: candidate
@@ -287,29 +287,18 @@ jobs:
             exit 1
           }
           echo "sha=$head" >> "$GITHUB_OUTPUT"
-      - id: classify
-        name: Classify preparation request
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The closed trusted Ruff policy is a harmless no-op when this
-          # candidate has no tracked Python source.
-          echo "active=true" >> "$GITHUB_OUTPUT"
       - name: Checkout the exact candidate head
-        if: steps.classify.outputs.active == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ steps.candidate.outputs.sha }}
           fetch-depth: ${{ inputs.fetch-depth }}
           persist-credentials: false
       - name: Install trusted uv for formatter preparation
-        if: steps.classify.outputs.active == 'true'
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           version: "0.12.5"
           enable-cache: true
       - name: Capture committed candidate state
-        if: steps.classify.outputs.active == 'true'
         uses: three-cubes/tc-pipelines/actions/preparation-writeback@14ad846e433db36ad636aa05216860411093dea6 # v2.2.1 candidate
         with:
           mode: snapshot
@@ -323,7 +312,6 @@ jobs:
           output: ${{ runner.temp }}/preparation-before.json
           root: ${{ github.workspace }}
       - name: Prepare candidate
-        if: steps.classify.outputs.active == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -332,7 +320,6 @@ jobs:
           uvx --from ruff==0.16.8 ruff check --force-exclude --select E,F,I,UP,B,S,RUF --target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero -- "${paths[@]}"
           uvx --from ruff==0.16.8 ruff format --force-exclude --line-length 110 --target-version py312 -- "${paths[@]}"
       - name: Capture first prepared state
-        if: steps.classify.outputs.active == 'true'
         uses: three-cubes/tc-pipelines/actions/preparation-writeback@14ad846e433db36ad636aa05216860411093dea6 # v2.2.1 candidate
         with:
           mode: snapshot
@@ -346,7 +333,6 @@ jobs:
           output: ${{ runner.temp }}/preparation-first.json
           root: ${{ github.workspace }}
       - name: Produce bounded preparation evidence
-        if: steps.classify.outputs.active == 'true'
         uses: three-cubes/tc-pipelines/actions/preparation-writeback@14ad846e433db36ad636aa05216860411093dea6 # v2.2.1 candidate
         with:
           mode: produce
@@ -355,7 +341,6 @@ jobs:
           patch: ${{ runner.temp }}/preparation-patch.json
           root: ${{ github.workspace }}
       - name: Prove preparation is a fixed point
-        if: steps.classify.outputs.active == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -364,7 +349,6 @@ jobs:
           uvx --from ruff==0.16.8 ruff check --force-exclude --select E,F,I,UP,B,S,RUF --target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero -- "${paths[@]}"
           uvx --from ruff==0.16.8 ruff format --force-exclude --line-length 110 --target-version py312 -- "${paths[@]}"
       - name: Capture second prepared state
-        if: steps.classify.outputs.active == 'true'
         uses: three-cubes/tc-pipelines/actions/preparation-writeback@14ad846e433db36ad636aa05216860411093dea6 # v2.2.1 candidate
         with:
           mode: snapshot
@@ -379,7 +363,6 @@ jobs:
           root: ${{ github.workspace }}
       - id: result
         name: Admit clean candidate or request exact writeback
-        if: steps.classify.outputs.active == 'true'
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}

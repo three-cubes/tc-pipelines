@@ -38,7 +38,7 @@ jobs:
     with:
       repository: ${{ github.repository }}
       workflow-run-id: ${{ github.event.workflow_run.id }}
-      trusted-validator-ref: "02bc49afcffb7e0d01fc8c2dadc0352791a46046"
+      trusted-validator-ref: "02bc49afcffb7e0d01fc8c2dadc0352791a46046" # pragma: allowlist secret
       repository-owner: ${{ github.repository_owner }}
       repository-name: ${{ github.event.repository.name }}
       azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
