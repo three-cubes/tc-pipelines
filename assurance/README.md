@@ -89,12 +89,45 @@ artifacts are retained by their actual producer workflows. Local receipts stay
 labelled `local`; the writer refuses to label them GitHub evidence outside the
 matching Actions run and attempt.
 
+For PRs, `head` / `candidate.pipeline_commit` is the tested merge commit and
+`candidate_head` / `candidate.pipeline_head_commit` is the branch head reported
+by the Actions API. The selector verifies the merge parents; merge-group and
+manual runs use the same commit for both identities. Admission compares the
+selection against the actual run/attempt's uploaded plan, not an editable local
+claim. Job logs use bounded raw HTTP downloads (16 MiB, 30-second socket timeout),
+retaining original bytes and transport diagnostics alongside sanitised text.
+Cross-host redirects drop authorisation headers.
+
+Mutation assurance additionally downloads its attempt-specific native artifact,
+checks the GitHub artifact digest, requires `mutation.json` with the real passing
+original/killed-mutant result, and binds both ZIP and JSON digests in the receipt.
+Admission downloads it again and compares bytes. A green non-blocking wrapper
+with a missing or failed native result cannot certify the case.
+
 `make assurance-hosted ASSURANCE_HOSTED_ARGS='admit --output /absolute/evidence-directory'`
 consumes retained evidence without repeating evaluations. It reselects the
 immutable candidate, recomputes receipt expectations and compares hosted
 terminal records with GitHub again. Protected cases require external
 `live-boundary` receipts with bound runtime receipts and the declared status
-operation. Missing external proof blocks admission while ordinary PR CI remains
+operation. Supply `admit --protected-policy /absolute/release-authority.json` for
+protected admission. This is explicit trusted admission input, **not** a file
+chosen by or copied from the runtime payload. It is keyed by protected case ID;
+`selection.json` enumerates all required policy fields. The operator supplies the
+canonical contract path, environment/target, expected image/host/user/deployment/
+configuration/run/attempt/checks/freshness, plus authorised producer repository,
+workflow path, actor ID, artifact name and independently approved artifact digest.
+No endpoint or credential is inferred from these inputs.
+
+The released `tc-fitness-runtime-contract verify-evidence` executable at immutable
+v0.16.1 commit `8d39d7e2f5b5d9daae778ec8195e344b0e7cc396` validates the canonical
+runtime receipt; the compatibility-engine lock remains unchanged. Producer
+provenance must match the declared completed, successful `workflow_dispatch`
+run/attempt and actor. Its actual GitHub artifact must contain byte-identical
+`runtime-evidence.json`, `status.json` (canonical `{valid: true, findings: []}`),
+and `execution.log`. Canonical deployment IDs retain their existing semantics;
+they are not assumed to be GitHub deployment object IDs. Policy digest and both
+candidate identities are recorded in admission output. Missing external proof
+blocks admission while ordinary PR CI remains
 limited to safe adapters and the existing hermetic gate. The resulting
 `admission.json` records complete receipt digests for coordinated release
 composition. Tag/publish composition is the subsequent coordinated-release

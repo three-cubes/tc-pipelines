@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
+from github_evidence import archive_member, download, download_log, validate_mutation
+from protected_evidence import validate_protected
 from receipt import ReceiptError, digest, read, validate, write
 
 
@@ -26,11 +28,16 @@ def git(root, *args):
     return command(root, "git", *args).strip()
 
 
-def select(root, base, head, *, complete=False):
-    for sha in (base, head):
+def select(root, base, head, *, complete=False, candidate_head=None):
+    candidate_head = candidate_head or head
+    for sha in (base, head, candidate_head):
         if len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha):
             raise ReceiptError("selection requires exact 40-hex commit identities")
         git(root, "cat-file", "-e", f"{sha}^{{commit}}")
+    if candidate_head != head:
+        parents = git(root, "show", "-s", "--format=%P", head).split()
+        if parents != [base, candidate_head]:
+            raise ReceiptError("tested PR merge does not bind base and candidate head")
     data = yaml.safe_load(git(root, "show", f"{head}:assurance/surfaces.yaml"))
     cases = yaml.safe_load(git(root, "show", f"{head}:assurance/hosted-cases.yaml"))[
         "cases"
@@ -83,6 +90,7 @@ def select(root, base, head, *, complete=False):
     return {
         "base": base,
         "head": head,
+        "candidate_head": candidate_head,
         "complete": complete,
         "changed": changed,
         "safe": safe,
@@ -91,10 +99,17 @@ def select(root, base, head, *, complete=False):
     }
 
 
-def plan(root, base, head, destination, complete=False):
-    selection = select(root, base, head, complete=complete)
+def plan(root, base, head, destination, complete=False, *, candidate_head=None):
+    selection = select(
+        root, base, head, complete=complete, candidate_head=candidate_head
+    )
     if git(root, "rev-parse", "HEAD") != head:
         raise ReceiptError("checkout is not the selected exact candidate")
+    if (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and os.environ.get("GITHUB_SHA") != head
+    ):
+        raise ReceiptError("tested commit does not match the Actions event")
     selection.update(
         execution_id=str(uuid.uuid4()),
         workflow_run_id=os.environ.get("GITHUB_RUN_ID"),
@@ -113,6 +128,26 @@ def plan(root, base, head, destination, complete=False):
             "probe_contract": row["hosted"]["release_probe"],
             "authority": "consumer-protected-environment",
             "runtime_receipt_required": True,
+            "release_authority_policy_required": True,
+            "required_policy_fields": [
+                "contract",
+                "environment",
+                "target",
+                "image_digest",
+                "host_id",
+                "runtime_user",
+                "deployment_id",
+                "configuration_identity",
+                "run_id",
+                "attempt_id",
+                "required_checks",
+                "max_age_seconds",
+                "repository",
+                "workflow_path",
+                "actor_id",
+                "artifact_name",
+                "artifact_digest",
+            ],
             "expectation": expectation_for(root, selection, row, {}),
         }
         for row in selection["surfaces"]
@@ -149,6 +184,7 @@ def expectation_for(root, selection, row, case):
         "candidate": {
             "fitness_digest": None,
             "pipeline_commit": head,
+            "pipeline_head_commit": selection["candidate_head"],
             "pipeline_package_digest": None,
             "pipeline_image_digest": None,
         },
@@ -176,7 +212,12 @@ def expectation_for(root, selection, row, case):
         },
         "output_ids": ["execution-log", "runtime-receipt", "status-result"]
         if protected
-        else ["execution-log", "github-terminal"],
+        else ["execution-log", "github-terminal"]
+        + (
+            ["native-artifact", "mutation-result"]
+            if case.get("native_artifact")
+            else []
+        ),
         "finding": None,
         "not_before": selection["started_at"],
     }
@@ -203,6 +244,70 @@ def validate_jobs(jobs, expected_steps, run_id, attempt, head):
     for step in expected_steps:
         if executed.count(step) != 1:
             raise ReceiptError(f"missing, skipped or duplicate required step: {step}")
+
+
+def validate_run(run, selection):
+    if (
+        run["head_sha"] != selection["candidate_head"]
+        or run["status"] != "completed"
+        or run["conclusion"] != "success"
+        or run["id"] != int(selection["workflow_run_id"])
+        or run["run_attempt"] != selection["attempt"]
+    ):
+        raise ReceiptError("GitHub has no successful exact-candidate execution")
+
+
+def download_native(root, selection, name, archive):
+    repo, run_id = (
+        selection["repository"],
+        selection["workflow_run_id"],
+    )
+    pages = json.loads(
+        command(
+            root,
+            "gh",
+            "api",
+            "--paginate",
+            "--slurp",
+            f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100",
+        )
+    )
+    artifacts = [
+        a
+        for page in pages
+        for a in page["artifacts"]
+        if a["name"] == name and not a["expired"]
+    ]
+    if len(artifacts) != 1:
+        raise ReceiptError("missing or duplicate native artifact")
+    artifact = artifacts[0]
+    if artifact["workflow_run"]["head_sha"] != selection["candidate_head"]:
+        raise ReceiptError("native artifact has wrong candidate")
+    data = download(
+        f"https://api.github.com/repos/{repo}/actions/artifacts/{artifact['id']}/zip",
+        archive,
+    )
+    if artifact.get("digest") != digest(data):
+        raise ReceiptError("native artifact digest does not match GitHub")
+    return data
+
+
+def collect_mutation(root, selection, directory, *, verify=False):
+    name = f"assurance-mutation-{selection['workflow_run_id']}-{selection['attempt']}"
+    archive = directory / ("native.verify.zip" if verify else "native.zip")
+    data = download_native(root, selection, name, archive)
+    result = archive_member(archive, "mutation.json")
+    if verify:
+        if (
+            data != (directory / "native.zip").read_bytes()
+            or result != (directory / "mutation.json").read_bytes()
+        ):
+            raise ReceiptError(
+                "retained native mutation evidence does not match GitHub"
+            )
+    else:
+        (directory / "mutation.json").write_bytes(result)
+    validate_mutation(directory / "mutation.json")
 
 
 def collect(root, directory):
@@ -249,20 +354,27 @@ def collect(root, directory):
             logs = []
             for job in jobs:
                 logs.append(
-                    command(
-                        root,
-                        "gh",
-                        "api",
-                        f"repos/{repository}/actions/jobs/{job['id']}/logs",
+                    download_log(
+                        f"https://api.github.com/repos/{repository}/actions/jobs/{job['id']}/logs",
+                        case_dir / f"job-{job['id']}",
                     )
                 )
             (case_dir / "execution.log").write_text("\n".join(logs))
-            validate_jobs(jobs, case["steps"], run_id, attempt, head)
+            validate_jobs(
+                jobs, case["steps"], run_id, attempt, selection["candidate_head"]
+            )
             if sorted(job["name"].rsplit(" / ", 1)[-1] for job in jobs) != sorted(
                 case["jobs"]
             ):
                 raise ReceiptError("missing or duplicate required case job")
             expectation = expectation_for(root, selection, row, case)
+            native_outputs = []
+            if case.get("native_artifact"):
+                collect_mutation(root, selection, case_dir)
+                native_outputs = [
+                    {"id": "native-artifact", "path": "native.zip"},
+                    {"id": "mutation-result", "path": "mutation.json"},
+                ]
             observation = {
                 "actual": "pass",
                 "started_at": min(job["started_at"] for job in jobs),
@@ -271,7 +383,8 @@ def collect(root, directory):
                 "outputs": [
                     {"id": "execution-log", "path": "execution.log"},
                     {"id": "github-terminal", "path": "terminal.json"},
-                ],
+                ]
+                + native_outputs,
                 "finding": None,
             }
             (case_dir / "expectation.json").write_text(
@@ -357,11 +470,15 @@ def collect(root, directory):
         raise ReceiptError(f"hosted cases failed: {failures}")
 
 
-def admit(root, directory):
+def admit(root, directory, protected_policy=None):
     """Consume exact retained evidence; never execute a protected operation."""
     selection = read(directory / "selection.json")
     current = select(
-        root, selection["base"], selection["head"], complete=selection["complete"]
+        root,
+        selection["base"],
+        selection["head"],
+        complete=selection["complete"],
+        candidate_head=selection["candidate_head"],
     )
     for key in ("safe", "protected", "surfaces"):
         if current[key] != selection[key]:
@@ -408,12 +525,18 @@ def admit(root, directory):
                 f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}",
             )
         )
+        validate_run(run, selection)
+        plan_archive = directory / "selection-provenance.zip"
+        download_native(
+            root, selection, f"assurance-plan-{run_id}-{attempt}", plan_archive
+        )
         if (
-            run["head_sha"] != selection["head"]
-            or run["status"] != "completed"
-            or run["conclusion"] != "success"
+            archive_member(plan_archive, "selection.json")
+            != (directory / "selection.json").read_bytes()
         ):
-            raise ReceiptError("GitHub has no successful exact-candidate execution")
+            raise ReceiptError(
+                "selection identities differ from the actual GitHub plan artifact"
+            )
         pages = json.loads(
             command(
                 root,
@@ -462,7 +585,7 @@ def admit(root, directory):
                 case["steps"],
                 selection["workflow_run_id"],
                 selection["attempt"],
-                selection["head"],
+                selection["candidate_head"],
             )
             for job in read(path.parent / terminal["path"]):
                 actual_job = hosted_jobs.get(job["id"])
@@ -481,6 +604,8 @@ def admit(root, directory):
                     raise ReceiptError(
                         "retained terminal evidence does not match GitHub"
                     )
+            if case.get("native_artifact"):
+                collect_mutation(root, selection, path.parent, verify=True)
         else:
             if (
                 execution["executor"] != "live-boundary"
@@ -493,6 +618,14 @@ def admit(root, directory):
                 raise ReceiptError(
                     "protected admission permits only the declared status operation"
                 )
+            validate_protected(
+                root,
+                path.parent,
+                receipt,
+                selection,
+                protected_policy.get(identity) if protected_policy else None,
+                lambda root, endpoint: json.loads(command(root, "gh", "api", endpoint)),
+            )
     index = [
         {
             "case_id": identity,
@@ -502,7 +635,19 @@ def admit(root, directory):
         for identity, (path, receipt) in sorted(receipts.items())
     ]
     (directory / "admission.json").write_text(
-        json.dumps({"candidate_commit": selection["head"], "receipts": index}, indent=2)
+        json.dumps(
+            {
+                "candidate_commit": selection["head"],
+                "candidate_head": selection["candidate_head"],
+                "protected_policy_digest": digest(
+                    json.dumps(protected_policy, sort_keys=True).encode()
+                )
+                if protected_policy
+                else None,
+                "receipts": index,
+            },
+            indent=2,
+        )
         + "\n"
     )
     return index
@@ -516,14 +661,26 @@ def main():
     )
     parser.add_argument("--base")
     parser.add_argument("--head")
+    parser.add_argument("--candidate-head")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--complete", action="store_true")
+    parser.add_argument(
+        "--protected-policy",
+        type=Path,
+        help="Release-authority policy supplied out of band, keyed by case id",
+    )
     args = parser.parse_args()
     try:
         if args.operation == "select":
             print(
                 json.dumps(
-                    select(args.root, args.base, args.head, complete=args.complete)
+                    select(
+                        args.root,
+                        args.base,
+                        args.head,
+                        complete=args.complete,
+                        candidate_head=args.candidate_head,
+                    )
                 )
             )
         elif args.operation == "plan":
@@ -533,11 +690,16 @@ def main():
                 args.head,
                 args.output,
                 args.complete or os.environ.get("COMPLETE") == "true",
+                candidate_head=args.candidate_head,
             )
         elif args.operation == "collect":
             collect(args.root, args.output)
         else:
-            admit(args.root, args.output)
+            admit(
+                args.root,
+                args.output,
+                read(args.protected_policy) if args.protected_policy else None,
+            )
     except (
         ReceiptError,
         subprocess.CalledProcessError,

@@ -11,6 +11,7 @@ cases:
     jobs: [Fresh install smoke]
     steps: [Build candidate image, Run fresh-install smoke]
   workflow-mutation-gate:
+    native_artifact: mutation-result
     jobs: ['Mutation — diff-scoped, ratcheted (non-blocking)']
     steps: [Resolve diff base, 'Mutation parity (diff-scoped, ratcheted)', Upload surviving-mutant baseline]
   workflow-security-scan:

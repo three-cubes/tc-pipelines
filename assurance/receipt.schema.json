@@ -16,6 +16,7 @@
       "properties": {
         "fitness_digest": {"$ref": "#/$defs/nullableDigest"},
         "pipeline_commit": {"$ref": "#/$defs/commit"},
+        "pipeline_head_commit": {"$ref": "#/$defs/commit"},
         "pipeline_package_digest": {"$ref": "#/$defs/nullableDigest"},
         "pipeline_image_digest": {"$ref": "#/$defs/nullableDigest"}
       }

@@ -140,6 +140,10 @@ on:
         description: "Retention for the uploaded surviving-mutant baseline artifact."
         type: number
         default: 30
+      artifact-name:
+        description: Name of the native result artifact; assurance callers bind run and attempt.
+        type: string
+        default: mutation-survivors
     secrets:
       # Generic passthrough. The default runner needs no secret; a caller whose
       # runner pulls a private package index or posts a notification wires it
@@ -306,7 +310,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: mutation-survivors
+          name: ${{ inputs.artifact-name }}
           path: ${{ inputs.baseline-path }}
           if-no-files-found: warn
           retention-days: ${{ inputs.artifact-retention-days }}

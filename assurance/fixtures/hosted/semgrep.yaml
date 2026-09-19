@@ -5,4 +5,4 @@ rules:
     message: Dynamic eval is forbidden in the hosted product fixture.
     pattern: eval(...)
     paths:
-      include: [assurance/fixtures/python/src/**]
+      include: [assurance/fixtures/python/project/src/**]

@@ -16,6 +16,10 @@ on:
         default: true
   workflow_call:
     inputs:
+      candidate-head:
+        description: Branch head for PRs, merge-group head otherwise; distinct from the tested merge commit.
+        type: string
+        required: true
       base:
         type: string
         required: true
@@ -46,8 +50,9 @@ jobs:
         env:
           BASE: ${{ inputs.base }}
           HEAD: ${{ inputs.head }}
+          CANDIDATE_HEAD: ${{ inputs.candidate-head || inputs.head }}
           COMPLETE: ${{ inputs.complete }}
-        run: uv run --no-sync python assurance/hosted.py plan --base "$BASE" --head "$HEAD" --output .assurance-hosted
+        run: uv run --no-sync python assurance/hosted.py plan --base "$BASE" --head "$HEAD" --candidate-head "$CANDIDATE_HEAD" --output .assurance-hosted
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: assurance-plan-${{ github.run_id }}-${{ github.run_attempt }}
@@ -98,6 +103,7 @@ jobs:
       runner-command: uv run --no-sync python assurance/adapter_probe.py mutation
       runner-args: --output artifacts/mutation.json
       baseline-path: artifacts/mutation.json
+      artifact-name: assurance-mutation-${{ github.run_id }}-${{ github.run_attempt }}
   security:
     name: workflow-security-scan
     needs: select
