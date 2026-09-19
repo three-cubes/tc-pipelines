@@ -29,7 +29,14 @@ def test_arbitrary_hashed_files_cannot_satisfy_protected_admission(tmp_path):
     head = git(tmp_path, "rev-parse", "HEAD")
     module = hosted_module()
     directory = tmp_path / "evidence"
-    selection = module.plan(tmp_path, base, head, directory, complete=True)
+    selection = module.plan(
+        tmp_path,
+        base,
+        head,
+        directory,
+        complete=True,
+        execution_environment={},
+    )
     expected = selection["required_probes"][0]["expectation"]
     outputs = []
     for identity in expected["output_ids"]:
@@ -77,7 +84,14 @@ def test_pr_selection_binds_branch_head_and_tested_merge(tmp_path):
     git(tmp_path, "merge", "--no-ff", "-m", "test: merge", candidate)
     tested = git(tmp_path, "rev-parse", "HEAD")
     module = hosted_module()
-    selection = module.plan(tmp_path, base, tested, tmp_path / "plan", candidate_head=candidate)
+    selection = module.plan(
+        tmp_path,
+        base,
+        tested,
+        tmp_path / "plan",
+        candidate_head=candidate,
+        execution_environment={},
+    )
     assert selection["head"] == tested
     assert selection["candidate_head"] == candidate
     row = yaml.safe_load((tmp_path / "assurance/surfaces.yaml").read_text())["surfaces"][0]
@@ -86,6 +100,37 @@ def test_pr_selection_binds_branch_head_and_tested_merge(tmp_path):
     assert expected["candidate"]["pipeline_head_commit"] == candidate
     with pytest.raises(ValueError, match="merge"):
         module.select(tmp_path, base, tested, candidate_head=base)
+
+
+def test_plan_binds_receipt_identity_to_the_explicit_actions_environment(tmp_path):
+    head = repository(tmp_path)
+    module = hosted_module()
+    actions_environment = {
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_SHA": "f" * 40,
+        "GITHUB_RUN_ID": "42",
+        "GITHUB_RUN_ATTEMPT": "2",
+        "GITHUB_REPOSITORY": "three-cubes/tc-pipelines",
+    }
+    with pytest.raises(ValueError, match="Actions event"):
+        module.plan(
+            tmp_path,
+            head,
+            head,
+            tmp_path / "mismatched",
+            execution_environment=actions_environment,
+        )
+    actions_environment["GITHUB_SHA"] = head
+    selection = module.plan(
+        tmp_path,
+        head,
+        head,
+        tmp_path / "matched",
+        execution_environment=actions_environment,
+    )
+    assert selection["workflow_run_id"] == "42"
+    assert selection["attempt"] == 2
+    assert selection["repository"] == "three-cubes/tc-pipelines"
 
 
 @pytest.mark.parametrize("defect", [None, "head_sha", "status", "conclusion", "id", "run_attempt"])

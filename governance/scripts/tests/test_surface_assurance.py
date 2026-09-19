@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -141,6 +142,23 @@ def test_inventory_reports_declared_requirements_without_claiming_execution(tmp_
 def test_checked_in_public_inventory_is_exact():
     result = invoke("inventory")
     assert result.returncode == 0, result.stderr
+
+
+def test_mixed_fixture_self_resolves_its_declared_package_manager():
+    package = json.loads((ROOT / "assurance/fixtures/mixed/project/package.json").read_text())
+    declared_pnpm = package["packageManager"].removeprefix("pnpm@")
+    expected_prefix = ["corepack", f"pnpm@{declared_pnpm}"]
+    manifest = yaml.safe_load((ROOT / "assurance/consumers.yaml").read_text())
+    mixed = next(row for row in manifest["consumers"] if row["id"] == "mixed")
+    pnpm_commands = [
+        command for command in [*mixed["install"], *mixed["prepare"]] if "pnpm" in " ".join(command)
+    ]
+    gate = tomllib.loads((ROOT / "assurance/fixtures/mixed/project/gate.toml").read_text())
+    pnpm_commands.extend(
+        step["run"] for step in gate["tool"]["tc_fitness"]["steps"] if "pnpm" in " ".join(step["run"])
+    )
+    assert pnpm_commands
+    assert all(command[:2] == expected_prefix for command in pnpm_commands)
 
 
 def test_lab_executes_all_variants_and_retains_actual_outputs(tmp_path):

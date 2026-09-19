@@ -21,11 +21,13 @@ def git(root, *args):
 
 
 def invoke(*args):
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GITHUB_")}
     return subprocess.run(
         [sys.executable, str(CLI), *map(str, args)],
         capture_output=True,
         text=True,
         check=False,
+        env=environment,
     )
 
 

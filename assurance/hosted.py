@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -89,18 +90,31 @@ def select(root, base, head, *, complete=False, candidate_head=None):
     }
 
 
-def plan(root, base, head, destination, complete=False, *, candidate_head=None):
+def plan(
+    root,
+    base,
+    head,
+    destination,
+    complete=False,
+    *,
+    candidate_head=None,
+    execution_environment: Mapping[str, str] | None = None,
+):
+    execution_environment = os.environ if execution_environment is None else execution_environment
     selection = select(root, base, head, complete=complete, candidate_head=candidate_head)
     if git(root, "rev-parse", "HEAD") != head:
         raise ReceiptError("checkout is not the selected exact candidate")
-    if os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("GITHUB_SHA") != head:
+    if (
+        execution_environment.get("GITHUB_ACTIONS") == "true"
+        and execution_environment.get("GITHUB_SHA") != head
+    ):
         raise ReceiptError("tested commit does not match the Actions event")
     selection.update(
         execution_id=str(uuid.uuid4()),
-        workflow_run_id=os.environ.get("GITHUB_RUN_ID"),
-        attempt=int(os.environ.get("GITHUB_RUN_ATTEMPT", "1")),
+        workflow_run_id=execution_environment.get("GITHUB_RUN_ID"),
+        attempt=int(execution_environment.get("GITHUB_RUN_ATTEMPT", "1")),
         started_at=datetime.now(UTC).isoformat(),
-        repository=os.environ.get("GITHUB_REPOSITORY", "fixtures/local"),
+        repository=execution_environment.get("GITHUB_REPOSITORY", "fixtures/local"),
     )
     selection["required_probes"] = [
         {

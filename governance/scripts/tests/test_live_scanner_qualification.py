@@ -8,6 +8,7 @@ qualification boundary.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -215,6 +216,7 @@ def test_live_workflow_uses_the_one_pinned_scanner_provisioner_and_retains_recei
 
 
 def test_live_scanner_writer_refuses_to_mint_a_local_success(tmp_path):
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GITHUB_")}
     result = subprocess.run(
         [
             sys.executable,
@@ -229,6 +231,7 @@ def test_live_scanner_writer_refuses_to_mint_a_local_success(tmp_path):
         text=True,
         capture_output=True,
         check=False,
+        env=environment,
     )
     assert result.returncode == 1
     assert "requires GitHub Actions" in result.stderr

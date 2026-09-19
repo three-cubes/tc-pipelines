@@ -18,8 +18,8 @@ consumers:
       diagnostics: ['FAIL [consumer-tests]', consumer-total]
       output_result: test-failure
   - id: mixed
-    install: [[uv, lock], [uv, sync, --locked], [pnpm, install, --frozen-lockfile]]
-    prepare: [[make, prepare], [pnpm, --filter, consumer-web, run, generate]]
+    install: [[uv, lock], [uv, sync, --locked], [corepack, pnpm@10.17.1, install, --frozen-lockfile]]
+    prepare: [[make, prepare], [corepack, pnpm@10.17.1, --filter, consumer-web, run, generate]]
     evaluate:
       affected: [uv, run, --no-sync, tc-fitness, run, --changed-files-from, .assurance-changed-files]
       complete: [uv, run, --no-sync, tc-fitness, run]
