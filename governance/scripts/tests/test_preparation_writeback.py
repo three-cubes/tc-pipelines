@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
+import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -14,7 +16,7 @@ import pytest
 
 pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[3]
-CLI = ROOT / "governance/scripts/preparation_writeback.py"
+CLI = ROOT / "actions/preparation-writeback/preparation_writeback.py"
 
 
 def git(root: Path, *args: str) -> str:
@@ -41,10 +43,8 @@ def repository(tmp_path: Path) -> tuple[Path, str]:
     return root, git(root, "rev-parse", "HEAD")
 
 
-def produce(root: Path, head: str, out: Path) -> tuple[Path, Path]:
+def snapshot(root: Path, head: str, out: Path) -> Path:
     pre = out / "pre.json"
-    receipt = out / "receipt.json"
-    patch = out / "patch.json"
     result = invoke(
         "snapshot",
         "--repository",
@@ -67,8 +67,12 @@ def produce(root: Path, head: str, out: Path) -> tuple[Path, Path]:
         root,
     )
     assert result.returncode == 0, result.stderr
-    (root / "tracked.txt").write_text("after\n")
-    (root / "generated.txt").write_text("generated\n")
+    return pre
+
+
+def produce_after(root: Path, pre: Path, out: Path) -> tuple[Path, Path]:
+    receipt = out / "receipt.json"
+    patch = out / "patch.json"
     result = invoke(
         "produce",
         "--snapshot",
@@ -82,6 +86,13 @@ def produce(root: Path, head: str, out: Path) -> tuple[Path, Path]:
     )
     assert result.returncode == 0, result.stderr
     return receipt, patch
+
+
+def produce(root: Path, head: str, out: Path) -> tuple[Path, Path]:
+    pre = snapshot(root, head, out)
+    (root / "tracked.txt").write_text("after\n")
+    (root / "generated.txt").write_text("generated\n")
+    return produce_after(root, pre, out)
 
 
 def clone_at_head(source: Path, destination: Path) -> Path:
@@ -102,6 +113,8 @@ def apply(destination: Path, receipt: Path, patch: Path, head: str) -> subproces
         "17",
         "--expected-head",
         head,
+        "--expected-head-ref",
+        "feature/prepare",
         "--workflow-run-id",
         "99",
         "--workflow-run-attempt",
@@ -135,11 +148,186 @@ def test_credential_free_producer_and_apply_round_trip_use_real_git(tmp_path: Pa
     assert document["head_tree"] == git(source, "rev-parse", f"{head}^{{tree}}")
     assert document["pre_tree"] != document["post_tree"]
     assert document["patch_digest"] == patch_digest(patch)
+    assert all("content_base64" not in entry for entry in json.loads((out / "pre.json").read_text())["entries"])
     target = clone_at_head(source, tmp_path / "target")
     result = apply(target, receipt, patch, head)
     assert result.returncode == 0, result.stderr
     assert (target / "tracked.txt").read_text() == "after\n"
     assert (target / "generated.txt").read_text() == "generated\n"
+
+
+def test_snapshot_scales_with_repository_identity_not_repository_content(tmp_path: Path) -> None:
+    source, head = repository(tmp_path)
+    (source / "large.bin").write_bytes(b"x" * (17 * 1024 * 1024))
+    git(source, "add", "large.bin")
+    git(source, "commit", "-qm", "large fixture")
+    head = git(source, "rev-parse", "HEAD")
+    out = tmp_path / "evidence"
+    out.mkdir()
+    pre = snapshot(source, head, out)
+    assert pre.stat().st_size < 4096
+    assert all("content_base64" not in entry for entry in json.loads(pre.read_text())["entries"])
+    receipt, patch = produce_after(source, pre, out)
+    assert receipt.exists()
+    assert patch.stat().st_size < 4096
+
+
+def test_snapshot_retains_git_valid_whitespace_filenames(tmp_path: Path) -> None:
+    source, _ = repository(tmp_path)
+    (source / " leading-name.txt").write_text("identity\n")
+    git(source, "add", " leading-name.txt")
+    git(source, "commit", "-qm", "whitespace filename")
+    head = git(source, "rev-parse", "HEAD")
+    out = tmp_path / "evidence"
+    out.mkdir()
+    pre = snapshot(source, head, out)
+    assert " leading-name.txt" in {entry["path"] for entry in json.loads(pre.read_text())["entries"]}
+
+
+@pytest.mark.parametrize("change", ["untracked", "delete"])
+def test_apply_round_trips_complete_git_visible_state(tmp_path: Path, change: str) -> None:
+    source, head = repository(tmp_path)
+    out = tmp_path / "evidence"
+    out.mkdir()
+    pre = snapshot(source, head, out)
+    if change == "untracked":
+        (source / "only-generated.txt").write_text("generated\n")
+    else:
+        (source / "tracked.txt").unlink()
+    receipt, patch = produce_after(source, pre, out)
+    target = clone_at_head(source, tmp_path / "target")
+    result = apply(target, receipt, patch, head)
+    assert result.returncode == 0, result.stderr
+    if change == "untracked":
+        assert (target / "only-generated.txt").read_text() == "generated\n"
+    else:
+        assert not (target / "tracked.txt").exists()
+
+
+def test_changed_and_push_use_real_git_without_persistent_credentials(tmp_path: Path) -> None:
+    source, head = repository(tmp_path)
+    clean = invoke("changed", "--root", source)
+    assert clean.returncode == 0
+    assert clean.stdout.strip() == "false"
+    (source / "untracked.txt").write_text("generated\n")
+    dirty = invoke("changed", "--root", source)
+    assert dirty.returncode == 0
+    assert dirty.stdout.strip() == "true"
+    git(source, "add", "untracked.txt")
+    git(source, "commit", "-qm", "prepared")
+    bare = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", bare)
+    git(source, "remote", "add", "origin", str(bare))
+    git(source, "push", "-q", "origin", f"{head}:refs/heads/feature/prepare")
+    environment = {**os.environ, "GITHUB_APP_TOKEN": "opaque-test-token"}
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(CLI),
+            "push",
+            "--root",
+            str(source),
+            "--remote",
+            "origin",
+            "--head-ref",
+            "feature/prepare",
+            "--expected-head",
+            head,
+        ],
+        text=True,
+        capture_output=True,
+        env=environment,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "opaque-test-token" not in result.stdout + result.stderr
+    assert git(bare, "rev-parse", "refs/heads/feature/prepare") == git(source, "rev-parse", "HEAD")
+    assert subprocess.run(
+        ["git", "config", "--local", "--get-regexp", r"^http\\..*extraheader$"],
+        cwd=source,
+        text=True,
+        capture_output=True,
+    ).returncode == 1
+
+
+def test_authenticated_fetch_uses_real_git_without_persistent_credentials(tmp_path: Path) -> None:
+    source, head = repository(tmp_path)
+    bare = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", bare)
+    git(source, "remote", "add", "origin", str(bare))
+    git(source, "push", "-q", "origin", f"{head}:refs/heads/feature/prepare")
+    target = tmp_path / "target"
+    git(tmp_path, "init", "-q", target)
+    environment = {**os.environ, "GITHUB_READ_TOKEN": "opaque-read-token"}
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(CLI),
+            "fetch",
+            "--root",
+            str(target),
+            "--remote-url",
+            str(bare),
+            "--head-sha",
+            head,
+        ],
+        text=True,
+        capture_output=True,
+        env=environment,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "opaque-read-token" not in result.stdout + result.stderr
+    assert git(target, "rev-parse", f"{head}^{{commit}}") == head
+    assert subprocess.run(
+        ["git", "config", "--local", "--get-regexp", r"^http\\..*extraheader$"],
+        cwd=target,
+        text=True,
+        capture_output=True,
+    ).returncode == 1
+
+
+@pytest.mark.parametrize("entries", [("preparation-patch.json", "preparation-receipt.json"), ("preparation-receipt.json", "preparation-patch.json")])
+def test_receipt_artifact_accepts_exact_names_in_any_zip_order(tmp_path: Path, entries: tuple[str, str]) -> None:
+    archive = tmp_path / "receipt.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        for name in entries:
+            output.writestr(name, b"{}")
+    destination = tmp_path / "evidence"
+    result = invoke("artifact", "--archive", archive, "--output", destination)
+    assert result.returncode == 0, result.stderr
+    assert (destination / "preparation-receipt.json").read_bytes() == b"{}"
+    assert (destination / "preparation-patch.json").read_bytes() == b"{}"
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        ("preparation-receipt.json", "preparation-receipt.json"),
+        ("nested/preparation-receipt.json", "preparation-patch.json"),
+        ("preparation-receipt.json", "unexpected.json"),
+    ],
+)
+def test_receipt_artifact_rejects_ambiguous_or_nested_entries(tmp_path: Path, entries: tuple[str, str]) -> None:
+    archive = tmp_path / "receipt.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        for position, name in enumerate(entries):
+            if entries[0] == entries[1] and position == 1:
+                with pytest.warns(UserWarning, match="Duplicate name"):
+                    output.writestr(name, b"{}")
+            else:
+                output.writestr(name, b"{}")
+    result = invoke("artifact", "--archive", archive, "--output", tmp_path / "evidence")
+    assert result.returncode == 1
+    assert "preparation" in result.stderr
+
+
+def test_receipt_artifact_rejects_oversized_extracted_stream(tmp_path: Path) -> None:
+    archive = tmp_path / "receipt.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
+        output.writestr("preparation-receipt.json", b"x" * (2 * 1024 * 1024 + 1))
+        output.writestr("preparation-patch.json", b"{}")
+    result = invoke("artifact", "--archive", archive, "--output", tmp_path / "evidence")
+    assert result.returncode == 1
+    assert "preparation" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -148,6 +336,7 @@ def test_credential_free_producer_and_apply_round_trip_use_real_git(tmp_path: Pa
         "wrong-head",
         "wrong-pr",
         "wrong-run",
+        "wrong-head-ref",
         "stale",
         "fork",
         "altered-patch",
@@ -156,6 +345,13 @@ def test_credential_free_producer_and_apply_round_trip_use_real_git(tmp_path: Pa
         "symlink",
         "mode",
         "moved-head",
+        "duplicate-path",
+        "invalid-base64",
+        "future",
+        "altered-pre-tree",
+        "altered-post-tree",
+        "unexpected-receipt-field",
+        "unexpected-patch-field",
     ],
 )
 def test_apply_rejects_untrusted_or_nonidentical_preparation_evidence(
@@ -172,6 +368,8 @@ def test_apply_rejects_untrusted_or_nonidentical_preparation_evidence(
         document["pull_request"] = 18
     elif defect == "wrong-run":
         document["workflow_run_attempt"] = 3
+    elif defect == "wrong-head-ref":
+        document["head_ref"] = "other-branch"
     elif defect == "stale":
         document["issued_at"] = (datetime.now(UTC) - timedelta(days=2)).isoformat()
     elif defect == "fork":
@@ -190,7 +388,24 @@ def test_apply_rejects_untrusted_or_nonidentical_preparation_evidence(
         (source / "other.txt").write_text("new head\n")
         git(source, "add", "other.txt")
         git(source, "commit", "-qm", "move head")
-    if defect in {"wrong-head", "wrong-pr", "wrong-run", "stale", "fork", "oversize"}:
+    elif defect == "duplicate-path":
+        replace_patch(receipt, patch, lambda data: data["entries"].append(data["entries"][0]))
+    elif defect == "invalid-base64":
+        replace_patch(receipt, patch, lambda data: data["entries"][0].update(content_base64="%%%"))
+    elif defect == "future":
+        document["issued_at"] = (datetime.now(UTC) + timedelta(days=2)).isoformat()
+    elif defect == "altered-pre-tree":
+        document["pre_tree"] = "sha256:" + "0" * 64
+    elif defect == "altered-post-tree":
+        document["post_tree"] = "sha256:" + "0" * 64
+    elif defect == "unexpected-receipt-field":
+        document["surplus"] = True
+    elif defect == "unexpected-patch-field":
+        replace_patch(receipt, patch, lambda data: data.update(surplus=True))
+    if defect in {
+        "wrong-head", "wrong-pr", "wrong-run", "wrong-head-ref", "stale", "fork", "oversize",
+        "future", "altered-pre-tree", "altered-post-tree", "unexpected-receipt-field",
+    }:
         receipt.write_text(json.dumps(document, sort_keys=True) + "\n")
     target = clone_at_head(source, tmp_path / "target")
     result = apply(target, receipt, patch, head)

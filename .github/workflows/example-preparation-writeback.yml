@@ -1,0 +1,28 @@
+name: example — preparation-writeback (reusable self-check)
+
+# Resolves the reusable's required-input contract without creating a receipt,
+# accessing Azure, or invoking the privileged writer.
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  writeback-shape:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/preparation-writeback.yml
+    with:
+      repository: three-cubes/example
+      repository-owner: three-cubes
+      repository-name: example
+      workflow-run-id: "1"
+      pipelines-sha: 0000000000000000000000000000000000000000
+      azure-client-id: 00000000-0000-0000-0000-000000000000
+      azure-tenant-id: 00000000-0000-0000-0000-000000000000
+      azure-subscription-id: 00000000-0000-0000-0000-000000000000

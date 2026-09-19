@@ -17,6 +17,7 @@ import os
 import stat
 import subprocess
 import sys
+import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -25,6 +26,8 @@ from typing import Any
 RECEIPT_SCHEMA = "tc.sdlc/preparation-receipt/v1"
 PATCH_SCHEMA = "tc.sdlc/preparation-patch/v1"
 MAX_PATCH_BYTES = 1024 * 1024
+MAX_RECEIPT_BYTES = MAX_PATCH_BYTES * 2
+MAX_ARTIFACT_BYTES = MAX_RECEIPT_BYTES + MAX_PATCH_BYTES
 MAX_RECEIPT_AGE = timedelta(minutes=30)
 ALLOWED_MODES = {0o644, 0o755}
 
@@ -44,6 +47,15 @@ def run_git(root: Path, *arguments: str) -> str:
     if result.returncode:
         fail(f"git {' '.join(arguments)} failed: {result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def run_git_bytes(root: Path, *arguments: str) -> bytes:
+    result = subprocess.run(
+        ["git", *arguments], cwd=root, capture_output=True, check=False
+    )
+    if result.returncode:
+        fail(f"git {' '.join(arguments)} failed: {result.stderr.decode(errors='replace').strip()}")
+    return result.stdout
 
 
 def sha256(data: bytes) -> str:
@@ -95,9 +107,9 @@ def checked_file(root: Path, relative: str) -> Path:
 
 
 def visible_paths(root: Path) -> list[str]:
-    tracked = run_git(root, "ls-files", "-z").encode("utf-8").split(b"\0")
-    untracked = run_git(root, "ls-files", "--others", "--exclude-standard", "-z").encode("utf-8").split(b"\0")
-    paths = {piece.decode("utf-8") for piece in tracked + untracked if piece}
+    tracked = run_git_bytes(root, "ls-files", "-z").split(b"\0")
+    untracked = run_git_bytes(root, "ls-files", "--others", "--exclude-standard", "-z").split(b"\0")
+    paths = {os.fsdecode(piece) for piece in tracked + untracked if piece}
     return sorted(paths)
 
 
@@ -106,7 +118,9 @@ def manifest(root: Path, *, include_content: bool) -> tuple[list[dict[str, Any]]
     for relative in visible_paths(root):
         path = checked_file(root, relative)
         if not path.exists():
-            fail(f"tracked path disappeared: {relative!r}")
+            # `git ls-files` retains deleted tracked paths.  A content-state
+            # manifest describes the working tree, so a deleted file is absent.
+            continue
         mode = stat.S_IMODE(os.lstat(path).st_mode)
         if mode & ~0o777:
             fail(f"unsafe file mode: {relative!r}")
@@ -119,12 +133,12 @@ def manifest(root: Path, *, include_content: bool) -> tuple[list[dict[str, Any]]
     return entries, state
 
 
-def read_document(path: Path, *, limit: int = MAX_PATCH_BYTES * 2) -> dict[str, Any]:
+def read_document(path: Path, *, limit: int | None = MAX_RECEIPT_BYTES) -> dict[str, Any]:
     try:
         raw = path.read_bytes()
     except OSError as error:
         fail(f"cannot read evidence: {error}")
-    if len(raw) > limit:
+    if limit is not None and len(raw) > limit:
         fail("evidence document is too large")
     try:
         value = json.loads(raw)
@@ -150,7 +164,7 @@ def snapshot(arguments: argparse.Namespace) -> None:
     head = run_git(root, "rev-parse", "HEAD")
     if head != arguments.head_sha:
         fail("snapshot head does not match supplied head SHA")
-    entries, pre_tree = manifest(root, include_content=True)
+    entries, pre_tree = manifest(root, include_content=False)
     document = {
         "schema": "tc.sdlc/preparation-snapshot/v1",
         "repository": arguments.repository,
@@ -168,7 +182,9 @@ def snapshot(arguments: argparse.Namespace) -> None:
 
 
 def produce(arguments: argparse.Namespace) -> None:
-    snapshot_document = read_document(arguments.snapshot, limit=MAX_PATCH_BYTES * 16)
+    # Snapshots are a producer-local handoff, never privileged input.  They
+    # contain only state identity and must scale with file count, not file size.
+    snapshot_document = read_document(arguments.snapshot, limit=None)
     snapshot_fields = {
         "schema", "repository", "pull_request", "head_sha", "head_tree", "head_repository",
         "head_ref", "workflow_run_id", "workflow_run_attempt", "pre_tree", "entries",
@@ -186,7 +202,7 @@ def produce(arguments: argparse.Namespace) -> None:
         fail("snapshot entries must be a list")
     before: dict[str, dict[str, Any]] = {}
     for entry in original_entries:
-        if not isinstance(entry, dict) or set(entry) != {"path", "mode", "digest", "content_base64"}:
+        if not isinstance(entry, dict) or set(entry) != {"path", "mode", "digest"}:
             fail("invalid snapshot entry")
         validate_relative_path(entry["path"])
         before[entry["path"]] = entry
@@ -250,6 +266,8 @@ def validate_receipt(document: dict[str, Any], arguments: argparse.Namespace, ro
         fail("fork preparation evidence is not eligible for writeback")
     if document["head_sha"] != arguments.expected_head:
         fail("receipt head does not match expected pull-request head")
+    if document["head_ref"] != arguments.expected_head_ref:
+        fail("receipt head ref does not match expected pull-request head ref")
     if run_git(root, "rev-parse", "HEAD") != arguments.expected_head:
         fail("temporary checkout does not match expected pull-request head")
     if run_git(root, "rev-parse", "HEAD^{tree}") != document["head_tree"]:
@@ -348,6 +366,123 @@ def apply(arguments: argparse.Namespace) -> None:
         fail("applied preparation patch does not reproduce receipt post tree")
 
 
+def changed(arguments: argparse.Namespace) -> None:
+    """Report Git-visible changes, including additions and deletions."""
+    status = run_git(arguments.root.resolve(), "status", "--porcelain=v1", "--untracked-files=all")
+    print("true" if status else "false")
+
+
+def push(arguments: argparse.Namespace) -> None:
+    """Push a prepared commit with an ephemeral GitHub App credential header."""
+    root = arguments.root.resolve()
+    if arguments.remote != "origin":
+        fail("writeback remote must be origin")
+    run_git(root, "check-ref-format", "--branch", arguments.head_ref)
+    if len(arguments.expected_head) != 40 or any(
+        character not in "0123456789abcdef" for character in arguments.expected_head
+    ):
+        fail("expected head is malformed")
+    token = os.environ.get("GITHUB_APP_TOKEN")
+    if not token:
+        fail("GitHub App token is unavailable after validation")
+    authorization = base64.b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
+    environment = {
+        **os.environ,
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {authorization}",
+    }
+    result = subprocess.run(
+        [
+            "git",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "push",
+            f"--force-with-lease=refs/heads/{arguments.head_ref}:{arguments.expected_head}",
+            arguments.remote,
+            f"HEAD:refs/heads/{arguments.head_ref}",
+        ],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+    if result.returncode:
+        fail(f"leased writeback push failed: {result.stderr.strip()}")
+
+
+def fetch(arguments: argparse.Namespace) -> None:
+    """Fetch an exact head through a non-persistent read-token header."""
+    root = arguments.root.resolve()
+    if len(arguments.head_sha) != 40 or any(
+        character not in "0123456789abcdef" for character in arguments.head_sha
+    ):
+        fail("expected head is malformed")
+    token = os.environ.get("GITHUB_READ_TOKEN")
+    if not token:
+        fail("read token is unavailable")
+    authorization = base64.b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
+    environment = {
+        **os.environ,
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {authorization}",
+    }
+    result = subprocess.run(
+        [
+            "git",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "fetch",
+            "--depth=1",
+            "--no-tags",
+            arguments.remote_url,
+            arguments.head_sha,
+        ],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+    if result.returncode:
+        fail(f"authenticated head fetch failed: {result.stderr.strip()}")
+    run_git(root, "cat-file", "-e", f"{arguments.head_sha}^{{commit}}")
+
+
+def artifact(arguments: argparse.Namespace) -> None:
+    """Extract exactly the two bounded receipt members, in either ZIP order."""
+    try:
+        if arguments.archive.stat().st_size > MAX_ARTIFACT_BYTES:
+            fail("receipt artifact exceeds bounded compressed size")
+        with zipfile.ZipFile(arguments.archive) as archive_file:
+            members = archive_file.infolist()
+            expected_limits = {
+                "preparation-receipt.json": MAX_RECEIPT_BYTES,
+                "preparation-patch.json": MAX_PATCH_BYTES,
+            }
+            names = [member.filename for member in members]
+            if len(members) != len(expected_limits) or set(names) != set(expected_limits):
+                fail("receipt artifact must contain exactly the receipt and patch")
+            if len(set(names)) != len(names):
+                fail("receipt artifact contains duplicate members")
+            extracted: dict[str, bytes] = {}
+            for member in members:
+                if member.is_dir() or member.file_size > expected_limits[member.filename]:
+                    fail("receipt artifact member exceeds bounded extracted size")
+                with archive_file.open(member) as stream:
+                    content = stream.read(expected_limits[member.filename] + 1)
+                if len(content) != member.file_size or len(content) > expected_limits[member.filename]:
+                    fail("receipt artifact member exceeds bounded extracted size")
+                extracted[member.filename] = content
+    except (OSError, zipfile.BadZipFile) as error:
+        raise PreparationError(f"invalid receipt artifact: {error}") from error
+    arguments.output.mkdir(parents=True, exist_ok=True)
+    for name, content in extracted.items():
+        (arguments.output / name).write_bytes(content)
+
+
 def parser() -> argparse.ArgumentParser:
     main_parser = argparse.ArgumentParser(description=__doc__)
     subparsers = main_parser.add_subparsers(dest="command", required=True)
@@ -374,10 +509,29 @@ def parser() -> argparse.ArgumentParser:
     apply_parser.add_argument("--repository", required=True)
     apply_parser.add_argument("--pull-request", type=positive_integer, required=True)
     apply_parser.add_argument("--expected-head", required=True)
+    apply_parser.add_argument("--expected-head-ref", required=True)
     apply_parser.add_argument("--workflow-run-id", type=positive_integer, required=True)
     apply_parser.add_argument("--workflow-run-attempt", type=positive_integer, required=True)
     apply_parser.add_argument("--root", type=Path, required=True)
     apply_parser.set_defaults(handler=apply)
+    changed_parser = subparsers.add_parser("changed")
+    changed_parser.add_argument("--root", type=Path, required=True)
+    changed_parser.set_defaults(handler=changed)
+    push_parser = subparsers.add_parser("push")
+    push_parser.add_argument("--root", type=Path, required=True)
+    push_parser.add_argument("--remote", required=True)
+    push_parser.add_argument("--head-ref", required=True)
+    push_parser.add_argument("--expected-head", required=True)
+    push_parser.set_defaults(handler=push)
+    artifact_parser = subparsers.add_parser("artifact")
+    artifact_parser.add_argument("--archive", type=Path, required=True)
+    artifact_parser.add_argument("--output", type=Path, required=True)
+    artifact_parser.set_defaults(handler=artifact)
+    fetch_parser = subparsers.add_parser("fetch")
+    fetch_parser.add_argument("--root", type=Path, required=True)
+    fetch_parser.add_argument("--remote-url", required=True)
+    fetch_parser.add_argument("--head-sha", required=True)
+    fetch_parser.set_defaults(handler=fetch)
     return main_parser
 
 
