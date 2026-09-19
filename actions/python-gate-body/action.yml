@@ -107,6 +107,8 @@ runs:  # ${{ inputs.probe-undeclared-input }}
     # Repositories with no contract do no OSV setup work at all. The reusable
     # workflow assigns this step to one lane; the composite does not infer
     # ownership from consumer-defined tier names.
+    # The emitted executable version comes from tc-pipelines' scanner catalogue;
+    # existing consumer version fields do not create independent scanner pins.
     - name: Read declared OSV scanner contract
       id: osv-contract
       if: inputs.provision-osv-scanner == 'true'
@@ -123,7 +125,9 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       env:
         INSTALL_OSV_SCANNER: "true"
         OSV_SCANNER_VERSION: ${{ steps.osv-contract.outputs.version }}
+        TC_SCANNER_BIN_DIR: ${{ runner.temp }}/tc-pipelines-scanners/bin
       run: |
+        export TC_SCANNER_PATH_FILE="$GITHUB_PATH"
         bash "$GITHUB_ACTION_PATH/provision-scanners.sh"
 
     # ── Node / pnpm half (opt-in) ───────────────────────────────────────

@@ -29,7 +29,12 @@ except ImportError:  # pragma: no cover - exercised by the workflow entrypoint.
 SCHEMA = "tc.sdlc/live-scanner-qualification/v1"
 WORKFLOW_PATH = ".github/workflows/live-scanner-qualification.yml"
 MAX_RECEIPT_AGE = timedelta(hours=6)
-TOOLS = {"checkov": "3.2.531", "osv-scanner": "2.2.4"}
+_SCANNER_IDENTITIES = json.loads(
+    (Path(__file__).resolve().parents[1] / "actions/python-gate-body/scanner-versions.json").read_text(
+        encoding="utf-8"
+    )
+)
+TOOLS = {name: identity["version"] for name, identity in _SCANNER_IDENTITIES.items()}
 CASES = {
     "checkov-compliant": {
         "tool": "checkov",
@@ -269,10 +274,12 @@ def _tool_identity(name: str) -> tuple[Path, str]:
     return path, digest(path.read_bytes())
 
 
-def _rule_database(name: str, report: str) -> tuple[str, str, dict[str, Any]]:
+def _rule_database(name: str, report: str, executable: Path) -> tuple[str, str, dict[str, Any]]:
     if name == "checkov":
+        resolved_executable = executable.resolve(strict=True)
+        python = resolved_executable.parent / ("python.exe" if os.name == "nt" else "python")
         module = _run(
-            [sys.executable, "-c", "import checkov; print(checkov.__path__[0])"],
+            [str(python), "-c", "import checkov; print(checkov.__path__[0])"],
             Path.cwd(),
         )
         if module.returncode != 0:
@@ -359,7 +366,7 @@ def _qualify_case(root: Path, destination: Path, candidate: str, case_id: str) -
     actual = scanner_outcome(result.returncode, report, case["finding"])
     if actual != case["expected"]:
         raise ReceiptError(f"{case_id} did not produce its declared scanner outcome")
-    rule_kind, rule_identity, rule_data = _rule_database(str(case["tool"]), report)
+    rule_kind, rule_identity, rule_data = _rule_database(str(case["tool"]), report, executable)
     (destination / "rule-database.json").write_text(json.dumps(rule_data, sort_keys=True, indent=2) + "\n")
     outputs = [
         {"id": identity, "path": path, "digest": file_digest(destination / path)}

@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+import platform
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 import yaml
+
+from assurance.live_scanners import _rule_database, scanner_outcome
 
 pytestmark = pytest.mark.contract
 
@@ -15,6 +22,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "actions" / "python-gate-body" / "declared_osv_contract.py"
 ACTION = REPO_ROOT / "actions" / "python-gate-body" / "action.yml"
 PROVISIONER = REPO_ROOT / "actions" / "python-gate-body" / "provision-scanners.sh"
+SCANNER_CATALOGUE = REPO_ROOT / "actions" / "python-gate-body" / "scanner-versions.json"
+CHECKOV_LOCK = REPO_ROOT / "actions" / "python-gate-body" / "checkov-tool" / "uv.lock"
+
+
+def _default_scanner_bin() -> Path:
+    cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    return cache_home / "tc-pipelines" / "scanners" / "bin"
 
 
 def _lane_owns_provisioning(value: bool | str, *, shard_tier: str) -> bool:
@@ -94,7 +108,7 @@ def test_explicitly_optional_contract_does_not_request_install(tmp_path: Path) -
     assert result.stdout.splitlines() == ["required=false", "version="]
 
 
-def test_required_contract_emits_the_consumers_exact_pin(tmp_path: Path) -> None:
+def test_required_contract_emits_the_pipeline_catalogued_pin(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
         """
 [tool.tc_fitness.core_checks.osv_scanner_sca]
@@ -106,9 +120,13 @@ lockfiles = ["uv.lock", "pnpm-lock.yaml"]
     )
 
     result = _run(tmp_path)
+    catalogued_version = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))["osv-scanner"]["version"]
 
     assert result.returncode == 0
-    assert result.stdout.splitlines() == ["required=true", "version=2.2.4"]
+    assert result.stdout.splitlines() == [
+        "required=true",
+        f"version={catalogued_version}",
+    ]
 
 
 def test_dedicated_config_wins_over_pyproject_for_required_contract(
@@ -129,9 +147,13 @@ lockfiles = ["uv.lock"]
     )
 
     result = _run(tmp_path)
+    catalogued_version = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))["osv-scanner"]["version"]
 
     assert result.returncode == 0
-    assert result.stdout.splitlines() == ["required=true", "version=2.2.4"]
+    assert result.stdout.splitlines() == [
+        "required=true",
+        f"version={catalogued_version}",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -165,9 +187,13 @@ def test_required_contract_accepts_multiline_lockfiles(tmp_path: Path, name: str
     (tmp_path / name).write_text(contract.strip(), encoding="utf-8")
 
     result = _run(tmp_path)
+    catalogued_version = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))["osv-scanner"]["version"]
 
     assert result.returncode == 0
-    assert result.stdout.splitlines() == ["required=true", "version=2.2.4"]
+    assert result.stdout.splitlines() == [
+        "required=true",
+        f"version={catalogued_version}",
+    ]
 
 
 def test_contract_reader_has_a_python310_tomli_fallback() -> None:
@@ -191,9 +217,13 @@ lockfiles = [
     )
 
     result = _run_with_python310_tomli_fallback(tmp_path)
+    catalogued_version = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))["osv-scanner"]["version"]
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == ["required=true", "version=2.2.4"]
+    assert result.stdout.splitlines() == [
+        "required=true",
+        f"version={catalogued_version}",
+    ]
 
 
 @pytest.mark.parametrize("required", ['"true"', "1", '"false"'])
@@ -257,10 +287,10 @@ def test_composite_installs_and_verifies_only_when_lane_owns_provisioning() -> N
     assert detect["if"] == "inputs.provision-osv-scanner == 'true'"
     assert install["if"] == "steps.osv-contract.outputs.required == 'true'"
     assert "provision-scanners.sh" in install["run"]
-    provisioner = PROVISIONER.read_text(encoding="utf-8")
-    assert "osv-scanner_SHA256SUMS" in provisioner
-    assert '"$install_dir/osv-scanner" --version' in provisioner
-    assert "steps.osv-contract.outputs.version" in install["env"]["OSV_SCANNER_VERSION"]
+    assert install["env"]["OSV_SCANNER_VERSION"] == "${{ steps.osv-contract.outputs.version }}"
+    assert install["env"]["TC_SCANNER_BIN_DIR"] == "${{ runner.temp }}/tc-pipelines-scanners/bin"
+    assert 'export TC_SCANNER_PATH_FILE="$GITHUB_PATH"' in install["run"]
+    assert "GITHUB_PATH" not in PROVISIONER.read_text(encoding="utf-8")
 
 
 def test_full_and_partitioned_sharded_workflow_provision_scanner_exactly_once() -> None:
@@ -286,3 +316,367 @@ def test_unpartitioned_shards_keep_required_scanner_available() -> None:
 
     shard_owner = workflow["jobs"]["quality-shard"]["steps"][0]["with"]["provision-osv-scanner"]
     assert _lane_owns_provisioning(shard_owner, shard_tier="") is True
+
+
+def test_real_checkov_install_uses_explicit_bin_and_preserves_consumer_lock_environment(
+    tmp_path: Path,
+) -> None:
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "scanner-consumer-fixture"\nversion = "0.0.0"\n'
+        'requires-python = ">=3.12"\ndependencies = ["asteval==1.0.9"]\n',
+        encoding="utf-8",
+    )
+    for command in (
+        ["uv", "lock", "--python", "3.12"],
+        ["uv", "sync", "--locked", "--python", "3.12"],
+    ):
+        result = subprocess.run(command, cwd=consumer, text=True, capture_output=True, check=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+    lock_before = (consumer / "uv.lock").read_bytes()
+    install_bin = _default_scanner_bin()
+    path_file = tmp_path / "scanner-path"
+    environment = {
+        key: value for key, value in os.environ.items() if key not in {"RUNNER_TEMP", "GITHUB_PATH"}
+    }
+    environment.update(
+        INSTALL_CHECKOV_SCANNER="true",
+        TC_SCANNER_BIN_DIR=str(install_bin),
+        TC_SCANNER_PATH_FILE=str(path_file),
+    )
+
+    provision = subprocess.run(
+        ["bash", str(PROVISIONER)],
+        cwd=consumer,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    consumer_asteval = subprocess.run(
+        [
+            str(consumer / ".venv" / "bin" / "python"),
+            "-c",
+            "import asteval; print(asteval.__version__)",
+        ],
+        cwd=consumer,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    checkov_python = (install_bin / "checkov").resolve().parent / "python"
+    checkov_asteval = subprocess.run(
+        [str(checkov_python), "-c", "import asteval; print(asteval.__version__)"],
+        cwd=consumer,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    checkov_version = subprocess.run(
+        [str(install_bin / "checkov"), "--version"],
+        cwd=consumer,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    checkov_ecdsa = subprocess.run(
+        [
+            str(checkov_python),
+            "-c",
+            "import importlib.metadata as m; print(any(d.metadata['Name'].lower() in {'ecdsa', 'python-ecdsa'} for d in m.distributions()))",
+        ],
+        cwd=consumer,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    checkov_clean = subprocess.run(
+        [
+            str(install_bin / "checkov"),
+            "-d",
+            str(REPO_ROOT / "assurance/fixtures/live-scanners/checkov/compliant"),
+            "--check",
+            "CKV_AWS_20",
+            "--output",
+            "json",
+            "--quiet",
+        ],
+        cwd=consumer,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    checkov_violation = subprocess.run(
+        [
+            str(install_bin / "checkov"),
+            "-d",
+            str(REPO_ROOT / "assurance/fixtures/live-scanners/checkov/violation"),
+            "--check",
+            "CKV_AWS_20",
+            "--output",
+            "json",
+            "--quiet",
+        ],
+        cwd=consumer,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    lock = tomllib.loads(CHECKOV_LOCK.read_text(encoding="utf-8"))
+    locked_asteval = next(row["version"] for row in lock["package"] if row["name"] == "asteval")
+    assert tuple(int(part) for part in locked_asteval.split(".")) >= (1, 0, 9)
+    assert tuple(int(part) for part in locked_asteval.split(".")) < (1, 1)
+    assert (
+        provision.returncode,
+        (install_bin / "checkov").is_file(),
+        consumer_asteval.stdout.strip(),
+        checkov_asteval.stdout.strip(),
+        checkov_version.returncode,
+        checkov_ecdsa.stdout.strip(),
+        scanner_outcome(checkov_clean.returncode, checkov_clean.stdout, "CKV_AWS_20"),
+        scanner_outcome(checkov_violation.returncode, checkov_violation.stdout, "CKV_AWS_20"),
+        (consumer / "uv.lock").read_bytes() == lock_before,
+    ) == (
+        0,
+        True,
+        "1.0.9",
+        locked_asteval,
+        0,
+        "False",
+        "clean",
+        "finding",
+        True,
+    ), (
+        provision.stdout
+        + provision.stderr
+        + consumer_asteval.stderr
+        + checkov_asteval.stderr
+        + checkov_version.stdout
+        + checkov_version.stderr
+        + checkov_ecdsa.stderr
+        + checkov_clean.stdout
+        + checkov_clean.stderr
+        + checkov_violation.stdout
+        + checkov_violation.stderr
+    )
+    assert path_file.read_text(encoding="utf-8").splitlines() == [str(install_bin)]
+    rule_kind, rule_identity, _ = _rule_database("checkov", checkov_clean.stdout, install_bin / "checkov")
+    assert rule_kind == "packaged-checkov-policy-tree"
+    assert rule_identity.startswith("sha256:")
+
+
+def test_make_prepare_exposes_pinned_scanners_to_a_later_process() -> None:
+    environment = os.environ.copy()
+    environment.pop("TC_SCANNER_BIN_DIR", None)
+    environment.pop("TC_SCANNER_PATH_FILE", None)
+    scanner_bin = str(_default_scanner_bin().resolve())
+    environment["PATH"] = os.pathsep.join(
+        entry
+        for entry in environment.get("PATH", "").split(os.pathsep)
+        if str(Path(entry).expanduser().resolve()) != scanner_bin
+    )
+
+    prepared = subprocess.run(
+        ["make", "prepare"],
+        cwd=REPO_ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    evaluated = subprocess.run(
+        ["make", "scanner-versions"],
+        cwd=REPO_ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    catalogue = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))
+
+    assert prepared.returncode == 0, prepared.stdout + prepared.stderr
+    assert evaluated.returncode == 0, evaluated.stdout + evaluated.stderr
+    assert scanner_bin in evaluated.stdout
+    assert catalogue["osv-scanner"]["version"] in evaluated.stdout
+    assert catalogue["checkov"]["version"] in evaluated.stdout
+
+
+def test_real_osv_install_checks_release_hash_and_executes_json_reports(
+    tmp_path: Path,
+) -> None:
+    install_bin = _default_scanner_bin()
+    path_file = tmp_path / "scanner-path"
+    environment = {
+        key: value for key, value in os.environ.items() if key not in {"RUNNER_TEMP", "GITHUB_PATH"}
+    }
+    environment.update(
+        INSTALL_OSV_SCANNER="true",
+        TC_SCANNER_BIN_DIR=str(install_bin),
+        TC_SCANNER_PATH_FILE=str(path_file),
+    )
+    provision = subprocess.run(
+        ["bash", str(PROVISIONER)],
+        cwd=REPO_ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    installed_version = subprocess.run(
+        [str(install_bin / "osv-scanner"), "--version"],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    catalogue = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))
+    outcomes = []
+    for case, expected_finding in (
+        ("compliant", None),
+        ("violation", "GHSA-35jh-r3h4-6jhm"),
+    ):
+        lockfile = REPO_ROOT / "assurance/fixtures/live-scanners/osv" / case / "package-lock.json"
+        report = subprocess.run(
+            [
+                str(install_bin / "osv-scanner"),
+                "--lockfile",
+                str(lockfile),
+                "--format",
+                "json",
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        outcomes.append(scanner_outcome(report.returncode, report.stdout, expected_finding))
+
+    assert provision.returncode == 0, provision.stdout + provision.stderr
+    assert installed_version.returncode == 0
+    assert catalogue["osv-scanner"]["version"] in installed_version.stdout + installed_version.stderr
+    assert outcomes == ["clean", "finding"]
+    assert path_file.read_text(encoding="utf-8").splitlines() == [str(install_bin)]
+
+    scanner_root = install_bin.parent
+    binary = scanner_root / "osv-scanner" / catalogue["osv-scanner"]["version"] / "osv-scanner"
+    machine = platform.machine().lower()
+    architecture = "amd64" if machine in {"amd64", "x86_64"} else "arm64"
+    expected_hash = catalogue["osv-scanner"]["sha256"][f"{platform.system().lower()}_{architecture}"]
+    assert hashlib.sha256(binary.read_bytes()).hexdigest() == expected_hash
+
+    # A damaged owned cache is replaced from the same verified release bytes.
+    source_dir = tmp_path / "release"
+    source_dir.mkdir()
+    asset = f"osv-scanner_{platform.system().lower()}_{architecture}"
+    fixture_asset = source_dir / asset
+    fixture_asset.write_bytes(binary.read_bytes())
+    isolated_bin = tmp_path / "isolated-scanners" / "bin"
+    isolated_environment = environment | {
+        "TC_SCANNER_BIN_DIR": str(isolated_bin),
+        "TC_OSV_RELEASE_BASE_URL": source_dir.as_uri(),
+    }
+    isolated_install = subprocess.run(
+        ["bash", str(PROVISIONER)],
+        cwd=REPO_ROOT,
+        env=isolated_environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    isolated_binary = (
+        isolated_bin.parent / "osv-scanner" / catalogue["osv-scanner"]["version"] / "osv-scanner"
+    )
+    assert isolated_install.returncode == 0, isolated_install.stdout + isolated_install.stderr
+    isolated_binary.write_bytes(b"corrupted scanner cache")
+    repaired = subprocess.run(
+        ["bash", str(PROVISIONER)],
+        cwd=REPO_ROOT,
+        env=isolated_environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert repaired.returncode == 0, repaired.stdout + repaired.stderr
+    assert hashlib.sha256(isolated_binary.read_bytes()).hexdigest() == expected_hash
+
+    # A valid cache avoids all network access, including the release checksum fetch.
+    offline_environment = isolated_environment | {
+        "TC_OSV_RELEASE_BASE_URL": (tmp_path / "missing-source").as_uri(),
+    }
+    cached = subprocess.run(
+        ["bash", str(PROVISIONER)],
+        cwd=REPO_ROOT,
+        env=offline_environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert cached.returncode == 0, cached.stdout + cached.stderr
+
+
+def test_osv_provisioner_rejects_stale_version_and_unowned_cache_paths(
+    tmp_path: Path,
+) -> None:
+    catalogue = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))
+    version = catalogue["osv-scanner"]["version"]
+    bin_dir = tmp_path / "scanner-tools" / "bin"
+    base_environment = {
+        key: value for key, value in os.environ.items() if key not in {"RUNNER_TEMP", "GITHUB_PATH"}
+    }
+    stale = base_environment | {
+        "INSTALL_OSV_SCANNER": "true",
+        "OSV_SCANNER_VERSION": "2.5.0",
+        "TC_SCANNER_BIN_DIR": str(bin_dir),
+    }
+    stale_result = subprocess.run(
+        ["bash", str(PROVISIONER)],
+        cwd=REPO_ROOT,
+        env=stale,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert stale_result.returncode != 0
+    assert "differs from catalogued version" in stale_result.stderr
+
+    external = tmp_path / "external-tools"
+    external.mkdir()
+    sentinel = external / "keep.txt"
+    sentinel.write_text("caller-owned", encoding="utf-8")
+    tool_root = bin_dir.parent / "osv-scanner"
+    tool_root.symlink_to(external, target_is_directory=True)
+    environment = base_environment | {
+        "INSTALL_OSV_SCANNER": "true",
+        "TC_SCANNER_BIN_DIR": str(bin_dir),
+    }
+    refused_symlink = subprocess.run(
+        ["bash", str(PROVISIONER)],
+        cwd=REPO_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert refused_symlink.returncode != 0
+    assert "cannot be a symlink" in refused_symlink.stderr
+    assert sentinel.read_text(encoding="utf-8") == "caller-owned"
+
+    tool_root.unlink()
+    tool_root.mkdir()
+    unowned = tool_root / version
+    unowned.mkdir()
+    keep = unowned / "keep.txt"
+    keep.write_text("unowned", encoding="utf-8")
+    refused_unowned = subprocess.run(
+        ["bash", str(PROVISIONER)],
+        cwd=REPO_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert refused_unowned.returncode != 0
+    assert "without our ownership marker" in refused_unowned.stderr
+    assert keep.read_text(encoding="utf-8") == "unowned"
