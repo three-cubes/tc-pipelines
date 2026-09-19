@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import stat
 import subprocess
 import sys
 import tomllib
@@ -29,6 +30,10 @@ CHECKOV_LOCK = REPO_ROOT / "actions" / "python-gate-body" / "checkov-tool" / "uv
 def _default_scanner_bin() -> Path:
     cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     return cache_home / "tc-pipelines" / "scanners" / "bin"
+
+
+def _catalogued_osv_version() -> str:
+    return json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))["osv-scanner"]["version"]
 
 
 def _lane_owns_provisioning(value: bool | str, *, shard_tier: str) -> bool:
@@ -108,7 +113,9 @@ def test_explicitly_optional_contract_does_not_request_install(tmp_path: Path) -
     assert result.stdout.splitlines() == ["required=false", "version="]
 
 
-def test_required_contract_emits_the_pipeline_catalogued_pin(tmp_path: Path) -> None:
+def test_required_contract_rejects_a_consumer_pin_that_differs_from_the_catalogue(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "pyproject.toml").write_text(
         """
 [tool.tc_fitness.core_checks.osv_scanner_sca]
@@ -120,40 +127,48 @@ lockfiles = ["uv.lock", "pnpm-lock.yaml"]
     )
 
     result = _run(tmp_path)
-    catalogued_version = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))["osv-scanner"]["version"]
+
+    assert result.returncode != 0
+    assert "consumer declares OSV Scanner 2.2.4, but tc-pipelines provisions" in result.stderr
+
+
+def test_required_contract_emits_its_exact_catalogued_pin(tmp_path: Path) -> None:
+    version = _catalogued_osv_version()
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.tc_fitness.core_checks.osv_scanner_sca]\n"
+        "required = true\n"
+        f'scanner_version = "{version}"\n'
+        'lockfiles = ["uv.lock"]\n',
+        encoding="utf-8",
+    )
+
+    result = _run(tmp_path)
 
     assert result.returncode == 0
-    assert result.stdout.splitlines() == [
-        "required=true",
-        f"version={catalogued_version}",
-    ]
+    assert result.stdout.splitlines() == ["required=true", f"version={version}"]
 
 
 def test_dedicated_config_wins_over_pyproject_for_required_contract(
     tmp_path: Path,
 ) -> None:
+    version = _catalogued_osv_version()
     (tmp_path / "pyproject.toml").write_text(
         "[tool.tc_fitness.core_checks.osv_scanner_sca]\nrequired = false\n",
         encoding="utf-8",
     )
     (tmp_path / ".tc-fitness.toml").write_text(
-        """
+        f"""
 [core_checks.osv_scanner_sca]
 required = true
-scanner_version = "2.2.4"
+scanner_version = "{version}"
 lockfiles = ["uv.lock"]
 """.strip(),
         encoding="utf-8",
     )
 
     result = _run(tmp_path)
-    catalogued_version = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))["osv-scanner"]["version"]
-
     assert result.returncode == 0
-    assert result.stdout.splitlines() == [
-        "required=true",
-        f"version={catalogued_version}",
-    ]
+    assert result.stdout.splitlines() == ["required=true", f"version={version}"]
 
 
 @pytest.mark.parametrize(
@@ -164,7 +179,7 @@ lockfiles = ["uv.lock"]
             """
 [core_checks.osv_scanner_sca]
 required = true
-scanner_version = "2.2.4"
+scanner_version = "@CATALOGUED_VERSION@"
 lockfiles = [
   "uv.lock",
 ]
@@ -175,7 +190,7 @@ lockfiles = [
             """
 [tool.tc_fitness.core_checks.osv_scanner_sca]
 required = true
-scanner_version = "2.2.4"
+scanner_version = "@CATALOGUED_VERSION@"
 lockfiles = [
   "uv.lock",
 ]
@@ -184,31 +199,25 @@ lockfiles = [
     ],
 )
 def test_required_contract_accepts_multiline_lockfiles(tmp_path: Path, name: str, contract: str) -> None:
+    contract = contract.replace("@CATALOGUED_VERSION@", _catalogued_osv_version())
     (tmp_path / name).write_text(contract.strip(), encoding="utf-8")
 
     result = _run(tmp_path)
-    catalogued_version = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))["osv-scanner"]["version"]
 
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
         "required=true",
-        f"version={catalogued_version}",
+        f"version={_catalogued_osv_version()}",
     ]
 
 
-def test_contract_reader_has_a_python310_tomli_fallback() -> None:
-    source = SCRIPT.read_text(encoding="utf-8")
-
-    assert "import tomllib" in source
-    assert "import tomli as tomllib" in source
-
-
 def test_python310_tomli_fallback_reads_multiline_contract(tmp_path: Path) -> None:
+    version = _catalogued_osv_version()
     (tmp_path / ".tc-fitness.toml").write_text(
-        """
+        f"""
 [core_checks.osv_scanner_sca]
 required = true
-scanner_version = "2.2.4"
+scanner_version = "{version}"
 lockfiles = [
   "uv.lock",
 ]
@@ -217,13 +226,68 @@ lockfiles = [
     )
 
     result = _run_with_python310_tomli_fallback(tmp_path)
-    catalogued_version = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))["osv-scanner"]["version"]
-
     assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == [
-        "required=true",
-        f"version={catalogued_version}",
-    ]
+    assert result.stdout.splitlines() == ["required=true", f"version={version}"]
+
+
+def test_provisioner_runs_under_python310_with_its_tomli_dependency(
+    tmp_path: Path,
+) -> None:
+    scanner_bin = _default_scanner_bin()
+    current_environment = os.environ.copy()
+    current_environment.update(
+        INSTALL_CHECKOV_SCANNER="true",
+        INSTALL_OSV_SCANNER="true",
+        TC_SCANNER_BIN_DIR=str(scanner_bin),
+    )
+    warm_cache = subprocess.run(
+        ["bash", str(PROVISIONER)],
+        cwd=REPO_ROOT,
+        env=current_environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert warm_cache.returncode == 0, warm_cache.stdout + warm_cache.stderr
+
+    python310_environment = tmp_path / "python310"
+    create_environment = subprocess.run(
+        ["uv", "venv", "--python", "3.10", str(python310_environment)],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert create_environment.returncode == 0, create_environment.stdout + create_environment.stderr
+    python310 = python310_environment / "bin" / "python"
+    install_tomli = subprocess.run(
+        ["uv", "pip", "install", "--python", str(python310), "tomli==2.3.0"],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert install_tomli.returncode == 0, install_tomli.stdout + install_tomli.stderr
+    environment = current_environment | {
+        "PATH": os.pathsep.join((str(python310_environment / "bin"), current_environment["PATH"]))
+    }
+
+    result = subprocess.run(
+        ["bash", str(PROVISIONER)],
+        cwd=REPO_ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Installed isolated Checkov" in result.stdout
+    assert "Installed verified OSV Scanner" in result.stdout
+    interpreter_version = subprocess.run(
+        [str(python310), "--version"], capture_output=True, text=True, check=True
+    )
+    assert "Python 3.10" in interpreter_version.stdout + interpreter_version.stderr
 
 
 @pytest.mark.parametrize("required", ['"true"', "1", '"false"'])
@@ -249,10 +313,11 @@ def test_malformed_required_value_cannot_silently_disable_scanning(tmp_path: Pat
 def test_required_contract_rejects_missing_or_malformed_lockfiles(
     tmp_path: Path, lockfiles_line: str
 ) -> None:
+    version = _catalogued_osv_version()
     (tmp_path / "pyproject.toml").write_text(
         "[tool.tc_fitness.core_checks.osv_scanner_sca]\n"
         "required = true\n"
-        'scanner_version = "2.2.4"\n' + lockfiles_line,
+        f'scanner_version = "{version}"\n' + lockfiles_line,
         encoding="utf-8",
     )
 
@@ -599,6 +664,20 @@ def test_real_osv_install_checks_release_hash_and_executes_json_reports(
         check=False,
     )
     assert repaired.returncode == 0, repaired.stdout + repaired.stderr
+    assert hashlib.sha256(isolated_binary.read_bytes()).hexdigest() == expected_hash
+
+    # A verified cache entry with damaged executable metadata is repaired in place.
+    isolated_binary.chmod(0o644)
+    mode_repaired = subprocess.run(
+        ["bash", str(PROVISIONER)],
+        cwd=REPO_ROOT,
+        env=isolated_environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert mode_repaired.returncode == 0, mode_repaired.stdout + mode_repaired.stderr
+    assert stat.S_IMODE(isolated_binary.stat().st_mode) == 0o755
     assert hashlib.sha256(isolated_binary.read_bytes()).hexdigest() == expected_hash
 
     # A valid cache avoids all network access, including the release checksum fetch.

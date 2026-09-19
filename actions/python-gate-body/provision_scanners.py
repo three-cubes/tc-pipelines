@@ -12,11 +12,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, NoReturn
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10; installed by the shared gate action.
+    import tomli as tomllib
 
 HERE = Path(__file__).resolve().parent
 CHECKOV_PROJECT = HERE / "checkov-tool"
@@ -250,6 +254,9 @@ def _install_osv(root: Path, bin_dir: Path) -> None:
             staged.write_bytes(downloaded.read_bytes())
             staged.chmod(0o755)
             staged.replace(binary)
+    else:
+        # A complete downloaded cache may lose mode bits during restore/copy.
+        binary.chmod(0o755)
     _verify_version(binary, "osv-scanner", version)
     _publish_executable(binary, bin_dir, "osv-scanner", root)
     print(f"Installed verified OSV Scanner {version} for {platform_key} in {binary}")

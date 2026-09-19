@@ -77,6 +77,14 @@ def emit(repo_root: Path) -> int:
     if EXACT_VERSION.fullmatch(version) is None:
         print("catalogued OSV Scanner version must be exact x.y.z", file=sys.stderr)
         return 1
+    if declared_version != version:
+        print(
+            "consumer declares OSV Scanner "
+            f"{declared_version}, but tc-pipelines provisions {version}; "
+            "update scanner_version in the consumer SCA contract to match",
+            file=sys.stderr,
+        )
+        return 1
     lockfiles = contract.get("lockfiles")
     if (
         not isinstance(lockfiles, list)
