@@ -13,7 +13,7 @@ description: |
   Usage (replace {{ ... }} with the literal GitHub-Actions expression
   syntax — it's been de-templated here so the action.yml parser doesn't try
   to evaluate the docstring):
-    - uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@14ad846e433db36ad636aa05216860411093dea6 # v2.2.1
+    - uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@5a07e4b3f738ebd1081f70f545b446df06cedb33 # v2.2.1
       with:
         client-id:       {{ vars.AZURE_CLIENT_ID }}
         tenant-id:       {{ vars.AZURE_TENANT_ID }}
