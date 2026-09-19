@@ -30,6 +30,7 @@ def test_quality_checkout_is_bound_to_the_pr_head_not_the_merge_candidate() -> N
     assert "github.event.pull_request.head.sha" in candidate["env"]["EVENT_HEAD"]
     assert "REQUESTED_HEAD" not in candidate["env"]
     action = yaml.safe_load((ROOT / "actions/python-gate-body/action.yml").read_text())
+    assert action["inputs"]["candidate-head-sha"]["required"] is True
     checkout = next(
         step for step in action["runs"]["steps"] if step["name"] == "Checkout"
     )
@@ -62,6 +63,10 @@ def test_preparation_uses_only_the_closed_trusted_ruff_policy() -> None:
         in prepare["run"]
     )
     assert prepare["run"].count("uvx --from ruff==0.16.8 ruff") == 2
+    names = [step.get("name") for step in workflow["jobs"]["preparation"]["steps"]]
+    assert "Install trusted uv for formatter preparation" in names
+    assert "Locked uv install" not in names
+    assert "pnpm install" not in names
 
 
 def test_writer_bootstraps_private_tools_and_uses_only_the_fixed_policy() -> None:

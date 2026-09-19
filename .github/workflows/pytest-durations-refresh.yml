@@ -163,6 +163,7 @@ jobs:
           write-changed-files: false
           changed-files-path: ""
           run-no-attribution: false
+          candidate-head-sha: ${{ github.event.pull_request.head.sha || github.sha }}
           # The composite checks out before it runs pre-steps, so clearing the
           # map has to happen HERE — a step ahead of the composite would be undone
           # by that checkout. A consumer commits its map, so the file is on disk

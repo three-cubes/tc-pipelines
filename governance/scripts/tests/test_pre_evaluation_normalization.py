@@ -72,8 +72,9 @@ def test_reusable_prepares_once_and_proves_a_fixed_point_before_evaluation() -> 
         "ruff format --force-exclude --line-length 110 --target-version py312"
         in first["run"]
     )
-    assert names.index("Locked uv install") < names.index("Prepare candidate")
-    assert names.index("pnpm install") < names.index("Prepare candidate")
+    assert names.index("Install trusted uv for formatter preparation") < names.index(
+        "Prepare candidate"
+    )
     assert names.index("Capture committed candidate state") < names.index(
         "Prepare candidate"
     )
