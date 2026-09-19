@@ -16,7 +16,7 @@ description: |
   tag has passed.
 
   Usage:
-    - uses: three-cubes/tc-pipelines/.github/actions/snapshot-azure-vm-disk@4dd9cc3b4ed882686d776073da43b959289df47a # v2.2.1
+    - uses: three-cubes/tc-pipelines/.github/actions/snapshot-azure-vm-disk@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1
       with:
         resource-group: RG-AGENTS-CORE
         vm-names: 'vm-openclaw,vm-hermes-poc'
