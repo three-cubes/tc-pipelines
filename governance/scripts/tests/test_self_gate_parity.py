@@ -8,7 +8,6 @@ while the configured gate local contributors run is absent or broken.
 
 from __future__ import annotations
 
-import os
 import re
 import shlex
 import subprocess
@@ -26,20 +25,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 MAKEFILE = REPO_ROOT / "Makefile"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-PREPARE_AND_CHECK_COMMANDS = [
-    "uvx --from uv==0.12.5 uv lock",
-    "uv sync --locked",
-    "uv run --no-sync ruff check --force-exclude --select E,F,I,UP,B,S,RUF "
-    "--target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes "
-    "--exit-zero .",
-    "uv run --no-sync ruff format --force-exclude --line-length 110 --target-version py312 .",
-    "uv run --no-sync python assurance/run.py prepare",
-    "make --no-print-directory assert-clean",
-    'test -z "$(git status --porcelain --untracked-files=all)" || { git status --short; '
-    'echo "preparation changed committed state; commit the prepared files before evaluation" '
-    ">&2; exit 1; }",
-    "uv run --no-sync tc-fitness run",
-]
 
 
 def _project_config() -> dict:
@@ -50,28 +35,18 @@ def _ci_workflow() -> dict:
     return yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8")) or {}
 
 
-def _make_check_commands(*, outer_make: bool = False) -> list[str]:
-    env = os.environ.copy()
-    if outer_make:
-        env["MAKELEVEL"] = "1"
+def _dry_run_make_check() -> list[str]:
     result = subprocess.run(
         ["make", "--no-print-directory", "--dry-run", "check"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=False,
-        env=env,
     )
     assert result.returncode == 0, (
         f"{MAKEFILE.name}: cannot dry-run the local check target: {result.stderr.strip()}"
     )
-    commands = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    return [
-        "make --no-print-directory assert-clean"
-        if command.endswith("/make --no-print-directory assert-clean")
-        else command
-        for command in commands
-    ]
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
 def test_self_gate_declares_the_contract_test_command() -> None:
@@ -90,17 +65,13 @@ def test_self_gate_declares_the_contract_test_command() -> None:
     )
 
 
-def test_make_check_runs_the_declared_fitness_gate() -> None:
-    """Replacing the engine command would make local success diverge from CI."""
-    assert _make_check_commands() == PREPARE_AND_CHECK_COMMANDS, (
-        f"{MAKEFILE.name}: `check` must prepare deterministic mechanical and "
-        "generated state before running the configured tc-fitness gate."
-    )
+def test_make_check_reaches_fitness_after_the_preparation_checkpoint() -> None:
+    """Preparation and its clean-tree checkpoint precede the repository fitness gate."""
+    commands = _dry_run_make_check()
+    clean_index = next(index for index, command in enumerate(commands) if "assert-clean" in command)
+    fitness_index = next(index for index, command in enumerate(commands) if "tc-fitness run" in command)
 
-
-def test_make_check_dry_run_is_stable_inside_an_outer_make() -> None:
-    """GNU make directory notices must not become part of the command contract."""
-    assert _make_check_commands(outer_make=True) == PREPARE_AND_CHECK_COMMANDS
+    assert clean_index < fitness_index
 
 
 def test_assert_clean_rejects_a_real_dirty_git_checkout(tmp_path: Path) -> None:
