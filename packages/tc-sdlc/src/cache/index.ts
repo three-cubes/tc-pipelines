@@ -105,6 +105,15 @@ export function restoreEvaluationCache(
   if (canonicalJson(manifest.candidate) !== canonicalJson(candidate)) {
     throw new SdlcError("CACHE_CANDIDATE_MISMATCH", "cache entry does not match candidate");
   }
+  if (
+    canonicalJson(evaluationCandidate(manifest.receipt)) !==
+    canonicalJson(manifest.candidate)
+  ) {
+    throw new SdlcError(
+      "CACHE_CANDIDATE_MISMATCH",
+      "cache manifest candidate does not match its evaluation receipt",
+    );
+  }
   reusable(manifest.receipt);
   const filesRoot = resolve(entry, "files");
   const expected = receiptOutputs(manifest.receipt);

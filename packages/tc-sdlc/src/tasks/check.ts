@@ -50,7 +50,6 @@ async function evaluate(
   let treeMutations: readonly TreeMutation[] = [];
   let reason: string | null = null;
   try {
-    source = sourceIdentity(options.root);
     const full = plan(options);
     const graph = phaseGraph(full, "evaluate");
     const selected = all
@@ -83,11 +82,13 @@ async function evaluate(
         })
       );
     };
-    if (
-      graph.tasks.some(
-        (task) => selected.has(task.key) && requiresPreparation(task.key),
-      )
-    ) {
+    const preparationRequired = graph.tasks.some(
+      (task) => selected.has(task.key) && requiresPreparation(task.key),
+    );
+    source = sourceIdentity(options.root, {
+      allowPreparedTree: preparationRequired,
+    });
+    if (preparationRequired) {
       const preparation = options.preparationReceipt;
       if (
         preparation === undefined ||

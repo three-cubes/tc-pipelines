@@ -83,10 +83,14 @@ evaluate-to-evaluate dependencies remain in the graph and are enforced by
 
 ### Evaluation and source identity
 
-Evaluation requires a real Git commit and an empty porcelain status including
-untracked files. It binds commit, tree digest, declaration, catalogue, lock,
-environment class, producer, task identity, canonical input inventory, trust
-boundary and output inventory. `check` uses dependency-closed
+Evaluation requires a real Git commit and ordinarily requires an empty
+porcelain status including untracked files. A selected evaluate task whose
+dependency closure crosses the prepare boundary may instead consume the exact
+dirty tree authorised by a succeeded fixed-point `PreparationReceipt`; the
+current complete tree digest, declaration, catalogue and lock must all match
+before evaluation starts. It binds commit, tree digest, declaration, catalogue,
+lock, environment class, producer, task identity, canonical input inventory,
+trust boundary and output inventory. `check` uses dependency-closed
 `selectAffected`; `checkAll` passes every evaluate task exactly once to the same
 scheduler. Any tracked, untracked, mode, symlink or content mutation records a
 failed evaluation receipt.
@@ -246,3 +250,62 @@ Both diff checks exit 0 without output and no package-local lock exists.
 - Controller-owned `docs/IMPLEMENTATION.md` and progress files are unchanged.
 
 No known Task 4 acceptance gap or implementation blocker remains.
+
+## Independent-review remediation
+
+The first independent review reproduced two blockers. Both were converted into
+built-public regression tests before implementation changes.
+
+RED:
+
+```text
+pnpm --filter @three-cubes/tc-sdlc build
+pnpm --filter @three-cubes/tc-sdlc exec vitest run test/task4.test.ts
+```
+
+Exit 1: 14/16 passed. A genuine fixed-point prepare performed after the fixture
+commit left its declared generated output dirty, and `check` failed early with
+`dirty_source_tree` instead of validating the exact preparation receipt. A
+forged cache manifest retained the expected manifest candidate but substituted
+a receipt containing an injected output; restore accepted it because it never
+derived the candidate from the receipt.
+
+GREEN changes:
+
+- evaluation now computes the selected dependency closure before source
+  admission, permits a dirty tree only when preparation is required, and then
+  requires the succeeded fixed-point receipt to match the complete current tree,
+  declaration, catalogue and lock before invoking `runGraph`;
+- cache restore independently derives `evaluationCandidate(manifest.receipt)`
+  and rejects any mismatch with the manifest candidate before enumerating or
+  writing cached outputs;
+- the public tests prove the exact prepared dirty tree succeeds, while edits to
+  either a declared input or the prepared output fail with
+  `preparation_evidence_invalid`;
+- the cache test injects a second output and forged receipt into an otherwise
+  valid entry, proves rejection happens before either output is written, then
+  restores the genuine manifest and proves valid restoration still succeeds.
+
+Focused final verification:
+
+```text
+pnpm --filter @three-cubes/tc-sdlc build
+pnpm --filter @three-cubes/tc-sdlc exec vitest run test/task4.test.ts
+```
+
+Exit 0: 1 file and 16 tests passed.
+
+Complete package and frozen-lock verification:
+
+```text
+corepack pnpm install --frozen-lockfile
+corepack pnpm build
+corepack pnpm test
+git diff --exit-code -- pnpm-lock.yaml
+```
+
+Exit 0: 4 files and 100 tests passed; the root lockfile is unchanged.
+
+Packed-consumer verification imported `check`, `prepare`, cache and candidate
+APIs from a clean tarball installation and reported `buildGraph/2` and
+`runGraph/3`. `git diff --check` also exited 0.

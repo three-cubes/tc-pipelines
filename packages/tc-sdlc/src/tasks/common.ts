@@ -115,7 +115,10 @@ export function taskOutputs(
   );
 }
 
-export function sourceIdentity(root: string): Readonly<{
+export function sourceIdentity(
+  root: string,
+  options: Readonly<{ allowPreparedTree?: boolean }> = {},
+): Readonly<{
   commit: string;
   treeDigest: string;
 }> {
@@ -136,7 +139,7 @@ export function sourceIdentity(root: string): Readonly<{
       `could not resolve source identity: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  if (status.length > 0) {
+  if (status.length > 0 && options.allowPreparedTree !== true) {
     throw new SdlcError("SOURCE_DIRTY", "source tree contains tracked or untracked changes");
   }
   return { commit, treeDigest: digest(snapshotFiles(root)) };

@@ -6,6 +6,7 @@ import {
   lstatSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -448,6 +449,34 @@ describe("tc-sdlc Task 4", () => {
       cache,
       receipt,
     );
+    const manifestPath = join(cache, entry.key, "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const forged = structuredClone(manifest);
+    const injectedPath = join(cache, entry.key, "files", "injected.txt");
+    writeFileSync(injectedPath, "injected");
+    chmodSync(injectedPath, 0o644);
+    forged.receipt.tasks[0].outputs.push({
+      path: "injected.txt",
+      digest: (sdlc as Record<string, any>).bytesDigest("injected"),
+      mode: 0o644,
+      symlink: null,
+    });
+    writeFileSync(manifestPath, JSON.stringify(forged));
+    writeFileSync(join(root, "result.txt"), "unchanged-on-rejection");
+    expect(() =>
+      (sdlc as Record<string, any>).restoreEvaluationCache(
+        root,
+        cache,
+        entry.key,
+        candidate,
+      ),
+    ).toThrowError(expect.objectContaining({ code: "CACHE_CANDIDATE_MISMATCH" }));
+    expect(existsSync(join(root, "injected.txt"))).toBe(false);
+    expect(readFileSync(join(root, "result.txt"), "utf8")).toBe(
+      "unchanged-on-rejection",
+    );
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    rmSync(injectedPath);
     writeFileSync(join(root, "result.txt"), "corrupt");
     expect(
       (sdlc as Record<string, any>).restoreEvaluationCache(
@@ -583,13 +612,19 @@ describe("tc-sdlc Task 4", () => {
         inputs: ["input.txt", "check.mjs"],
       }),
     });
+    initialiseGit(root);
     const preparation = await (sdlc as Record<string, any>).prepare({
       ...input,
       receiptPath: join(dirname(root), `${root.split("/").at(-1)}-prepare.json`),
       runOptions: { capacity: { cpu: 1, memoryMiB: 128 } },
     });
     expect(preparation.status).toBe("succeeded");
-    initialiseGit(root);
+    expect(
+      execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+        cwd: root,
+        encoding: "utf8",
+      }),
+    ).toContain("generated.txt");
     const observed: Record<string, unknown>[] = [];
     const evaluation = (preparationReceipt: unknown, suffix: string) =>
       (sdlc as Record<string, any>).check({
@@ -623,14 +658,18 @@ describe("tc-sdlc Task 4", () => {
       reason: "preparation_evidence_invalid",
     });
     expect(observed).toEqual([]);
-    await expect(evaluation(preparation, "valid")).resolves.toMatchObject({
-      status: "succeeded",
-    });
+    await expect(
+      evaluation(preparation, "valid-prepared-tree"),
+    ).resolves.toMatchObject({ status: "succeeded", reason: null });
 
     writeFileSync(join(root, "input.txt"), "two");
-    execFileSync("git", ["add", "input.txt"], { cwd: root });
-    execFileSync("git", ["commit", "-qm", "drift"], { cwd: root });
-    await expect(evaluation(preparation, "stale-tree")).resolves.toMatchObject({
+    await expect(evaluation(preparation, "stale-input")).resolves.toMatchObject({
+      status: "failed",
+      reason: "preparation_evidence_invalid",
+    });
+    writeFileSync(join(root, "input.txt"), "one");
+    writeFileSync(join(root, "generated.txt"), "post-receipt-drift");
+    await expect(evaluation(preparation, "stale-output")).resolves.toMatchObject({
       status: "failed",
       reason: "preparation_evidence_invalid",
     });
