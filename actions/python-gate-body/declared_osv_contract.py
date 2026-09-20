@@ -1,8 +1,9 @@
-"""Emit the consumer-declared OSV install contract for the composite action."""
+"""Validate the consumer's SCA opt-in and emit tc-pipelines' pinned OSV version."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 EXACT_VERSION = re.compile(r"\d+\.\d+\.\d+")
+SCANNER_CATALOGUE = Path(__file__).with_name("scanner-versions.json")
 
 
 def _config_path(repo_root: Path) -> tuple[Path, tuple[str, ...]] | None:
@@ -56,10 +58,30 @@ def emit(repo_root: Path) -> int:
         print("required=false")
         print("version=")
         return 0
-    version = str(contract.get("scanner_version", "")).strip()
-    if EXACT_VERSION.fullmatch(version) is None:
+    declared_version = str(contract.get("scanner_version", "")).strip()
+    if EXACT_VERSION.fullmatch(declared_version) is None:
         print(
             "required OSV SCA contract must declare an exact scanner_version (x.y.z)",
+            file=sys.stderr,
+        )
+        return 1
+    # Existing fitness declarations carry a scanner_version field. The
+    # executable pin belongs to tc-pipelines so consumers cannot drift to a
+    # stale binary independently of this provisioner.
+    try:
+        catalogue = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))
+        version = catalogue["osv-scanner"]["version"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+        print(f"cannot read canonical OSV Scanner version: {error}", file=sys.stderr)
+        return 1
+    if EXACT_VERSION.fullmatch(version) is None:
+        print("catalogued OSV Scanner version must be exact x.y.z", file=sys.stderr)
+        return 1
+    if declared_version != version:
+        print(
+            "consumer declares OSV Scanner "
+            f"{declared_version}, but tc-pipelines provisions {version}; "
+            "update scanner_version in the consumer SCA contract to match",
             file=sys.stderr,
         )
         return 1

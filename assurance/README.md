@@ -146,7 +146,8 @@ remain unverified until the reviewed branch is pushed and these cases run.
 `live-scanner-qualification.yml` is the separate GitHub-hosted admission
 boundary for the Task 3 Checkov and OSV Scanner cases. It checks out the exact
 40-hex candidate, uses the one canonical `python-gate-body` scanner provisioner
-to install Checkov `3.2.531` and OSV Scanner `2.2.4`, then records compliant and
+to install the versions declared in
+`actions/python-gate-body/scanner-versions.json`, then records compliant and
 violation results for each. It retains an attempt-specific artifact named
 `live-scanner-receipts-<run>-<attempt>`.
 
@@ -160,10 +161,34 @@ rejects a missing receipt, stale attempt, wrong tool pin, fixture replacement,
 or any tc-fitness `protocol-unit` ledger. A generic local adapter receipt cannot
 be substituted for this schema.
 
-The workflow is intentionally not a local command and is not included in normal
-PR fan-in. Local tests prove the writer refuses local execution; they do not
-claim a scanner result. A GitHub-hosted execution on the reviewed commit is
-still required before these receipts can be used by release admission.
+The workflow is a GitHub-hosted admission boundary and is not included in normal
+PR fan-in. The same repo-owned provision command also runs on macOS and Linux:
+
+```sh
+make prepare
+make scanner-versions
+```
+
+`make prepare` provisions both scanners before evaluation and exports their
+bin directory through `PATH` for all subsequent Make targets. By default Make
+uses `${XDG_CACHE_HOME:-$HOME/.cache}/tc-pipelines/scanners/bin`; set
+`TC_SCANNER_BIN_DIR` to an absolute `.../bin` directory to override it in a
+sandbox. `make scanner-versions` resolves and runs the provisioned executables
+in a later process. For direct scanner commands outside Make, add the same bin
+directory to the interactive shell's `PATH`. Set `TC_SCANNER_PATH_FILE` when a
+caller needs the provisioner to register that directory for later processes
+(GitHub maps this to `GITHUB_PATH`). Local scanner tools live in the versioned
+XDG cache, outside the checkout. OSV assets are checked
+against the official release hashes pinned in
+`scanner-versions.json`. Checkov uses its own
+locked uv environment; the consumer `.venv` and lock are never modified, and
+the tool lock enforces `asteval>=1.0.9,<1.1` without `ecdsa`.
+
+The required local contract tests install both pinned binaries into the owned
+versioned cache, execute each scanner against real compliant and violation
+fixtures, and verify clean/finding reports. Those results prove local scanner
+behavior only. The workflow remains the authority for a hosted execution
+receipt; a local result cannot be relabelled or used as that receipt.
 
 ## Disposable consumers
 

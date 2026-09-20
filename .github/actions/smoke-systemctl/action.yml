@@ -5,7 +5,7 @@ description: |
   is not `active`.
 
   Usage:
-    - uses: three-cubes/tc-pipelines/.github/actions/smoke-systemctl@8c4d058013b911b80177ac73636a925d911dc1ed # v2.2.1
+    - uses: three-cubes/tc-pipelines/.github/actions/smoke-systemctl@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1
       with:
         resource-group: RG-AGENTS-CORE
         vm-name: vm-openclaw

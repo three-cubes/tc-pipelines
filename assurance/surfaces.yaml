@@ -39,7 +39,7 @@ surfaces:
     hosted:
       boundary: assurance-harness
       case: null
-      dependencies: ['assurance/live_scanners.py', 'assurance/fixtures/live-scanners/**', 'actions/python-gate-body/provision-scanners.sh', 'uv.lock', 'pyproject.toml']
+      dependencies: ['assurance/live_scanners.py', 'assurance/fixtures/live-scanners/**', 'actions/python-gate-body/**', 'uv.lock', 'pyproject.toml']
       release_probe: null
     required:
       pr: [structural, hermetic]
