@@ -1,15 +1,19 @@
 import { canonicalJson, digest } from "../canonical.js";
+import { validateCatalogue } from "../catalogue/index.js";
 import { SdlcError } from "../errors.js";
 import { assertCurrentLock, validateLock } from "../lock/index.js";
 import { buildPresetTasks } from "../preset/index.js";
 import { validateDeclaration } from "../schema/declaration.js";
 import type {
-  GraphBuildContext,
+  GraphLockBindingOptions,
   GraphTask,
+  PathCaseSensitivity,
+  ReleaseCatalogue,
   SdlcDeclaration,
   SdlcGraph,
   SdlcLock,
   TaskIdentity,
+  TaskInputDigests,
 } from "../schema/types.js";
 import { assertRelativePath, normalisePath } from "./path.js";
 import {
@@ -19,6 +23,51 @@ import {
 } from "./selector.js";
 
 export { taskIdentity } from "./identity.js";
+
+type GraphAuthority = Readonly<{
+  catalogue: ReleaseCatalogue;
+  inputs: TaskInputDigests;
+  pathCaseSensitivity: PathCaseSensitivity;
+}>;
+
+const graphAuthorities = new WeakMap<SdlcLock, GraphAuthority>();
+const graphPathCaseSensitivities = new WeakMap<SdlcGraph, PathCaseSensitivity>();
+
+function nativePathCaseSensitivity(): PathCaseSensitivity {
+  return process.platform === "darwin" || process.platform === "win32"
+    ? "insensitive"
+    : "sensitive";
+}
+
+export function bindGraphLock(
+  declarationValue: SdlcDeclaration,
+  lockValue: SdlcLock,
+  catalogueValue: ReleaseCatalogue,
+  inputs: TaskInputDigests,
+  options: GraphLockBindingOptions = {},
+): SdlcLock {
+  validateDeclaration(declarationValue);
+  const lock = validateLock(structuredClone(lockValue));
+  const catalogue = validateCatalogue(structuredClone(catalogueValue));
+  const pathCaseSensitivity =
+    options.pathCaseSensitivity ?? nativePathCaseSensitivity();
+  if (
+    pathCaseSensitivity !== "sensitive" &&
+    pathCaseSensitivity !== "insensitive"
+  ) {
+    throw new SdlcError(
+      "GRAPH_CONTEXT_INVALID",
+      "path case sensitivity must be sensitive or insensitive",
+    );
+  }
+  assertCurrentLock(lock, declarationValue, catalogue);
+  graphAuthorities.set(lock, {
+    catalogue,
+    inputs: structuredClone(inputs),
+    pathCaseSensitivity,
+  });
+  return lock;
+}
 
 function assertUniqueIdentities(
   values: readonly string[],
@@ -180,12 +229,12 @@ function sorted(values: readonly string[]): readonly string[] {
 export function buildGraph(
   declarationValue: SdlcDeclaration,
   lockValue: SdlcLock,
-  context: GraphBuildContext,
 ): SdlcGraph {
   const declaration = validateDeclaration(declarationValue);
   const lock = validateLock(lockValue);
   validateGraphDeclaration(declarationValue, declaration);
   const declarationDigest = digest(declaration);
+  const context = graphAuthorities.get(lockValue);
   if (
     context === undefined ||
     context.catalogue === undefined ||
@@ -211,13 +260,18 @@ export function buildGraph(
   );
   assertAcyclic(tasks);
 
-  return {
+  const graph: SdlcGraph = {
     schema: "tc.sdlc/graph/v1",
     declarationDigest,
     lockDigest,
     projects,
     tasks,
   };
+  graphPathCaseSensitivities.set(
+    graph,
+    context.pathCaseSensitivity ?? nativePathCaseSensitivity(),
+  );
+  return graph;
 }
 
 export function serialiseGraph(graph: SdlcGraph): string {
@@ -257,19 +311,23 @@ function selectorWitnesses(selector: string): readonly string[] {
   return witnesses;
 }
 
-function selectorsOverlap(left: string, right: string): boolean {
+function selectorsOverlap(
+  left: string,
+  right: string,
+  caseSensitivity: PathCaseSensitivity,
+): boolean {
   if (!hasWildcard(left)) {
-    return selectorPattern(right).test(left);
+    return selectorPattern(right, caseSensitivity).test(left);
   }
   if (!hasWildcard(right)) {
-    return selectorPattern(left).test(right);
+    return selectorPattern(left, caseSensitivity).test(right);
   }
   return (
     selectorWitnesses(left).some((witness) =>
-      selectorPattern(right).test(witness),
+      selectorPattern(right, caseSensitivity).test(witness),
     ) ||
     selectorWitnesses(right).some((witness) =>
-      selectorPattern(left).test(witness),
+      selectorPattern(left, caseSensitivity).test(witness),
     )
   );
 }
@@ -277,16 +335,18 @@ function selectorsOverlap(left: string, right: string): boolean {
 function taskConsumesGeneratedSelector(
   task: GraphTask,
   outputSelector: string,
+  caseSensitivity: PathCaseSensitivity,
 ): boolean {
   return (
     task.inputs.some((input) =>
       selectorsOverlap(
         outputSelector,
         resolveProjectPath(task.projectRoot, input),
+        caseSensitivity,
       ),
     ) ||
     (task.sharedInputs ?? []).some((input) =>
-      selectorsOverlap(outputSelector, input),
+      selectorsOverlap(outputSelector, input, caseSensitivity),
     )
   );
 }
@@ -295,6 +355,10 @@ export function selectAffected(
   graph: SdlcGraph,
   changedPaths: readonly string[],
 ): readonly TaskIdentity[] {
+  const caseSensitivity =
+    graphPathCaseSensitivities.get(graph) ?? nativePathCaseSensitivity();
+  const pathIdentity = (path: string): string =>
+    caseSensitivity === "insensitive" ? path.toLowerCase() : path;
   const tasksByKey = new Map(graph.tasks.map((task) => [task.key, task]));
   const consumers = new Map<string, string[]>();
   for (const task of graph.tasks) {
@@ -309,9 +373,9 @@ export function selectAffected(
   const pendingPaths: string[] = [];
   const seenPaths = new Set<string>();
   const enqueuePath = (path: string): void => {
-    const pathIdentity = path.toLowerCase();
-    if (!seenPaths.has(pathIdentity)) {
-      seenPaths.add(pathIdentity);
+    const identity = pathIdentity(path);
+    if (!seenPaths.has(identity)) {
+      seenPaths.add(identity);
       pendingPaths.push(path);
     }
   };
@@ -331,7 +395,13 @@ export function selectAffected(
       const outputSelector = resolveProjectPath(task.projectRoot, output);
       enqueuePath(outputSelector);
       for (const candidate of graph.tasks) {
-        if (taskConsumesGeneratedSelector(candidate, outputSelector)) {
+        if (
+          taskConsumesGeneratedSelector(
+            candidate,
+            outputSelector,
+            caseSensitivity,
+          )
+        ) {
           selectTask(candidate.key);
         }
       }
@@ -351,15 +421,15 @@ export function selectAffected(
     if (changedPath === undefined) {
       break;
     }
-    const pathIdentity = changedPath.toLowerCase();
-    if (pathIdentity === "sdlc.yaml" || pathIdentity === "tc-sdlc.lock") {
+    const identity = pathIdentity(changedPath);
+    if (identity === "sdlc.yaml" || identity === "tc-sdlc.lock") {
       for (const task of graph.tasks) {
         selectTask(task.key);
       }
       continue;
     }
     for (const task of graph.tasks) {
-      if (taskConsumesPath(task, changedPath)) {
+      if (taskConsumesPath(task, changedPath, caseSensitivity)) {
         selectTask(task.key);
       }
     }

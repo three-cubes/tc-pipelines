@@ -79,9 +79,10 @@ export type TaskInputDigests = Readonly<
   Record<string, readonly InputDigest[]>
 >;
 
-export type GraphBuildContext = Readonly<{
-  catalogue: ReleaseCatalogue;
-  inputs: TaskInputDigests;
+export type PathCaseSensitivity = "sensitive" | "insensitive";
+
+export type GraphLockBindingOptions = Readonly<{
+  pathCaseSensitivity?: PathCaseSensitivity;
 }>;
 
 export type TaskDeclaration = Readonly<{

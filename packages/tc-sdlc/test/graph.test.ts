@@ -57,14 +57,19 @@ function lockedGraph(
   input: ReturnType<typeof declaration>,
   inputs: Readonly<Record<string, readonly Record<string, string>[]>> =
     emptyTaskInputs(input),
+  options?: Readonly<{ pathCaseSensitivity: "sensitive" | "insensitive" }>,
 ) {
   const catalogue = sdlc.createReleaseCatalogue(release);
   const lock = sdlc.resolveLock(input as never, catalogue);
+  const boundLock = (sdlc as Record<string, any>).bindGraphLock(
+    input,
+    lock,
+    catalogue,
+    inputs,
+    options,
+  );
   return {
-    graph: (sdlc as Record<string, any>).buildGraph(input, lock, {
-      catalogue,
-      inputs,
-    }),
+    graph: (sdlc as Record<string, any>).buildGraph(input, boundLock),
     serialise: (sdlc as Record<string, any>).serialiseGraph as (value: unknown) => string,
   };
 }
@@ -375,13 +380,16 @@ describe("tc-sdlc graph", () => {
     const initial = declaration([{ name: "api", root: "services/api" }]);
     const catalogue = sdlc.createReleaseCatalogue(release);
     const staleLock = sdlc.resolveLock(initial as never, catalogue);
+    const boundLock = (sdlc as Record<string, any>).bindGraphLock(
+      initial,
+      staleLock,
+      catalogue,
+      emptyTaskInputs(initial),
+    );
     const changed = declaration([{ name: "api", root: "services/renamed-api" }]);
 
     expect(() =>
-      (sdlc as Record<string, any>).buildGraph(changed, staleLock, {
-        catalogue,
-        inputs: emptyTaskInputs(changed),
-      }),
+      (sdlc as Record<string, any>).buildGraph(changed, boundLock),
     ).toThrowError(expect.objectContaining({ code: "LOCK_STALE" }));
   });
 
@@ -491,6 +499,25 @@ describe("tc-sdlc graph", () => {
     ).toThrowError(expect.objectContaining({ code: "GRAPH_CONTEXT_INVALID" }));
   });
 
+  test("builds through the public two-argument graph API after binding planning authority", () => {
+    const input = declaration([{ name: "api", root: "services/api" }]);
+    const catalogue = sdlc.createReleaseCatalogue(release);
+    const lock = sdlc.resolveLock(input as never, catalogue);
+    const boundLock = (sdlc as Record<string, any>).bindGraphLock(
+      input,
+      lock,
+      catalogue,
+      emptyTaskInputs(input),
+    );
+
+    const graph = (sdlc as Record<string, any>).buildGraph(input, boundLock);
+
+    expect(graph.tasks.map((task: { key: string }) => task.key)).toEqual([
+      "api:check",
+      "api:prepare",
+    ]);
+  });
+
   test.each([
     ["catalogue digest", (lock: Record<string, any>) => {
       lock.catalogueDigest =
@@ -512,24 +539,25 @@ describe("tc-sdlc graph", () => {
   ])("rejects a schema-valid hand edit to lock %s", (_name, sabotage) => {
     const input = declaration([{ name: "api", root: "services/api" }]);
     const catalogue = sdlc.createReleaseCatalogue(release);
-    const lock = structuredClone(sdlc.resolveLock(input as never, catalogue)) as Record<
+    const lock = (sdlc as Record<string, any>).bindGraphLock(
+      input,
+      sdlc.resolveLock(input as never, catalogue),
+      catalogue,
+      emptyTaskInputs(input),
+    ) as Record<
       string,
       any
     >;
     sabotage(lock);
 
     expect(() =>
-      (sdlc as Record<string, any>).buildGraph(input, lock, {
-        catalogue,
-        inputs: emptyTaskInputs(input),
-      }),
+      (sdlc as Record<string, any>).buildGraph(input, lock),
     ).toThrowError(expect.objectContaining({ code: "LOCK_STALE" }));
   });
 
   test.each([
     ["direct change and downstream consumers", ["services/api/src/main.ts"], ["api:test", "web:test"]],
     ["Windows path syntax", ["services\\api\\src\\main.ts"], ["api:test", "web:test"]],
-    ["case-equivalent path", ["Services/API/SRC/main.ts"], ["api:test", "web:test"]],
     [
       "generated-output propagation",
       ["packages/schema/spec.yaml"],
@@ -548,7 +576,6 @@ describe("tc-sdlc graph", () => {
       ["api:check", "docs:check", "schema:check", "web:check"],
     ],
     ["declaration invalidation", ["sdlc.yaml"], "all"],
-    ["case-equivalent declaration invalidation", ["SDLC.YAML"], "all"],
     ["lock invalidation", ["tc-sdlc.lock"], "all"],
     ["unrelated change", ["unrelated/notes.txt"], []],
   ])("selects affected tasks for %s", (_name, changedPaths, expected) => {
@@ -587,6 +614,48 @@ describe("tc-sdlc graph", () => {
     const allKeys = graph.tasks.map((task: { key: string }) => task.key);
 
     expect(selectedKeys).toEqual(expected === "all" ? allKeys : expected);
+  });
+
+  test("uses Linux-sensitive and macOS/Windows-insensitive changed-path matching", () => {
+    const input = {
+      ...declaration([{ name: "api", root: "services/api" }]),
+      targets: {
+        test: { command: "make test", inputs: ["src/**"] },
+      },
+    } as const;
+    const sensitive = lockedGraph(
+      input as never,
+      emptyTaskInputs(input as never),
+      { pathCaseSensitivity: "sensitive" },
+    ).graph;
+    const insensitive = lockedGraph(
+      input as never,
+      emptyTaskInputs(input as never),
+      { pathCaseSensitivity: "insensitive" },
+    ).graph;
+    const native = lockedGraph(input as never).graph;
+    const select = (graph: typeof sensitive, path: string) =>
+      (sdlc as Record<string, any>).selectAffected(graph, [path]) as readonly string[];
+
+    expect(select(sensitive, "services/api/src/main.ts")).toEqual([
+      sensitive.tasks[0]?.identity,
+    ]);
+    expect(select(sensitive, "Services/API/SRC/main.ts")).toEqual([]);
+    expect(select(sensitive, "SDLC.YAML")).toEqual([]);
+    expect(select(insensitive, "Services/API/SRC/main.ts")).toEqual([
+      insensitive.tasks[0]?.identity,
+    ]);
+    expect(select(insensitive, "SDLC.YAML")).toEqual([
+      insensitive.tasks[0]?.identity,
+    ]);
+    expect(select(native, "Services/API/SRC/main.ts")).toEqual(
+      process.platform === "darwin" || process.platform === "win32"
+        ? [native.tasks[0]?.identity]
+        : [],
+    );
+    expect((sdlc as Record<string, any>).serialiseGraph(sensitive)).toBe(
+      (sdlc as Record<string, any>).serialiseGraph(insensitive),
+    );
   });
 
   test.each([

@@ -2,14 +2,15 @@ export { createReleaseCatalogue, loadCatalogue, validateCatalogue } from "./cata
 export { bytesDigest, canonicalJson, digest } from "./canonical.js";
 export { SdlcError } from "./errors.js";
 export type { ExecutorContract } from "./executors/index.js";
-export { buildGraph, selectAffected, serialiseGraph, taskIdentity } from "./graph/index.js";
+export { bindGraphLock, buildGraph, selectAffected, serialiseGraph, taskIdentity } from "./graph/index.js";
 export { assertCurrentLock, loadLock, resolveLock, validateLock, writeLock } from "./lock/index.js";
 export { loadDeclaration, validateDeclaration } from "./schema/declaration.js";
 export type {
   GraphProject,
-  GraphBuildContext,
+  GraphLockBindingOptions,
   GraphTask,
   InputDigest,
+  PathCaseSensitivity,
   ProjectDeclaration,
   ReleaseCatalogue,
   ReleaseEntry,
