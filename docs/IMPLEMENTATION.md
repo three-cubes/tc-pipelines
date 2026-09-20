@@ -219,7 +219,7 @@ group and records `stalled`, while an operator cancellation records
 
 ### Task 4 — Preparation, evaluation and evidence reuse
 
-**Status:** ready for implementation after Task 3 review
+**Status:** complete and independently reviewed (`ea61ca0`, `8aad84b`, `631422e`)
 
 **Files**
 
