@@ -3,9 +3,12 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  linkSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -549,6 +552,70 @@ describe("tc-sdlc Task 4", () => {
     expect(identities[0]).toBe(identities[1]);
   });
 
+  test("restores the bytes it verified when destination aliases a later cache source", async () => {
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-cache-alias-"));
+    writeFileSync(join(root, "input.txt"), "input");
+    writeFileSync(join(root, "a-trigger.txt"), "trigger");
+    writeFileSync(join(root, "z-victim.txt"), "verified");
+    const input = planning(root, {
+      check: target("node -e 'process.exit(0)'", "evaluate", {
+        inputs: ["input.txt"],
+        outputs: ["a-trigger.txt", "z-victim.txt"],
+      }),
+    });
+    initialiseGit(root);
+    const receipt = await (sdlc as Record<string, any>).checkAll({
+      ...input,
+      receiptPath: join(dirname(root), `${root.split("/").at(-1)}.json`),
+      environmentClass: "canonical-linux",
+      producer: "local-fixture",
+      runOptions: { capacity: { cpu: 1, memoryMiB: 128 } },
+    });
+    const cache = mkdtempSync(join(tmpdir(), "tc-sdlc-cache-alias-entry-"));
+    const entry = (sdlc as Record<string, any>).storeEvaluationCache(
+      root,
+      cache,
+      receipt,
+    );
+    const files = join(cache, entry.key, "files");
+    rmSync(join(root, "a-trigger.txt"));
+    linkSync(join(files, "z-victim.txt"), join(root, "a-trigger.txt"));
+    writeFileSync(join(root, "z-victim.txt"), "stale");
+
+    expect(
+      (sdlc as Record<string, any>).restoreEvaluationCache(
+        root,
+        cache,
+        entry.key,
+        (sdlc as Record<string, any>).evaluationCandidate(receipt),
+      ),
+    ).toBe(true);
+    expect(readFileSync(join(root, "a-trigger.txt"), "utf8")).toBe("trigger");
+    expect(readFileSync(join(root, "z-victim.txt"), "utf8")).toBe("verified");
+    expect(readFileSync(join(files, "z-victim.txt"), "utf8")).toBe("verified");
+
+    writeFileSync(join(root, "a-trigger.txt"), "preserve-on-failure");
+    rmSync(join(root, "z-victim.txt"));
+    mkdirSync(join(root, "z-victim.txt"));
+    expect(() =>
+      (sdlc as Record<string, any>).restoreEvaluationCache(
+        root,
+        cache,
+        entry.key,
+        (sdlc as Record<string, any>).evaluationCandidate(receipt),
+      ),
+    ).toThrowError(expect.objectContaining({ code: "CACHE_PATH_INVALID" }));
+    expect(readFileSync(join(root, "a-trigger.txt"), "utf8")).toBe(
+      "preserve-on-failure",
+    );
+    expect(
+      readdirSync(root).some((name) => name.includes(".tc-sdlc-")),
+    ).toBe(false);
+    expect(
+      readdirSync(cache).some((name) => name.startsWith(".tc-sdlc-restore-")),
+    ).toBe(false);
+  });
+
   test("check-all runs every evaluate task once and never runs prepare tasks", async () => {
     const root = mkdtempSync(join(tmpdir(), "tc-sdlc-phase-"));
     const executionLog = join(dirname(root), `${root.split("/").at(-1)}.log`);
@@ -673,6 +740,70 @@ describe("tc-sdlc Task 4", () => {
       status: "failed",
       reason: "preparation_evidence_invalid",
     });
+  });
+
+  test("executes receipt-bound bytes when the live prepared tree changes at task start", async () => {
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-phase-snapshot-"));
+    writeFileSync(
+      join(root, "prepare.mjs"),
+      'import { writeFileSync } from "node:fs"; writeFileSync("generated.txt", "stable");\n',
+    );
+    writeFileSync(
+      join(root, "check.mjs"),
+      'import { execFileSync } from "node:child_process"; import { readFileSync } from "node:fs"; process.stdout.write(`${readFileSync("input.txt", "utf8")}:${execFileSync("git", ["rev-parse", "HEAD"], {encoding: "utf8"}).trim()}`);\n',
+    );
+    writeFileSync(join(root, "input.txt"), "verified");
+    const input = planning(root, {
+      prepare: target("node prepare.mjs", "prepare", {
+        inputs: ["prepare.mjs"],
+        outputs: ["generated.txt"],
+      }),
+      check: target("node check.mjs", "evaluate", {
+        dependsOn: ["prepare"],
+        inputs: ["input.txt", "check.mjs"],
+      }),
+    });
+    initialiseGit(root);
+    const preparation = await (sdlc as Record<string, any>).prepare({
+      ...input,
+      receiptPath: join(dirname(root), `${root.split("/").at(-1)}-prepare.json`),
+      runOptions: { capacity: { cpu: 1, memoryMiB: 128 } },
+    });
+    const commit = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+    }).trim();
+    let changed = false;
+
+    const evaluation = await (sdlc as Record<string, any>).check({
+      ...input,
+      changedPaths: ["input.txt"],
+      receiptPath: join(dirname(root), `${root.split("/").at(-1)}-check.json`),
+      environmentClass: "native-linux",
+      producer: "local-fixture",
+      preparationReceipt: preparation,
+      runOptions: {
+        capacity: { cpu: 1, memoryMiB: 128 },
+        onEvent: (event: Record<string, unknown>) => {
+          if (!changed && event.type === "start") {
+            changed = true;
+            writeFileSync(join(root, "input.txt"), "substituted-after-proof");
+          }
+        },
+      },
+    });
+
+    expect(evaluation).toMatchObject({
+      status: "failed",
+      reason: "source_tree_drift",
+      scheduler: {
+        status: "succeeded",
+        tasks: [{ stdout: `verified:${commit}`, status: "succeeded" }],
+      },
+    });
+    expect(readFileSync(join(root, "input.txt"), "utf8")).toBe(
+      "substituted-after-proof",
+    );
   });
 
   test("exposes prepare, check and check-all through the built CLI", () => {

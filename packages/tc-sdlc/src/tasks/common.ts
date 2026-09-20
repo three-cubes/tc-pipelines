@@ -1,4 +1,14 @@
 import { execFileSync } from "node:child_process";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 
 import { digest } from "../canonical.js";
 import { SdlcError } from "../errors.js";
@@ -115,9 +125,47 @@ export function taskOutputs(
   );
 }
 
+export function materializeTree(root: string): Readonly<{
+  root: string;
+  dispose: () => void;
+}> {
+  const container = mkdtempSync(join(tmpdir(), "tc-sdlc-evaluation-"));
+  const workspace = resolve(container, "workspace");
+  try {
+    execFileSync(
+      "git",
+      ["clone", "--quiet", "--shared", "--no-checkout", "--", root, workspace],
+      { stdio: "pipe" },
+    );
+    for (const file of snapshotFiles(root)) {
+      const destination = resolve(workspace, file.path);
+      mkdirSync(dirname(destination), { recursive: true });
+      if (file.symlink !== null && file.symlink !== undefined) {
+        symlinkSync(file.symlink, destination);
+      } else {
+        copyFileSync(resolve(root, file.path), destination);
+        chmodSync(destination, file.mode ?? 0o644);
+      }
+    }
+  } catch (error) {
+    rmSync(container, { recursive: true, force: true });
+    throw new SdlcError(
+      "SOURCE_IDENTITY_INVALID",
+      `could not materialize source workspace: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  return {
+    root: workspace,
+    dispose: () => rmSync(container, { recursive: true, force: true }),
+  };
+}
+
 export function sourceIdentity(
   root: string,
-  options: Readonly<{ allowPreparedTree?: boolean }> = {},
+  options: Readonly<{
+    allowPreparedTree?: boolean;
+    treeRoot?: string;
+  }> = {},
 ): Readonly<{
   commit: string;
   treeDigest: string;
@@ -142,5 +190,8 @@ export function sourceIdentity(
   if (status.length > 0 && options.allowPreparedTree !== true) {
     throw new SdlcError("SOURCE_DIRTY", "source tree contains tracked or untracked changes");
   }
-  return { commit, treeDigest: digest(snapshotFiles(root)) };
+  return {
+    commit,
+    treeDigest: digest(snapshotFiles(options.treeRoot ?? root)),
+  };
 }

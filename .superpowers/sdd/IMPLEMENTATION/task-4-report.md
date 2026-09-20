@@ -309,3 +309,50 @@ Exit 0: 4 files and 100 tests passed; the root lockfile is unchanged.
 Packed-consumer verification imported `check`, `prepare`, cache and candidate
 APIs from a clean tarball installation and reported `buildGraph/2` and
 `runGraph/3`. `git diff --check` also exited 0.
+
+## Second independent-review remediation — verified bytes at use time
+
+The second review confirmed the first fixes and identified two verify/use
+gaps. Evaluation authorised the prepared checkout before taking the execution
+snapshot, and cache restore validated cache paths before reopening them during
+copy. Both gaps were reproduced through deterministic built-public tests.
+
+RED:
+
+```text
+pnpm --filter @three-cubes/tc-sdlc build
+pnpm --filter @three-cubes/tc-sdlc exec vitest run test/task4.test.ts
+```
+
+Exit 1: 16/18 passed. A public scheduler `start` callback replaced a declared
+input after preparation proof; the task consumed the substituted bytes. A
+destination hard link aliased a later cache source, so publishing the first
+output changed the already-validated second source and restored `trigger`
+instead of the verified `verified` bytes.
+
+Implementation and GREEN evidence:
+
+- evaluation materialises a private Git workspace, plans and computes the
+  source tree digest from that workspace, validates preparation evidence against
+  it, and executes `runGraph` in the same workspace;
+- the workspace retains isolated Git metadata, so evaluate tasks resolve the
+  exact receipt commit without accessing mutable checkout bytes;
+- a final live-tree comparison records `source_tree_drift` while retaining the
+  scheduler proof that the task consumed the verified bytes;
+- cache restore copies candidate outputs into a mode-0700 owned staging
+  directory, hashes and retains those staged bytes, prepares all destination
+  temporaries, then atomically replaces outputs with rollback and cleanup;
+- validation and publication failures preserve prior destinations and remove
+  staging, temporary and backup paths.
+
+Focused final verification:
+
+```text
+pnpm --filter @three-cubes/tc-sdlc build
+pnpm --filter @three-cubes/tc-sdlc exec vitest run test/task4.test.ts
+```
+
+Exit 0: 1 file and 18 tests passed. The complete package suite passed 4 files
+and 102 tests. Frozen pnpm installation and lock diff checks passed. A clean
+tarball consumer imported `check` and `restoreEvaluationCache` and retained
+`buildGraph/2` and `runGraph/3`; `git diff --check` also exited 0.

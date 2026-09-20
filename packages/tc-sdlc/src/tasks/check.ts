@@ -12,6 +12,7 @@ import { runGraph, type RunOptions } from "../runtime/index.js";
 import type { ReleaseCatalogue, SdlcDeclaration, SdlcLock } from "../schema/types.js";
 import {
   mutations,
+  materializeTree,
   phaseGraph,
   plan,
   sourceIdentity,
@@ -49,8 +50,9 @@ async function evaluate(
   let taskEvidence: EvaluationReceipt["tasks"] = [];
   let treeMutations: readonly TreeMutation[] = [];
   let reason: string | null = null;
+  const workspace = materializeTree(options.root);
   try {
-    const full = plan(options);
+    const full = plan({ ...options, root: workspace.root });
     const graph = phaseGraph(full, "evaluate");
     const selected = all
       ? new Set(graph.tasks.map((task) => task.key))
@@ -87,6 +89,7 @@ async function evaluate(
     );
     source = sourceIdentity(options.root, {
       allowPreparedTree: preparationRequired,
+      treeRoot: workspace.root,
     });
     if (preparationRequired) {
       const preparation = options.preparationReceipt;
@@ -105,13 +108,13 @@ async function evaluate(
         );
       }
     }
-    const before = snapshotFiles(options.root);
+    const before = snapshotFiles(workspace.root);
     scheduler = await runGraph(graph, selection, {
       ...options.runOptions,
-      cwd: options.root,
+      cwd: workspace.root,
       receiptPath: `${options.receiptPath}.run`,
     });
-    const after = snapshotFiles(options.root);
+    const after = snapshotFiles(workspace.root);
     treeMutations = mutations(before, after);
     const inventory = new Map(
       graph.tasks.map((task) => [task.key, task.inputDigests] as const),
@@ -124,12 +127,14 @@ async function evaluate(
         mode: "evaluate" as const,
         trustBoundary: task.trustBoundary,
         inputs: inventory.get(task.key) ?? [],
-        outputs: taskOutputs(options.root, graph, task.key),
+        outputs: taskOutputs(workspace.root, graph, task.key),
       }));
     if (scheduler.status !== "succeeded") {
       reason = `scheduler_${scheduler.status}`;
     } else if (treeMutations.length > 0) {
       reason = "evaluation_mutation";
+    } else if (digest(snapshotFiles(options.root)) !== source.treeDigest) {
+      reason = "source_tree_drift";
     }
   } catch (error) {
     reason =
@@ -141,6 +146,7 @@ async function evaluate(
           ? error.message
           : String(error);
   }
+  workspace.dispose();
   const receipt: EvaluationReceipt = {
     schema: "tc.sdlc/evaluation-receipt/v1",
     status: reason === null ? "succeeded" : "failed",
