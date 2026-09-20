@@ -1,4 +1,14 @@
 export { createReleaseCatalogue, loadCatalogue, validateCatalogue } from "./catalogue/index.js";
+export { bootstrap, serialiseBootstrapReceipt } from "./bootstrap/index.js";
+export type {
+  BootstrapAdapterEvidence,
+  BootstrapCapabilityName,
+  BootstrapDiagnostic,
+  BootstrapHost,
+  BootstrapOptions,
+  BootstrapPlatform,
+  BootstrapReceipt,
+} from "./bootstrap/index.js";
 export { bytesDigest, canonicalJson, digest } from "./canonical.js";
 export { restoreEvaluationCache, storeEvaluationCache } from "./cache/index.js";
 export { SdlcError } from "./errors.js";

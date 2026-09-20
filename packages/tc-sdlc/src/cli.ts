@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs";
 
+import { bootstrap } from "./bootstrap/index.js";
 import { bytesDigest, canonicalJson } from "./canonical.js";
 import { loadCatalogue } from "./catalogue/index.js";
 import { SdlcError } from "./errors.js";
@@ -11,9 +12,13 @@ import { loadDeclaration } from "./schema/declaration.js";
 import { check, checkAll } from "./tasks/check.js";
 import { prepare } from "./tasks/prepare.js";
 
-type Command = "lock" | "validate" | "prepare" | "check" | "check-all";
+type Command = "lock" | "validate" | "bootstrap" | "prepare" | "check" | "check-all";
 
-function parseOptions(args: readonly string[], required: readonly string[]): Record<string, string> {
+function parseOptions(
+  args: readonly string[],
+  required: readonly string[],
+  optional: readonly string[] = [],
+): Record<string, string> {
   const options: Record<string, string> = {};
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index];
@@ -22,7 +27,7 @@ function parseOptions(args: readonly string[], required: readonly string[]): Rec
       throw new SdlcError("USAGE", "options must be provided as --name value pairs");
     }
     const name = flag.slice(2);
-    if (!required.includes(name) || options[name] !== undefined) {
+    if ((!required.includes(name) && !optional.includes(name)) || options[name] !== undefined) {
       throw new SdlcError("USAGE", `unknown or repeated option ${flag}`);
     }
     options[name] = value;
@@ -74,6 +79,46 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
       declarationDigest: loaded.lock.declarationDigest,
       catalogueDigest: loaded.lock.catalogueDigest,
       lockDigest: bytesDigest(loaded.bytes),
+    });
+    return;
+  }
+
+  if (command === "bootstrap") {
+    const options = parseOptions(
+      args,
+      ["declaration", "catalogue", "lock", "root", "state-root", "receipt"],
+      ["offline", "max-diagnostics"],
+    );
+    const declaration = loadDeclaration(options.declaration!);
+    const catalogue = loadCatalogue(options.catalogue!);
+    const loaded = loadLock(options.lock!);
+    const offline = options.offline === undefined ? false : options.offline === "true";
+    if (options.offline !== undefined && options.offline !== "true" && options.offline !== "false") {
+      throw new SdlcError("USAGE", "--offline must be true or false");
+    }
+    const maxDiagnostics =
+      options["max-diagnostics"] === undefined
+        ? undefined
+        : Number(options["max-diagnostics"]);
+    const receipt = await bootstrap({
+      root: options.root!,
+      stateRoot: options["state-root"]!,
+      declaration,
+      catalogue,
+      lock: loaded.lock,
+      receiptPath: options.receipt!,
+      host: { offline },
+      ...(maxDiagnostics === undefined ? {} : { maxDiagnostics }),
+    });
+    if (receipt.status !== "succeeded") {
+      throw new SdlcError("BOOTSTRAP_FAILED", `bootstrap failed: ${receipt.reason}`);
+    }
+    success(command, {
+      receipt: options.receipt,
+      receiptSchema: receipt.schema,
+      release: receipt.release,
+      lockDigest: receipt.lockDigest,
+      reused: receipt.reused,
     });
     return;
   }
@@ -133,12 +178,22 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
 }
 
 const rawCommand = process.argv[2];
-const commands: readonly Command[] = ["lock", "validate", "prepare", "check", "check-all"];
+const commands: readonly Command[] = [
+  "lock",
+  "validate",
+  "bootstrap",
+  "prepare",
+  "check",
+  "check-all",
+];
 const envelopeCommand = commands.includes(rawCommand as Command) ? rawCommand : "unknown";
 
 try {
   if (!commands.includes(rawCommand as Command)) {
-    throw new SdlcError("USAGE", "command must be lock, validate, prepare, check or check-all");
+    throw new SdlcError(
+      "USAGE",
+      "command must be lock, validate, bootstrap, prepare, check or check-all",
+    );
   }
   await run(rawCommand as Command, process.argv.slice(3));
 } catch (error) {
