@@ -30,7 +30,7 @@ const release = {
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   declarationSchema: "tc.sdlc/v1",
   lockSchema: "tc.sdlc/lock/v1",
-  fitness: { package: "three-cubes-fitness", version: "0.16.1" },
+  fitness: { package: "three-cubes-fitness", version: "0.17.0" },
   toolchains: {
     node: "24",
     packageManager: "pnpm@11.22.0",
@@ -820,7 +820,7 @@ describe("tc-sdlc Task 4", () => {
       `schema: tc.sdlc/v1
 project: cli-fixture
 toolchains: {python: "3.13", node: "24", packageManager: pnpm@11.22.0, uv: "0.12.5"}
-fitness: {package: three-cubes-fitness, version: "0.16.1"}
+fitness: {package: three-cubes-fitness, version: "0.17.0"}
 projects: [{name: fixture, root: .}]
 targets:
   prepare:

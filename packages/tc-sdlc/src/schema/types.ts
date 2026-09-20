@@ -44,7 +44,7 @@ export type SdlcToolchains = Readonly<{
 
 export type SdlcFitness = Readonly<{
   package: "three-cubes-fitness";
-  version: "0.16.1";
+  version: "0.17.0";
 }>;
 
 export type SdlcDeclaration = Readonly<{

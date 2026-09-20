@@ -39,7 +39,7 @@
       "required": ["package", "version"],
       "properties": {
         "package": { "const": "three-cubes-fitness" },
-        "version": { "const": "0.16.1" }
+        "version": { "const": "0.17.0" }
       }
     },
     "toolchains": {

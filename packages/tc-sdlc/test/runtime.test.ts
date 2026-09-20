@@ -18,7 +18,7 @@ const release = {
   lockSchema: "tc.sdlc/lock/v1",
   fitness: {
     package: "three-cubes-fitness",
-    version: "0.16.1",
+    version: "0.17.0",
   },
   toolchains: {
     node: "24",

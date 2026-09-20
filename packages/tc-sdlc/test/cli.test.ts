@@ -17,7 +17,7 @@ toolchains:
   uv: "0.12.5"
 fitness:
   package: three-cubes-fitness
-  version: "0.16.1"
+  version: "0.17.0"
 projects:
   - name: api
     root: services/api
@@ -48,7 +48,7 @@ const catalogue = {
     lockSchema: "tc.sdlc/lock/v1",
     fitness: {
       package: "three-cubes-fitness",
-      version: "0.16.1",
+      version: "0.17.0",
     },
     toolchains: {
       node: "24",
@@ -150,7 +150,7 @@ describe("tc-sdlc lock", () => {
   check: {dependsOn: [prepare], command: make check, mode: evaluate, trustBoundary: portable}
   prepare: {command: make prepare, mode: prepare, trustBoundary: portable}
 projects: [{root: services\\api, name: api}]
-fitness: {version: "0.16.1", package: three-cubes-fitness}
+fitness: {version: "0.17.0", package: three-cubes-fitness}
 toolchains: {uv: "0.12.5", packageManager: pnpm@11.22.0, node: "24", python: "3.13"}
 project: example-product
 schema: tc.sdlc/v1
@@ -220,7 +220,7 @@ describe("tc-sdlc validate", () => {
   });
 
   test.each([
-    ["fitness", 'version: "0.16.1"', 'version: "0.16.1"\n  typo: rejected'],
+    ["fitness", 'version: "0.17.0"', 'version: "0.17.0"\n  typo: rejected'],
     ["toolchains", 'uv: "0.12.5"', 'uv: "0.12.5"\n  typo: rejected'],
   ])("rejects an unknown nested %s field before generating a lock", (_name, field, sabotage) => {
     const input = fixture(declaration.replace(field, sabotage));
