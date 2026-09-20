@@ -191,6 +191,8 @@ path syntax, filesystem case policy, worker count and execution order.
 
 ### Task 3 — Resource-aware execution and terminal diagnostics
 
+**Status:** complete and independently reviewed (`227a7bb`)
+
 **Files**
 
 - `packages/tc-sdlc/src/runtime/` owns resource admission, execution,
@@ -217,18 +219,41 @@ group and records `stalled`, while an operator cancellation records
 
 ### Task 4 — Preparation, evaluation and evidence reuse
 
+**Status:** ready for implementation after Task 3 review
+
 **Files**
 
 - `packages/tc-sdlc/src/tasks/prepare.ts` runs deterministic mutating work.
 - `packages/tc-sdlc/src/tasks/check.ts` runs read-only affected evaluation.
 - `packages/tc-sdlc/src/tasks/check-all.ts` runs the release-admission graph.
 - `packages/tc-sdlc/src/cache/` owns content-addressed pure-task results.
+- `packages/tc-sdlc/src/inputs/` resolves one canonical digest inventory for
+  graph planning, execution receipts and cache admission.
 
 `prepare` applies formatting, generators, lock refresh and manifest refresh once,
 then proves a second execution is a fixed point. `check` and `check-all` reject
 tree mutation. A successful local task receipt can satisfy CI only when its
 source tree, lock, task, inputs, environment class and producer identity match;
 hosted-only and live boundaries still execute at their owning trust boundary.
+
+`check` and `check-all` are selection modes over the Task 3 scheduler, not
+separate runners. `check` supplies the dependency-closed result from
+`selectAffected`; `check-all` supplies every graph task exactly once.
+
+Three evidence contracts remain separate:
+
+- the scheduler run receipt records execution and diagnostics;
+- the preparation receipt records a bounded, fixed-point mutation for trusted
+  writeback;
+- the evaluation receipt binds source tree, declaration, catalogue, lock, task,
+  canonical input digests, environment class, producer identity and output
+  digests for cache or CI admission.
+
+A local evaluation receipt may warm the content-addressed cache. It satisfies a
+required CI result only when an allowed producer authenticates it and every
+bound identity matches the candidate. Hosted credentials, security checks,
+deployment work and mutable network or live-system checks always execute at
+their owning trust boundary.
 
 ### Task 5 — Native bootstrap and canonical Linux image
 
