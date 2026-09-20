@@ -87,6 +87,10 @@ production deployment transaction or add another fitness engine.
    composition runs for release admission. Broad mutation and platform
    compatibility run on schedule and before a release that changes their
    surface.
+9. **State transitions use public interfaces.** Positive cases create valid
+   state through the production writer and resolve it through the public reader.
+   Negative cases change one declared boundary and prove the expected denial or
+   recovery result.
 
 ## tc-fitness check contract
 
@@ -166,6 +170,27 @@ Each tc-fitness test module declares one primary pytest tier at module level:
 Parametrised fixture text containing marker names does not classify the test
 that contains it. The repository enables its own
 `core:every_test_has_tier_marker` check with no baseline.
+
+### Stateful workflow proof
+
+A stateful release or deployment surface provides behavioural cases for:
+
+- first-state bootstrap through the production writer;
+- public resolution of the current authority;
+- candidate creation from an immutable state snapshot;
+- exact qualification-suite and release-closure binding;
+- atomic promotion after successful PVT;
+- hold and rollback to the recorded predecessor;
+- interrupted-write recovery and concurrent-writer exclusion;
+- scheduled consumers resolving the same current head; and
+- one-time migration followed by removal of the superseded path.
+
+Positive fixtures call supported constructors, writers and adapters. A test may
+construct raw malformed state only for the negative input under examination.
+Contract tests verify typed inputs and outputs at controlled collaborators.
+Integration tests exercise real process, filesystem and persistence boundaries.
+E2E tests invoke the installed product through its supported operator entrypoint.
+Source-shape checks provide structural evidence and carry no behavioural claim.
 
 ### Self-application
 
@@ -484,7 +509,12 @@ The assurance tranche is complete when:
     identities, resolved task input hashes, terminal outcomes and named
     produced evidence; and
 13. local and PR execution use the same commands, with no duplicated full
-    post-merge test run.
+    post-merge test run;
+14. stateful deployment cases create valid authority through production
+    interfaces, reject identity mismatches and prove promotion, rollback and
+    interrupted-write recovery; and
+15. a converged consumer resolves one current authority path and contains no
+    reachable superseded reader, writer or fallback.
 
 ## Rollback
 

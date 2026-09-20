@@ -238,11 +238,45 @@ Every stage records:
 - completed checks and terminal status;
 - retained diagnostic and receipt locations;
 - production runtime identity;
+- runtime-state authority schema, identity and predecessor;
+- qualified state snapshot and release-closure digests;
+- the authority writer and current-head transition;
 - PVT, rollback and cleanup result.
 
 Cache hits retain the original task identity and input hash. A cache record
 accelerates execution; production qualification is established by the retained
 candidate and runtime receipts.
+
+## Runtime state authority
+
+Each deployed product declares one current runtime-state authority and one
+production writer. The authority binds the immutable candidate, resolved
+configuration, product-defined persistent state, harvested learning artefacts,
+qualification suite and predecessor into one machine-readable record.
+
+The state lifecycle is:
+
+1. **Bootstrap** — the deployment transaction validates the existing live state
+   and writes the first authority through the production writer.
+2. **Harvest** — the product adapter captures persistent state and learning
+   artefacts through declared interfaces, validates their inventory and emits an
+   immutable snapshot.
+3. **Qualify** — qualification binds that snapshot, the candidate digest, the
+   release closure and the executed suite into a candidate authority.
+4. **Apply** — deployment reopens and verifies the exact candidate authority,
+   then applies its recorded candidate and state.
+5. **Promote** — successful PVT atomically advances the current authority head.
+6. **Recover** — hold and rollback preserve the failed authority and select its
+   recorded predecessor.
+7. **Operate** — scheduled capture, verification, cleanup and the next harvest
+   resolve the same current authority head through the public reader.
+
+Generated runtime state is derived from source inputs and retained evidence.
+Tests build valid authorities through the public writer and create negative
+controls by changing one declared boundary. The detailed transaction lives in
+[`ci-release-deployment-architecture.md`](ci-release-deployment-architecture.md),
+and its proof requirements live in
+[`core-assurance-contract.md`](core-assurance-contract.md).
 
 ## Adoption and compatibility
 
@@ -256,9 +290,13 @@ image and graph are introduced. Each consumer moves through these states:
 5. **Deployment** — production consumes the qualified digest and receipt.
 6. **Converged** — remove superseded consumer scripts, copied workflows and independent pins.
 
-Compatibility shims have an owner, consumer list and removal condition in the
-implementation roadmap. A released consumer contract remains supported until
-its declared migration window closes.
+An incompatible state change uses a bounded migration transaction with a named
+source schema, target schema, entry predicate, output verification and removal
+milestone. The migration reads the previous authority once and writes the new
+authority through the current production writer. Convergence removes the old
+reader, writer, schema, fixtures, retention rules and operational instructions
+together. A released consumer contract remains supported for its declared
+migration window; steady-state resolution uses the current contract alone.
 
 ## Acceptance criteria
 
@@ -272,6 +310,10 @@ The product reaches the target state when:
 - `tc-fitness` runs as a version-compatible graph task;
 - a release candidate is built once and promoted by digest;
 - local qualification, CI qualification and deployment consume that digest;
+- qualification and deployment use the same runtime-state authority and release closure;
+- one production writer advances the current authority head after successful PVT;
+- harvest, scheduled capture, rollback and cleanup resolve the same authority graph;
+- a converged consumer has one reachable reader and writer for current runtime state;
 - VM configuration converges idempotently;
 - rollback and cleanup are exercised and evidenced;
 - a consumer upgrade changes one coordinated SDLC release;
