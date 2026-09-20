@@ -1,5 +1,6 @@
 export {
   CANONICAL_SDLC_FITNESS,
+  CANONICAL_SDLC_BOOTSTRAP,
   CANONICAL_SDLC_TOOLCHAINS,
   createReleaseCatalogue,
   generateReleaseCatalogue,
@@ -12,10 +13,12 @@ export { bootstrap, serialiseBootstrapReceipt } from "./bootstrap/index.js";
 export type {
   BootstrapAdapterEvidence,
   BootstrapCapabilityName,
+  BootstrapDependencyEvidence,
   BootstrapDiagnostic,
   BootstrapHost,
   BootstrapOptions,
   BootstrapPlatform,
+  BootstrapProvider,
   BootstrapReceipt,
 } from "./bootstrap/index.js";
 export { bytesDigest, canonicalJson, digest } from "./canonical.js";

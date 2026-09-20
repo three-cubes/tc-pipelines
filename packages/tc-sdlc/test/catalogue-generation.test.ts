@@ -36,6 +36,7 @@ describe("tc-sdlc release catalogue generation", () => {
           python: "3.13",
           uv: "0.12.5",
         },
+        bootstrap: sdlc.CANONICAL_SDLC_BOOTSTRAP,
       },
     });
 

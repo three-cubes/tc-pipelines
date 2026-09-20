@@ -1,0 +1,9 @@
+{
+  "name": "tc-sdlc-bootstrap-consumer",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.22.0",
+  "dependencies": {
+    "yaml": "2.9.1"
+  }
+}

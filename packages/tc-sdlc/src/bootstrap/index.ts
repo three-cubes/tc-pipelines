@@ -1,9 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   accessSync,
   chmodSync,
-  copyFileSync,
   constants,
   existsSync,
   lstatSync,
@@ -15,7 +14,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { posix } from "node:path";
 
 import { bytesDigest, canonicalJson, digest } from "../canonical.js";
@@ -24,19 +23,15 @@ import { writeCanonicalEvidence } from "../evidence/index.js";
 import { bindGraphLock, buildGraph } from "../graph/index.js";
 import { resolveInputInventory } from "../inputs/index.js";
 import { assertCurrentLock } from "../lock/index.js";
-import type {
-  ReleaseCatalogue,
-  SdlcDeclaration,
-  SdlcLock,
-} from "../schema/types.js";
+import type { ReleaseCatalogue, SdlcDeclaration, SdlcLock } from "../schema/types.js";
 
 export type BootstrapPlatform = "darwin" | "linux";
 export type BootstrapCapabilityName = "node" | "pnpm" | "python" | "uv";
+export type BootstrapProvider = "homebrew" | "canonical-image" | "catalogue-distribution";
 
 export type BootstrapHost = Readonly<{
   platform: BootstrapPlatform;
   architecture: string;
-  path: string;
   offline: boolean;
 }>;
 
@@ -52,10 +47,18 @@ export type BootstrapDiagnostic = Readonly<{
 export type BootstrapAdapterEvidence = Readonly<{
   name: BootstrapCapabilityName;
   version: string;
+  provider: BootstrapProvider;
   executableDigest: string;
   launcherDigest: string;
   adapterDigest: string;
   launcher: string;
+}>;
+
+export type BootstrapDependencyEvidence = Readonly<{
+  manager: "pnpm" | "uv";
+  lockDigest: string;
+  manifestDigest: string;
+  environment: string;
 }>;
 
 export type BootstrapReceipt = Readonly<{
@@ -70,6 +73,7 @@ export type BootstrapReceipt = Readonly<{
   reused: boolean;
   taskIdentities: readonly string[];
   adapters: readonly BootstrapAdapterEvidence[];
+  dependencies: readonly BootstrapDependencyEvidence[];
   diagnostics: readonly BootstrapDiagnostic[];
   diagnosticsCount: number;
   diagnosticsTruncated: boolean;
@@ -88,63 +92,60 @@ export type BootstrapOptions = Readonly<{
 
 type CapabilityContract = Readonly<{
   name: BootstrapCapabilityName;
-  executable: string;
   expected: (declaration: SdlcDeclaration) => string;
   observed: (output: string) => string | null;
   matches: (actual: string, expected: string) => boolean;
 }>;
 
-type ResolvedAdapter = BootstrapAdapterEvidence &
-  Readonly<{
-    artifact: string;
-  }>;
-
-type DiscoveredAdapter = Readonly<{
+type HostCapability = Readonly<{
   name: BootstrapCapabilityName;
   version: string;
-  source: string;
+  provider: BootstrapProvider;
+  executable: string;
   executableDigest: string;
 }>;
 
+type ResolvedAdapter = BootstrapAdapterEvidence & Readonly<{ executable: string }>;
+
+type DependencyLock = BootstrapDependencyEvidence & Readonly<{
+  lockPath: string;
+  manifestPath: string;
+}>;
+
 type BootstrapState = Readonly<{
-  schema: "tc.sdlc/bootstrap-state/v1";
+  schema: "tc.sdlc/bootstrap-state/v3";
   release: string;
   lockDigest: string;
+  dependencyDigest: string;
   platform: BootstrapPlatform;
   architecture: string;
   adapters: readonly ResolvedAdapter[];
+  dependencies: readonly BootstrapDependencyEvidence[];
 }>;
 
-const OWNER = {
-  schema: "tc.sdlc/state-owner/v1",
-  owner: "@three-cubes/tc-sdlc",
-} as const;
+const OWNER = { schema: "tc.sdlc/state-owner/v1", owner: "@three-cubes/tc-sdlc" } as const;
 
 const contracts: readonly CapabilityContract[] = [
   {
     name: "node",
-    executable: "node",
     expected: (declaration) => declaration.toolchains.node,
     observed: (output) => output.match(/\bv?(\d+)(?:\.\d+){0,2}\b/)?.[1] ?? null,
     matches: (actual, expected) => actual === expected,
   },
   {
     name: "pnpm",
-    executable: "pnpm",
     expected: (declaration) => declaration.toolchains.packageManager.replace(/^pnpm@/, ""),
     observed: (output) => output.match(/\b(\d+\.\d+\.\d+)\b/)?.[1] ?? null,
     matches: (actual, expected) => actual === expected,
   },
   {
     name: "python",
-    executable: "python3",
     expected: (declaration) => declaration.toolchains.python,
     observed: (output) => output.match(/\bPython\s+(\d+\.\d+)(?:\.\d+)?\b/i)?.[1] ?? null,
     matches: (actual, expected) => actual === expected,
   },
   {
     name: "uv",
-    executable: "uv",
     expected: (declaration) => declaration.toolchains.uv,
     observed: (output) => output.match(/\buv\s+(\d+\.\d+\.\d+)\b/i)?.[1] ?? null,
     matches: (actual, expected) => actual === expected,
@@ -166,6 +167,33 @@ function fileDigest(path: string): string {
   return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
 }
 
+function remediation(host: BootstrapHost, catalogue: ReleaseCatalogue): string {
+  return host.platform === "darwin"
+    ? "/bin/bash -lc 'brew install node@24 python@3.13 uv && \"$(brew --prefix node@24)/bin/corepack\" install --global pnpm@11.22.0'"
+    : `docker pull ghcr.io/three-cubes/tc-sdlc@${catalogue.release.imageDigest}`;
+}
+
+function prerequisiteFailure(
+  host: BootstrapHost,
+  catalogue: ReleaseCatalogue,
+  message: string,
+  observed?: string,
+): BootstrapFailure {
+  return new BootstrapFailure("host_prerequisite_missing", [
+    {
+      code: "HOST_PREREQUISITE_MISSING",
+      message,
+      action: remediation(host, catalogue),
+      ...(observed === undefined ? {} : { observed }),
+    },
+  ]);
+}
+
+function resolvesInside(parent: string, child: string): boolean {
+  const value = relative(parent, child);
+  return value === "" || (value !== ".." && !value.startsWith(`..${sep}`));
+}
+
 function absoluteStatePath(path: string): string {
   if (!isAbsolute(path)) {
     throw new BootstrapFailure("state_root_invalid", [
@@ -177,11 +205,6 @@ function absoluteStatePath(path: string): string {
     ]);
   }
   return resolve(path);
-}
-
-function resolvesInside(parent: string, child: string): boolean {
-  const value = relative(parent, child);
-  return value === "" || (value !== ".." && !value.startsWith(`..${sep}`));
 }
 
 function resolvedDestination(path: string): string {
@@ -206,8 +229,8 @@ function resolvedDestination(path: string): string {
   return resolve(realpathSync(cursor), ...missing);
 }
 
-function validateStateRoot(root: string, stateRootValue: string): string {
-  const stateRoot = absoluteStatePath(stateRootValue);
+function validateStateRoot(root: string, value: string): string {
+  const stateRoot = absoluteStatePath(value);
   const destination = resolvedDestination(stateRoot);
   if (resolvesInside(realpathSync(root), destination)) {
     throw new BootstrapFailure("state_root_invalid", [
@@ -266,15 +289,11 @@ function readCanonical(path: string): unknown {
 }
 
 function inspectOwnership(stateRoot: string): "absent" | "owned" {
-  if (!existsSync(stateRoot)) {
-    return "absent";
-  }
+  if (!existsSync(stateRoot)) return "absent";
   const entries = readdirSync(stateRoot);
   const ownerPath = join(stateRoot, ".tc-sdlc-owner.json");
   if (!existsSync(ownerPath)) {
-    if (entries.length === 0) {
-      return "absent";
-    }
+    if (entries.length === 0) return "absent";
     throw new BootstrapFailure("foreign_state", [
       {
         code: "STATE_ROOT_FOREIGN",
@@ -283,17 +302,11 @@ function inspectOwnership(stateRoot: string): "absent" | "owned" {
       },
     ]);
   }
-  if (lstatSync(ownerPath).isSymbolicLink()) {
-    throw new BootstrapFailure("state_corrupt", [
-      {
-        code: "STATE_OWNER_CORRUPT",
-        message: "state ownership marker is not a regular canonical file",
-        action: "discard the corrupt state root and bootstrap online again",
-      },
-    ]);
-  }
   try {
-    if (canonicalJson(readCanonical(ownerPath)) !== canonicalJson(OWNER)) {
+    if (
+      lstatSync(ownerPath).isSymbolicLink() ||
+      canonicalJson(readCanonical(ownerPath)) !== canonicalJson(OWNER)
+    ) {
       throw new Error("owner mismatch");
     }
   } catch {
@@ -308,65 +321,219 @@ function inspectOwnership(stateRoot: string): "absent" | "owned" {
   return "owned";
 }
 
-function resolveExecutable(pathValue: string, name: string): string | null {
-  for (const directory of pathValue.split(delimiter).filter(Boolean)) {
-    const candidate = resolve(directory, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      const resolved = realpathSync(candidate);
-      if (lstatSync(resolved).isFile()) {
-        return resolved;
-      }
-    } catch {
-      // Continue through PATH until an executable regular file is found.
-    }
+function normalHost(value: BootstrapOptions["host"]): BootstrapHost {
+  const platform = value?.platform ?? process.platform;
+  if (platform !== "darwin" && platform !== "linux") {
+    throw new BootstrapFailure("platform_unsupported", [
+      {
+        code: "PLATFORM_UNSUPPORTED",
+        message: `native bootstrap does not support ${platform}`,
+        action: "use supported macOS or the canonical Linux image",
+      },
+    ]);
   }
-  return null;
+  return {
+    platform,
+    architecture: value?.architecture ?? process.arch,
+    offline: value?.offline ?? false,
+  };
 }
 
-function probe(
+function probeOutput(executable: string, pathValue: string): string {
+  return execFileSync(executable, ["--version"], {
+    encoding: "utf8",
+    env: { PATH: pathValue },
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+}
+
+function capability(
   contract: CapabilityContract,
   executable: string,
   expected: string,
+  provider: HostCapability["provider"],
   pathValue: string,
-): Readonly<{ observed: string; executableDigest: string }> {
-  let output: string;
-  try {
-    output = execFileSync(executable, ["--version"], {
-      encoding: "utf8",
-      env: { PATH: pathValue },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (error) {
-    throw new BootstrapFailure("capability_version_mismatch", [
-      {
-        code: "CAPABILITY_PROBE_FAILED",
-        capability: contract.name,
-        expected,
-        message: `${contract.name} could not report its version`,
-        action: `install ${contract.name} ${expected} and retry bootstrap`,
-        observed: error instanceof Error ? error.name : "probe_failed",
-      },
-    ]);
-  }
-  const observed = contract.observed(output.trim());
+): HostCapability {
+  accessSync(executable, constants.X_OK);
+  const resolved = realpathSync(executable);
+  if (!lstatSync(resolved).isFile()) throw new Error("capability is not a regular file");
+  const observed = contract.observed(probeOutput(resolved, pathValue));
   if (observed === null || !contract.matches(observed, expected)) {
-    throw new BootstrapFailure("capability_version_mismatch", [
-      {
-        code: "CAPABILITY_VERSION_MISMATCH",
-        capability: contract.name,
-        expected,
-        observed: observed ?? "unrecognised",
-        message: `${contract.name} does not match the catalogue-owned version`,
-        action: `install ${contract.name} ${expected} and retry bootstrap`,
-      },
-    ]);
+    throw new Error(`${contract.name} expected ${expected}, observed ${observed ?? "unrecognised"}`);
   }
-  return { observed, executableDigest: fileDigest(executable) };
+  return {
+    name: contract.name,
+    version: expected,
+    provider,
+    executable: resolved,
+    executableDigest: fileDigest(resolved),
+  };
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
+function homebrewCapabilities(
+  host: BootstrapHost,
+  declaration: SdlcDeclaration,
+  catalogue: ReleaseCatalogue,
+): Readonly<{ adapters: readonly HostCapability[]; installerUv: HostCapability }> {
+  const prefix = host.architecture === "arm64" ? "/opt/homebrew" : "/usr/local";
+  try {
+    accessSync(join(prefix, "bin", "brew"), constants.X_OK);
+    const nodeRoot = realpathSync(join(prefix, "opt", "node@24"));
+    const pythonRoot = realpathSync(join(prefix, "opt", "python@3.13"));
+    const uvExecutable = realpathSync(join(prefix, "bin", "uv"));
+    if (
+      !resolvesInside(join(prefix, "Cellar", "node@24"), nodeRoot) ||
+      !resolvesInside(join(prefix, "Cellar", "python@3.13"), pythonRoot) ||
+      !resolvesInside(join(prefix, "Cellar", "uv"), uvExecutable)
+    ) {
+      throw new Error("Homebrew capability escaped its formula cellar");
+    }
+    const node = join(prefix, "opt", "node@24", "bin", "node");
+    const pnpm = join(prefix, "opt", "node@24", "bin", "pnpm");
+    const python = join(prefix, "opt", "python@3.13", "libexec", "bin", "python3");
+    const pathValue = [dirname(node), dirname(python), join(prefix, "bin"), "/usr/bin", "/bin"].join(":");
+    const adapters = [
+      capability(contracts[0]!, node, declaration.toolchains.node, "homebrew", pathValue),
+      capability(
+        contracts[1]!,
+        pnpm,
+        declaration.toolchains.packageManager.replace(/^pnpm@/, ""),
+        "homebrew",
+        pathValue,
+      ),
+      capability(contracts[2]!, python, declaration.toolchains.python, "homebrew", pathValue),
+    ];
+    const installerVersion = contracts[3]!.observed(probeOutput(uvExecutable, pathValue));
+    if (installerVersion === null) throw new Error("Homebrew uv version was not recognised");
+    const [major, minor, patch] = installerVersion.split(".").map(Number);
+    if (major !== 0 || minor !== 12 || (patch ?? 0) < 5) {
+      throw new Error(`uv installer must be >=0.12.5,<0.13, observed ${installerVersion}`);
+    }
+    const installerUv: HostCapability = {
+      name: "uv",
+      version: installerVersion,
+      provider: "homebrew",
+      executable: uvExecutable,
+      executableDigest: fileDigest(uvExecutable),
+    };
+    return { adapters, installerUv };
+  } catch (error) {
+    throw prerequisiteFailure(
+      host,
+      catalogue,
+      "macOS bootstrap requires the reviewed Homebrew node@24, python@3.13 and uv prerequisites",
+      error instanceof Error ? error.message : "invalid Homebrew prerequisite",
+    );
+  }
+}
+
+function canonicalImageCapabilities(
+  host: BootstrapHost,
+  declaration: SdlcDeclaration,
+  catalogue: ReleaseCatalogue,
+): Readonly<{ adapters: readonly HostCapability[]; installerUv: HostCapability }> {
+  try {
+    const marker = readCanonical("/etc/tc-sdlc-release.json") as Record<string, unknown>;
+    if (
+      marker.schema !== "tc.sdlc/image-marker/v1" ||
+      marker.release !== catalogue.release.version ||
+      canonicalJson(marker.toolchains) !== canonicalJson(catalogue.release.toolchains)
+    ) {
+      throw new Error("canonical image marker does not match the release catalogue");
+    }
+    const paths = [
+      "/usr/local/bin/node",
+      "/usr/local/bin/pnpm",
+      "/usr/local/bin/python3",
+      "/usr/local/bin/uv",
+    ] as const;
+    const pathValue = "/usr/local/bin:/usr/bin:/bin";
+    const adapters = contracts.map((contract, index) =>
+      capability(
+        contract,
+        paths[index]!,
+        contract.expected(declaration),
+        "canonical-image",
+        pathValue,
+      ),
+    );
+    return { adapters, installerUv: adapters[3]! };
+  } catch (error) {
+    throw prerequisiteFailure(
+      host,
+      catalogue,
+      "Linux bootstrap requires the catalogue-selected canonical image",
+      error instanceof Error ? error.message : "invalid canonical image prerequisite",
+    );
+  }
+}
+
+function hostCapabilities(
+  host: BootstrapHost,
+  declaration: SdlcDeclaration,
+  catalogue: ReleaseCatalogue,
+): ReturnType<typeof homebrewCapabilities> {
+  return host.platform === "darwin"
+    ? homebrewCapabilities(host, declaration, catalogue)
+    : canonicalImageCapabilities(host, declaration, catalogue);
+}
+
+function dependencyLocks(root: string): readonly DependencyLock[] {
+  const dependencies: DependencyLock[] = [];
+  const pnpmLock = join(root, "pnpm-lock.yaml");
+  if (existsSync(pnpmLock)) {
+    if (!existsSync(join(root, "package.json"))) {
+      throw new BootstrapFailure("dependency_lock_invalid", [
+        {
+          code: "PNPM_MANIFEST_MISSING",
+          message: "pnpm-lock.yaml requires package.json",
+          action: "restore package.json and regenerate pnpm-lock.yaml",
+        },
+      ]);
+    }
+    dependencies.push({
+      manager: "pnpm",
+      lockPath: pnpmLock,
+      lockDigest: fileDigest(pnpmLock),
+      manifestPath: join(root, "package.json"),
+      manifestDigest: fileDigest(join(root, "package.json")),
+      environment: "dependencies/node/node_modules",
+    });
+  }
+  const uvLock = join(root, "uv.lock");
+  if (existsSync(uvLock)) {
+    if (!existsSync(join(root, "pyproject.toml"))) {
+      throw new BootstrapFailure("dependency_lock_invalid", [
+        {
+          code: "PYTHON_MANIFEST_MISSING",
+          message: "uv.lock requires pyproject.toml",
+          action: "restore pyproject.toml and regenerate uv.lock",
+        },
+      ]);
+    }
+    dependencies.push({
+      manager: "uv",
+      lockPath: uvLock,
+      lockDigest: fileDigest(uvLock),
+      manifestPath: join(root, "pyproject.toml"),
+      manifestDigest: fileDigest(join(root, "pyproject.toml")),
+      environment: "dependencies/python",
+    });
+  }
+  return dependencies;
+}
+
+function managedEnvironment(stateRoot: string, stateDirectory: string, pathValue: string): NodeJS.ProcessEnv {
+  const home = join(stateDirectory, "home");
+  const cache = join(stateRoot, "cache");
+  mkdirSync(home, { recursive: true, mode: 0o700 });
+  mkdirSync(cache, { recursive: true, mode: 0o700 });
+  return {
+    HOME: home,
+    PATH: pathValue,
+    XDG_CACHE_HOME: cache,
+    UV_CACHE_DIR: join(cache, "uv"),
+  };
 }
 
 function writeAtomicExecutable(path: string, bytes: string): void {
@@ -381,10 +548,91 @@ function writeAtomicExecutable(path: string, bytes: string): void {
   }
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+async function materializeCatalogueUv(
+  options: BootstrapOptions,
+  host: BootstrapHost,
+  stateRoot: string,
+  stateDirectory: string,
+  installerUv: HostCapability,
+  python: HostCapability,
+): Promise<HostCapability> {
+  const platformKey = `${host.platform}-${host.architecture}` as keyof typeof options.catalogue.release.bootstrap.uv.wheels;
+  const distribution = options.catalogue.release.bootstrap.uv.wheels[platformKey];
+  if (distribution === undefined) {
+    throw prerequisiteFailure(host, options.catalogue, `no uv distribution is declared for ${platformKey}`);
+  }
+  if (host.offline) {
+    throw new BootstrapFailure("offline_cold", [
+      {
+        code: "BOOTSTRAP_OFFLINE_COLD",
+        message: "offline bootstrap requires an existing verified warm state",
+        action: "retry without offline mode to materialise the release state",
+      },
+    ]);
+  }
+  const response = await fetch(distribution.url, { redirect: "error" });
+  if (!response.ok) throw new Error(`uv distribution download failed with HTTP ${response.status}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const observed = createHash("sha256").update(bytes).digest("hex");
+  if (observed !== distribution.sha256) {
+    throw new BootstrapFailure("distribution_corrupt", [
+      {
+        code: "DISTRIBUTION_DIGEST_MISMATCH",
+        capability: "uv",
+        expected: distribution.sha256,
+        observed,
+        message: "downloaded uv distribution does not match the release catalogue",
+        action: "discard the partial state and retry from the canonical distribution",
+      },
+    ]);
+  }
+  const downloads = join(stateDirectory, "downloads");
+  const environment = join(stateDirectory, "toolchains", "uv");
+  mkdirSync(downloads, { recursive: true, mode: 0o700 });
+  const wheelName = new URL(distribution.url).pathname.split("/").at(-1);
+  if (wheelName === undefined || !wheelName.endsWith(".whl")) {
+    throw new BootstrapFailure("distribution_corrupt", [
+      {
+        code: "DISTRIBUTION_NAME_INVALID",
+        capability: "uv",
+        message: "catalogue uv distribution does not have a wheel filename",
+        action: "regenerate the release catalogue from immutable distribution metadata",
+      },
+    ]);
+  }
+  const wheel = join(downloads, wheelName);
+  writeFileSync(wheel, bytes, { flag: "wx", mode: 0o600 });
+  const hostPath = [dirname(installerUv.executable), dirname(python.executable), "/usr/bin", "/bin"].join(":");
+  const env = managedEnvironment(stateRoot, stateDirectory, hostPath);
+  execFileSync(installerUv.executable, ["venv", environment, "--python", python.executable], {
+    cwd: options.root,
+    env,
+    stdio: "pipe",
+  });
+  const environmentPython = join(environment, "bin", "python");
+  execFileSync(
+    installerUv.executable,
+    ["pip", "install", "--python", environmentPython, "--no-deps", "--offline", wheel],
+    { cwd: options.root, env, stdio: "pipe" },
+  );
+  return capability(
+    contracts[3]!,
+    join(environment, "bin", "uv"),
+    options.declaration.toolchains.uv,
+    "canonical-image",
+    `${join(environment, "bin")}:${hostPath}`,
+  );
+}
+
 function adapterEvidence(adapter: ResolvedAdapter): BootstrapAdapterEvidence {
   return {
     name: adapter.name,
     version: adapter.version,
+    provider: adapter.provider,
     executableDigest: adapter.executableDigest,
     launcherDigest: adapter.launcherDigest,
     adapterDigest: adapter.adapterDigest,
@@ -392,137 +640,153 @@ function adapterEvidence(adapter: ResolvedAdapter): BootstrapAdapterEvidence {
   };
 }
 
-function discoverAdapters(
-  declaration: SdlcDeclaration,
-  host: BootstrapHost,
-): readonly DiscoveredAdapter[] {
-  const missing = contracts
-    .filter((contract) => resolveExecutable(host.path, contract.executable) === null)
-    .map((contract): BootstrapDiagnostic => {
-      const expected = contract.expected(declaration);
-      return {
-        code: "CAPABILITY_MISSING",
-        capability: contract.name,
-        expected,
-        message: `${contract.name} is missing from the declared host PATH`,
-        action: `install ${contract.name} ${expected} and retry bootstrap`,
-      };
-    });
-  if (missing.length > 0) {
-    throw new BootstrapFailure("capability_missing", missing);
-  }
-  return contracts.map((contract) => {
-    const source = resolveExecutable(host.path, contract.executable) as string;
-    const expected = contract.expected(declaration);
-    const result = probe(contract, source, expected, host.path);
-    return {
-      name: contract.name,
-      version: expected,
-      source,
-      executableDigest: result.executableDigest,
-    };
-  });
-}
-
-function materializeAdapters(
+function resolvedAdapter(
   stateRoot: string,
   stateKey: string,
-  release: string,
-  lockDigest: string,
+  value: HostCapability,
+): ResolvedAdapter {
+  const launcher = posix.join(stateKey, "bin", value.name);
+  const launcherPath = resolve(stateRoot, launcher);
+  const bytes = `#!/bin/sh\nset -eu\nexec ${shellQuote(value.executable)} "$@"\n`;
+  writeAtomicExecutable(launcherPath, bytes);
+  const launcherDigest = bytesDigest(bytes);
+  return {
+    ...value,
+    launcher,
+    launcherDigest,
+    adapterDigest: digest({
+      name: value.name,
+      version: value.version,
+      provider: value.provider,
+      executableDigest: value.executableDigest,
+      launcherDigest,
+    }),
+  };
+}
+
+function materializeDependencies(
+  options: BootstrapOptions,
+  stateRoot: string,
+  stateDirectory: string,
+  dependencies: readonly DependencyLock[],
+  adapters: readonly ResolvedAdapter[],
+): void {
+  const byName = new Map(adapters.map((adapter) => [adapter.name, adapter]));
+  const pathValue = [
+    dirname(byName.get("node")!.executable),
+    dirname(byName.get("pnpm")!.executable),
+    dirname(byName.get("python")!.executable),
+    dirname(byName.get("uv")!.executable),
+    "/usr/bin",
+    "/bin",
+  ].join(":");
+  const env = managedEnvironment(stateRoot, stateDirectory, pathValue);
+  for (const dependency of dependencies) {
+    const destination = resolve(stateDirectory, dependency.environment);
+    mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+    if (dependency.manager === "pnpm") {
+      const project = join(stateDirectory, "dependencies", "node");
+      mkdirSync(project, { recursive: true, mode: 0o700 });
+      writeFileSync(join(project, "package.json"), readFileSync(dependency.manifestPath), {
+        flag: "wx",
+        mode: 0o600,
+      });
+      writeFileSync(join(project, "pnpm-lock.yaml"), readFileSync(dependency.lockPath), {
+        flag: "wx",
+        mode: 0o600,
+      });
+      execFileSync(
+        byName.get("pnpm")!.executable,
+        [
+          "--dir",
+          project,
+          "install",
+          "--frozen-lockfile",
+          "--ignore-workspace",
+          "--store-dir",
+          join(stateRoot, "cache", "pnpm"),
+        ],
+        { cwd: project, env, stdio: "pipe" },
+      );
+    } else {
+      execFileSync(
+        byName.get("uv")!.executable,
+        ["sync", "--frozen", "--project", options.root, "--no-install-project"],
+        {
+          cwd: options.root,
+          env: { ...env, UV_PROJECT_ENVIRONMENT: destination },
+          stdio: "pipe",
+        },
+      );
+    }
+  }
+}
+
+async function materializeState(
+  options: BootstrapOptions,
   host: BootstrapHost,
-  discovered: ReturnType<typeof discoverAdapters>,
-): readonly ResolvedAdapter[] {
+  stateRoot: string,
+  stateKey: string,
+  lockDigest: string,
+  dependencyDigest: string,
+  dependencies: readonly DependencyLock[],
+  prerequisites: ReturnType<typeof hostCapabilities>,
+): Promise<readonly ResolvedAdapter[]> {
   const directory = resolve(stateRoot, stateKey);
   rejectSymlinkComponents(stateRoot, directory);
   if (existsSync(directory)) {
     throw new BootstrapFailure("state_corrupt", [
       {
         code: "BOOTSTRAP_STATE_PARTIAL",
-        message: "release state exists without a valid immutable manifest",
+        message: "release state exists without a valid completion manifest",
         action: "discard the partial release state and bootstrap online again",
       },
     ]);
   }
-  const parent = dirname(directory);
-  mkdirSync(parent, { recursive: true, mode: 0o700 });
-  rejectSymlinkComponents(stateRoot, parent);
-  const staging = `${directory}.tmp-${process.pid}-${randomUUID()}`;
-  const bin = resolve(staging, "bin");
-  const artifacts = resolve(staging, "artifacts");
-  try {
-    mkdirSync(bin, { recursive: true, mode: 0o700 });
-    mkdirSync(artifacts, { recursive: true, mode: 0o700 });
-    for (const adapter of discovered) {
-      const artifact = resolve(artifacts, adapter.name);
-      copyFileSync(adapter.source, artifact, constants.COPYFILE_EXCL);
-      chmodSync(artifact, 0o755);
-      if (fileDigest(artifact) !== adapter.executableDigest) {
-        throw new BootstrapFailure("capability_changed", [
-          {
-            code: "CAPABILITY_CHANGED",
-            capability: adapter.name,
-            expected: adapter.executableDigest,
-            observed: fileDigest(artifact),
-            message: `${adapter.name} changed while bootstrap was materialising it`,
-            action: "retry bootstrap with a stable catalogue-owned capability",
-          },
-        ]);
-      }
-    }
-    const adapterPath = artifacts;
-    const adapters = discovered.map((adapter): ResolvedAdapter => {
-      const launcherRelative = posix.join(stateKey, "bin", adapter.name);
-      const launcher = resolve(bin, adapter.name);
-      const artifactRelative = posix.join(stateKey, "artifacts", adapter.name);
-      const finalArtifact = resolve(stateRoot, artifactRelative);
-      const verified = probe(
-        contracts.find((contract) => contract.name === adapter.name)!,
-        resolve(artifacts, adapter.name),
-        adapter.version,
-        adapterPath,
-      );
-      const bytes = `#!/bin/sh\nset -eu\nPATH=${shellQuote(resolve(stateRoot, stateKey, "artifacts"))}\nexport PATH\nexec ${shellQuote(finalArtifact)} "$@"\n`;
-      writeAtomicExecutable(launcher, bytes);
-      const launcherDigest = bytesDigest(bytes);
-      return {
-        name: adapter.name,
-        version: adapter.version,
-        executableDigest: verified.executableDigest,
-        artifact: artifactRelative,
-        launcher: launcherRelative,
-        launcherDigest,
-        adapterDigest: digest({
-          name: adapter.name,
-          version: adapter.version,
-          executableDigest: adapter.executableDigest,
-          launcherDigest,
-        }),
-      };
-    });
-    const state: BootstrapState = {
-      schema: "tc.sdlc/bootstrap-state/v1",
-      release,
-      lockDigest,
-      platform: host.platform,
-      architecture: host.architecture,
-      adapters,
-    };
-    writeCanonicalEvidence(resolve(staging, "state.json"), state);
-    renameSync(staging, directory);
-    return adapters;
-  } catch (error) {
-    rmSync(staging, { recursive: true, force: true });
-    throw error;
+  mkdirSync(join(directory, "bin"), { recursive: true, mode: 0o700 });
+  let capabilities = prerequisites.adapters;
+  if (host.platform === "darwin") {
+    const python = capabilities.find((value) => value.name === "python")!;
+    const uv = await materializeCatalogueUv(
+      options,
+      host,
+      stateRoot,
+      directory,
+      prerequisites.installerUv,
+      python,
+    );
+    capabilities = [...capabilities, { ...uv, provider: "catalogue-distribution" }];
   }
+  const adapters = capabilities.map((value) => resolvedAdapter(stateRoot, stateKey, value));
+  materializeDependencies(options, stateRoot, directory, dependencies, adapters);
+  const state: BootstrapState = {
+    schema: "tc.sdlc/bootstrap-state/v3",
+    release: options.catalogue.release.version,
+    lockDigest,
+    dependencyDigest,
+    platform: host.platform,
+    architecture: host.architecture,
+    adapters,
+    dependencies: dependencies.map(({ manager, lockDigest: value, manifestDigest, environment }) => ({
+      manager,
+      lockDigest: value,
+      manifestDigest,
+      environment,
+    })),
+  };
+  writeCanonicalEvidence(join(directory, "state.json"), state);
+  return adapters;
 }
 
 function validateWarmState(
+  options: BootstrapOptions,
+  host: BootstrapHost,
   stateRoot: string,
   stateKey: string,
-  release: string,
   lockDigest: string,
-  host: BootstrapHost,
-  declaration: SdlcDeclaration,
+  dependencyDigest: string,
+  dependencies: readonly DependencyLock[],
+  prerequisites: ReturnType<typeof hostCapabilities>,
 ): readonly ResolvedAdapter[] | null {
   const statePath = resolve(stateRoot, stateKey, "state.json");
   rejectSymlinkComponents(stateRoot, statePath);
@@ -531,7 +795,7 @@ function validateWarmState(
       throw new BootstrapFailure("state_corrupt", [
         {
           code: "BOOTSTRAP_STATE_PARTIAL",
-          message: "release state exists without a valid immutable manifest",
+          message: "release state exists without a valid completion manifest",
           action: "discard the partial release state and bootstrap online again",
         },
       ]);
@@ -539,63 +803,76 @@ function validateWarmState(
     return null;
   }
   try {
-    if (lstatSync(statePath).isSymbolicLink()) {
-      throw new Error("state manifest symlink");
-    }
     const state = readCanonical(statePath) as BootstrapState;
+    const expectedDependencies = dependencies.map(({ manager, lockDigest: value, manifestDigest, environment }) => ({
+      manager,
+      lockDigest: value,
+      manifestDigest,
+      environment,
+    }));
     if (
-      state.schema !== "tc.sdlc/bootstrap-state/v1" ||
-      state.release !== release ||
+      state.schema !== "tc.sdlc/bootstrap-state/v3" ||
+      state.release !== options.catalogue.release.version ||
       state.lockDigest !== lockDigest ||
+      state.dependencyDigest !== dependencyDigest ||
       state.platform !== host.platform ||
       state.architecture !== host.architecture ||
+      canonicalJson(state.dependencies) !== canonicalJson(expectedDependencies) ||
       !Array.isArray(state.adapters) ||
       state.adapters.length !== contracts.length
     ) {
       throw new Error("state bindings mismatch");
     }
-    const adapterPath = resolve(stateRoot, stateKey, "artifacts");
+    const current = new Map(prerequisites.adapters.map((value) => [value.name, value]));
+    const adapterPath = [
+      ...new Set(state.adapters.map((adapter) => dirname(adapter.executable))),
+      "/usr/local/bin",
+      "/usr/bin",
+      "/bin",
+    ].join(":");
     for (const [index, contract] of contracts.entries()) {
       const adapter = state.adapters[index];
       if (
         adapter === undefined ||
         adapter.name !== contract.name ||
-        adapter.version !== contract.expected(declaration) ||
-        adapter.artifact !== posix.join(stateKey, "artifacts", adapter.name) ||
+        adapter.version !== contract.expected(options.declaration) ||
         adapter.launcher !== posix.join(stateKey, "bin", adapter.name)
       ) {
         throw new Error("adapter bindings mismatch");
       }
       const launcher = resolve(stateRoot, adapter.launcher);
-      const artifact = resolve(stateRoot, adapter.artifact);
       rejectSymlinkComponents(stateRoot, launcher);
-      rejectSymlinkComponents(stateRoot, artifact);
       if (
         !existsSync(launcher) ||
         lstatSync(launcher).isSymbolicLink() ||
-        !lstatSync(launcher).isFile() ||
         fileDigest(launcher) !== adapter.launcherDigest ||
-        !existsSync(artifact) ||
-        lstatSync(artifact).isSymbolicLink() ||
-        !lstatSync(artifact).isFile() ||
-        fileDigest(artifact) !== adapter.executableDigest
+        !existsSync(adapter.executable) ||
+        lstatSync(adapter.executable).isSymbolicLink() ||
+        fileDigest(adapter.executable) !== adapter.executableDigest
       ) {
         throw new Error("adapter artifact mismatch");
       }
-      const observed = probe(
-        contract,
-        artifact,
-        adapter.version,
-        adapterPath,
+      const hostCapability = current.get(adapter.name);
+      if (
+        adapter.provider !== "catalogue-distribution" &&
+        (hostCapability === undefined ||
+          hostCapability.executable !== adapter.executable ||
+          hostCapability.executableDigest !== adapter.executableDigest)
+      ) {
+        throw new Error("host prerequisite changed");
+      }
+      const observed = contract.observed(
+        probeOutput(adapter.executable, adapterPath),
       );
-      if (observed.executableDigest !== adapter.executableDigest) {
-        throw new Error("adapter executable changed");
+      if (observed === null || !contract.matches(observed, adapter.version)) {
+        throw new Error("adapter version changed");
       }
       if (
         adapter.adapterDigest !==
         digest({
           name: adapter.name,
           version: adapter.version,
+          provider: adapter.provider,
           executableDigest: adapter.executableDigest,
           launcherDigest: adapter.launcherDigest,
         })
@@ -603,8 +880,14 @@ function validateWarmState(
         throw new Error("adapter digest mismatch");
       }
     }
+    for (const dependency of state.dependencies) {
+      if (!existsSync(resolve(stateRoot, stateKey, dependency.environment))) {
+        throw new Error("dependency environment missing");
+      }
+    }
     return state.adapters;
-  } catch {
+  } catch (error) {
+    if (error instanceof BootstrapFailure) throw error;
     throw new BootstrapFailure("state_corrupt", [
       {
         code: "BOOTSTRAP_STATE_CORRUPT",
@@ -615,32 +898,11 @@ function validateWarmState(
   }
 }
 
-function normalHost(value: BootstrapOptions["host"]): BootstrapHost {
-  const platform = value?.platform ?? process.platform;
-  if (platform !== "darwin" && platform !== "linux") {
-    throw new BootstrapFailure("platform_unsupported", [
-      {
-        code: "PLATFORM_UNSUPPORTED",
-        message: `native bootstrap does not support ${platform}`,
-        action: "use a supported macOS or Linux host or the canonical image",
-      },
-    ]);
-  }
-  return {
-    platform,
-    architecture: value?.architecture ?? process.arch,
-    path: value?.path ?? process.env.PATH ?? "",
-    offline: value?.offline ?? false,
-  };
-}
-
 function failureReason(error: unknown): Readonly<{
   reason: string;
   diagnostics: readonly BootstrapDiagnostic[];
 }> {
-  if (error instanceof BootstrapFailure) {
-    return error;
-  }
+  if (error instanceof BootstrapFailure) return error;
   if (error instanceof SdlcError && error.code === "LOCK_STALE") {
     return {
       reason: "stale_lock",
@@ -658,8 +920,8 @@ function failureReason(error: unknown): Readonly<{
     diagnostics: [
       {
         code: error instanceof SdlcError ? error.code : "BOOTSTRAP_FAILED",
-        message: error instanceof Error ? error.message : String(error),
-        action: "correct the reported bootstrap failure and retry",
+        message: "bootstrap could not materialise the declared environment",
+        action: "discard any partial release state, correct the prerequisite or lock failure, and retry",
       },
     ],
   };
@@ -669,58 +931,86 @@ export function serialiseBootstrapReceipt(receipt: BootstrapReceipt): string {
   return canonicalJson(receipt);
 }
 
+function failedReceipt(
+  options: BootstrapOptions,
+  host: BootstrapHost,
+  stateKey: string,
+  reused: boolean,
+  taskIdentities: readonly string[],
+  adapters: readonly BootstrapAdapterEvidence[],
+  dependencies: readonly BootstrapDependencyEvidence[],
+  failure: Readonly<{ reason: string; diagnostics: readonly BootstrapDiagnostic[] }>,
+  maximumDiagnostics: number,
+): BootstrapReceipt {
+  return {
+    schema: "tc.sdlc/bootstrap-receipt/v1",
+    status: "failed",
+    reason: failure.reason,
+    release: options.catalogue.release.version,
+    lockDigest: digest(options.lock),
+    platform: host.platform,
+    architecture: host.architecture,
+    stateKey,
+    reused,
+    taskIdentities,
+    adapters,
+    dependencies,
+    diagnostics: failure.diagnostics.slice(0, maximumDiagnostics),
+    diagnosticsCount: failure.diagnostics.length,
+    diagnosticsTruncated: failure.diagnostics.length > maximumDiagnostics,
+  };
+}
+
 export async function bootstrap(options: BootstrapOptions): Promise<BootstrapReceipt> {
   const maximumDiagnostics = options.maxDiagnostics ?? 20;
   if (!Number.isSafeInteger(maximumDiagnostics) || maximumDiagnostics < 1) {
     throw new TypeError("maxDiagnostics must be a positive safe integer");
   }
-  let host: BootstrapHost;
-  try {
-    host = normalHost(options.host);
-  } catch (error) {
-    const fallbackPlatform = process.platform === "linux" ? "linux" : "darwin";
-    host = {
-      platform: fallbackPlatform,
-      architecture: options.host?.architecture ?? process.arch,
-      path: options.host?.path ?? "",
-      offline: options.host?.offline ?? false,
-    };
-    const failure = failureReason(error);
-    const receipt = failedReceipt(options, host, "unresolved", false, [], [], failure, maximumDiagnostics);
-    writeCanonicalEvidence(options.receiptPath, receipt);
-    return receipt;
-  }
+  const fallbackPlatform = process.platform === "linux" ? "linux" : "darwin";
+  let host: BootstrapHost = {
+    platform: fallbackPlatform,
+    architecture: options.host?.architecture ?? process.arch,
+    offline: options.host?.offline ?? false,
+  };
   const lockDigest = digest(options.lock);
-  const stateKey = posix.join(
-    "releases",
-    lockDigest.slice("sha256:".length),
-    `${host.platform}-${host.architecture}`,
-  );
+  let stateKey = "unresolved";
   let reused = false;
   let taskIdentities: readonly string[] = [];
   let adapters: readonly BootstrapAdapterEvidence[] = [];
+  let dependencyEvidence: readonly BootstrapDependencyEvidence[] = [];
   try {
+    host = normalHost(options.host);
     assertCurrentLock(options.lock, options.declaration, options.catalogue);
     const inventory = resolveInputInventory(options.root, options.declaration);
-    const bound = bindGraphLock(
-      options.declaration,
-      options.lock,
-      options.catalogue,
-      inventory,
-    );
-    taskIdentities = buildGraph(options.declaration, bound).tasks.map(
-      (task) => task.identity,
+    const bound = bindGraphLock(options.declaration, options.lock, options.catalogue, inventory);
+    taskIdentities = buildGraph(options.declaration, bound).tasks.map((task) => task.identity);
+    const dependencies = dependencyLocks(options.root);
+    dependencyEvidence = dependencies.map(({ manager, lockDigest: value, manifestDigest, environment }) => ({
+      manager,
+      lockDigest: value,
+      manifestDigest,
+      environment,
+    }));
+    const dependencyDigest = digest(dependencyEvidence);
+    stateKey = posix.join(
+      "releases",
+      lockDigest.slice("sha256:".length),
+      dependencyDigest.slice("sha256:".length),
+      `${host.platform}-${host.architecture}`,
     );
     const stateRoot = validateStateRoot(options.root, options.stateRoot);
     const ownership = inspectOwnership(stateRoot);
+    const prerequisites = hostCapabilities(host, options.declaration, options.catalogue);
     if (ownership === "owned") {
       const warm = validateWarmState(
+        options,
+        host,
         stateRoot,
         stateKey,
-        options.catalogue.release.version,
         lockDigest,
-        host,
-        options.declaration,
+        dependencyDigest,
+        dependencies,
+        prerequisites,
       );
       if (warm !== null) {
         reused = true;
@@ -737,19 +1027,22 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
           },
         ]);
       }
-      const discovered = discoverAdapters(options.declaration, host);
       mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
       chmodSync(stateRoot, 0o700);
       if (ownership === "absent") {
         writeCanonicalEvidence(join(stateRoot, ".tc-sdlc-owner.json"), OWNER);
       }
-      adapters = materializeAdapters(
-        stateRoot,
-        stateKey,
-        options.catalogue.release.version,
-        lockDigest,
-        host,
-        discovered,
+      adapters = (
+        await materializeState(
+          options,
+          host,
+          stateRoot,
+          stateKey,
+          lockDigest,
+          dependencyDigest,
+          dependencies,
+          prerequisites,
+        )
       ).map(adapterEvidence);
     }
     const receipt: BootstrapReceipt = {
@@ -764,6 +1057,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       reused,
       taskIdentities,
       adapters,
+      dependencies: dependencyEvidence,
       diagnostics: [],
       diagnosticsCount: 0,
       diagnosticsTruncated: false,
@@ -771,7 +1065,6 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
     writeCanonicalEvidence(options.receiptPath, receipt);
     return receipt;
   } catch (error) {
-    const failure = failureReason(error);
     const receipt = failedReceipt(
       options,
       host,
@@ -779,41 +1072,11 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       reused,
       taskIdentities,
       adapters,
-      failure,
+      dependencyEvidence,
+      failureReason(error),
       maximumDiagnostics,
     );
     writeCanonicalEvidence(options.receiptPath, receipt);
     return receipt;
   }
-}
-
-function failedReceipt(
-  options: BootstrapOptions,
-  host: BootstrapHost,
-  stateKey: string,
-  reused: boolean,
-  taskIdentities: readonly string[],
-  adapters: readonly BootstrapAdapterEvidence[],
-  failure: Readonly<{
-    reason: string;
-    diagnostics: readonly BootstrapDiagnostic[];
-  }>,
-  maximumDiagnostics: number,
-): BootstrapReceipt {
-  return {
-    schema: "tc.sdlc/bootstrap-receipt/v1",
-    status: "failed",
-    reason: failure.reason,
-    release: options.catalogue.release.version,
-    lockDigest: digest(options.lock),
-    platform: host.platform,
-    architecture: host.architecture,
-    stateKey,
-    reused,
-    taskIdentities,
-    adapters,
-    diagnostics: failure.diagnostics.slice(0, maximumDiagnostics),
-    diagnosticsCount: failure.diagnostics.length,
-    diagnosticsTruncated: failure.diagnostics.length > maximumDiagnostics,
-  };
 }

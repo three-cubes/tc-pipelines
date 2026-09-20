@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, test } from "vitest";
 
+import * as sdlc from "../dist/index.js";
+
 const CLI = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 
 const declaration = `schema: tc.sdlc/v1
@@ -56,6 +58,7 @@ const catalogue = {
       python: "3.13",
       uv: "0.12.5",
     },
+    bootstrap: sdlc.CANONICAL_SDLC_BOOTSTRAP,
   },
 } as const;
 
@@ -157,6 +160,7 @@ schema: tc.sdlc/v1
 `;
     const reorderedCatalogue = {
       release: {
+        bootstrap: catalogue.release.bootstrap,
         toolchains: catalogue.release.toolchains,
         fitness: catalogue.release.fitness,
         lockSchema: catalogue.release.lockSchema,

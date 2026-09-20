@@ -18,7 +18,8 @@
         "declarationSchema",
         "lockSchema",
         "fitness",
-        "toolchains"
+        "toolchains",
+        "bootstrap"
       ],
       "properties": {
         "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
@@ -54,7 +55,48 @@
             "packageManager": { "const": "pnpm@11.22.0" },
             "uv": { "const": "0.12.5" }
           }
+        },
+        "bootstrap": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["uv"],
+          "properties": {
+            "uv": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["package", "version", "wheels"],
+              "properties": {
+                "package": { "const": "uv" },
+                "version": { "const": "0.12.5" },
+                "wheels": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"],
+                  "properties": {
+                    "darwin-arm64": { "$ref": "#/$defs/distribution" },
+                    "darwin-x64": { "$ref": "#/$defs/distribution" },
+                    "linux-arm64": { "$ref": "#/$defs/distribution" },
+                    "linux-x64": { "$ref": "#/$defs/distribution" }
+                  }
+                }
+              }
+            }
+          }
         }
+      }
+    }
+  },
+  "$defs": {
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sha256"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^https://files\\.pythonhosted\\.org/packages/[a-f0-9/]+/uv-0\\.12\\.5-[A-Za-z0-9_.-]+\\.whl$"
+        },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       }
     }
   }

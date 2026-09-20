@@ -68,6 +68,18 @@ export type ReleaseEntry = Readonly<{
   lockSchema: "tc.sdlc/lock/v1";
   fitness: SdlcFitness;
   toolchains: SdlcToolchains;
+  bootstrap: Readonly<{
+    uv: Readonly<{
+      package: "uv";
+      version: "0.12.5";
+      wheels: Readonly<
+        Record<
+          "darwin-arm64" | "darwin-x64" | "linux-arm64" | "linux-x64",
+          Readonly<{ url: string; sha256: string }>
+        >
+      >;
+    }>;
+  }>;
 }>;
 
 export type ReleaseCatalogue = Readonly<{
