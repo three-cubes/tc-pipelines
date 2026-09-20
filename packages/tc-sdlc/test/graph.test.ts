@@ -556,8 +556,16 @@ describe("tc-sdlc graph", () => {
   });
 
   test.each([
-    ["direct change and downstream consumers", ["services/api/src/main.ts"], ["api:test", "web:test"]],
-    ["Windows path syntax", ["services\\api\\src\\main.ts"], ["api:test", "web:test"]],
+    [
+      "direct change, prerequisites and downstream consumers",
+      ["services/api/src/main.ts"],
+      ["api:test", "schema:test", "web:test"],
+    ],
+    [
+      "Windows path syntax",
+      ["services\\api\\src\\main.ts"],
+      ["api:test", "schema:test", "web:test"],
+    ],
     [
       "generated-output propagation",
       ["packages/schema/spec.yaml"],
@@ -614,6 +622,50 @@ describe("tc-sdlc graph", () => {
     const allKeys = graph.tasks.map((task: { key: string }) => task.key);
 
     expect(selectedKeys).toEqual(expected === "all" ? allKeys : expected);
+  });
+
+  test("closes affected selection over transitive target and project prerequisites", () => {
+    const input = {
+      ...declaration([
+        { name: "web", root: "apps/web", dependsOn: ["api"] },
+        { name: "docs", root: "docs" },
+        { name: "api", root: "services/api", dependsOn: ["schema"] },
+        { name: "schema", root: "packages/schema" },
+      ]),
+      targets: {
+        prepare: { command: "make prepare", inputs: ["prepare.trigger"] },
+        build: {
+          command: "make build",
+          dependsOn: ["prepare"],
+          inputs: ["build.trigger"],
+        },
+        check: {
+          command: "make check",
+          dependsOn: ["build"],
+          inputs: ["check.trigger"],
+        },
+      },
+    } as const;
+    const { graph } = lockedGraph(input as never);
+
+    const identities = (sdlc as Record<string, any>).selectAffected(graph, [
+      "apps/web/check.trigger",
+    ]) as readonly string[];
+    const selectedKeys = graph.tasks
+      .filter((task: { identity: string }) => identities.includes(task.identity))
+      .map((task: { key: string }) => task.key);
+
+    expect(selectedKeys).toEqual([
+      "api:build",
+      "api:check",
+      "api:prepare",
+      "schema:build",
+      "schema:check",
+      "schema:prepare",
+      "web:build",
+      "web:check",
+      "web:prepare",
+    ]);
   });
 
   test("uses Linux-sensitive and macOS/Windows-insensitive changed-path matching", () => {

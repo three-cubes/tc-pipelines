@@ -170,6 +170,79 @@ describe("tc-sdlc runtime", () => {
     );
   });
 
+  test("runs every prerequisite returned by affected selection before its consumer", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-"));
+    writeFileSync(
+      join(directory, "prepare.mjs"),
+      'import { writeFileSync } from "node:fs"; writeFileSync("prepared", "yes");\n',
+    );
+    writeFileSync(
+      join(directory, "check.mjs"),
+      'import { existsSync } from "node:fs"; if (!existsSync("prepared")) process.exit(9); console.log("checked");\n',
+    );
+    const graph = graphFor({
+      prepare: runtimeTarget("node prepare.mjs", {
+        inputs: ["prepare.trigger"],
+      }),
+      check: runtimeTarget("node check.mjs", {
+        dependsOn: ["prepare"],
+        inputs: ["check.trigger"],
+      }),
+    });
+    const selection = (sdlc as Record<string, any>).selectAffected(graph, [
+      "check.trigger",
+    ]);
+
+    const receipt = await (sdlc as Record<string, any>).runGraph(
+      graph,
+      selection,
+      {
+        cwd: directory,
+        receiptPath: join(directory, "run-receipt.json"),
+        capacity: { cpu: 2, memoryMiB: 256 },
+      },
+    );
+
+    expect(
+      graph.tasks
+        .filter((task: { identity: string }) => selection.includes(task.identity))
+        .map((task: { key: string }) => task.key),
+    ).toEqual(["fixture:check", "fixture:prepare"]);
+    expect(receipt.status).toBe("succeeded");
+    expect(receipt.tasks.map((task: Record<string, unknown>) => task.status)).toEqual([
+      "succeeded",
+      "succeeded",
+    ]);
+  });
+
+  test("rejects a caller selection that omits a required dependency", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-"));
+    const receiptPath = join(directory, "run-receipt.json");
+    const graph = graphFor({
+      prepare: runtimeTarget(
+        'node -e \'require("node:fs").writeFileSync("prepare-started", "yes")\'',
+      ),
+      check: runtimeTarget(
+        'node -e \'require("node:fs").writeFileSync("check-started", "yes")\'',
+        { dependsOn: ["prepare"] },
+      ),
+    });
+    const check = graph.tasks.find(
+      (task: { key: string }) => task.key === "fixture:check",
+    );
+
+    await expect(
+      (sdlc as Record<string, any>).runGraph(graph, [check.identity], {
+        cwd: directory,
+        receiptPath,
+        capacity: { cpu: 1, memoryMiB: 256 },
+      }),
+    ).rejects.toMatchObject({ code: "RUN_SELECTION_INVALID" });
+    expect(existsSync(receiptPath)).toBe(false);
+    expect(existsSync(join(directory, "prepare-started"))).toBe(false);
+    expect(existsSync(join(directory, "check-started"))).toBe(false);
+  });
+
   test("runs independent ready tasks concurrently within injected capacity", async () => {
     const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-"));
     const rendezvous = (self: string, peer: string) => `

@@ -585,6 +585,16 @@ export async function runGraph(
     );
   }
   const selectedKeys = new Set(tasks.map((task) => task.key));
+  for (const task of tasks) {
+    for (const dependency of task.dependsOn) {
+      if (!selectedKeys.has(dependency)) {
+        throw new SdlcError(
+          "RUN_SELECTION_INVALID",
+          `selection omits dependency ${dependency} required by ${task.key}`,
+        );
+      }
+    }
+  }
   const receipts = new Map<string, TaskReceipt>();
   const pending = new Set(tasks.map((task) => task.key));
   const capacity = options.capacity ?? detectedCapacity();
@@ -618,7 +628,7 @@ export async function runGraph(
         advanced = true;
         continue;
       }
-      const dependencies = task.dependsOn.filter((key) => selectedKeys.has(key));
+      const dependencies = task.dependsOn;
       if (dependencies.some((key) => !receipts.has(key))) {
         continue;
       }

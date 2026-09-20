@@ -391,6 +391,9 @@ export function selectAffected(
       );
     }
     selected.add(key);
+    for (const dependency of task.dependsOn) {
+      selectTask(dependency);
+    }
     for (const output of task.outputs) {
       const outputSelector = resolveProjectPath(task.projectRoot, output);
       enqueuePath(outputSelector);

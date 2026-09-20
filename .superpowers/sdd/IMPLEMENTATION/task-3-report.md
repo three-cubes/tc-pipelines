@@ -224,3 +224,115 @@ Both diff checks exited 0 without output and no package-local lockfile exists.
 - No Task 1 or Task 2 public behaviour was removed or narrowed.
 
 No implementation blocker or known acceptance gap remains.
+
+## Review remediation — dependency-closed affected execution
+
+The first Task 3 review found that `selectAffected` selected downstream
+consumers but did not close the result over their prerequisites. `runGraph`
+then filtered dependency keys to the caller's selection, which silently treated
+an omitted prerequisite as satisfied. A changed `check` input could therefore
+run `check` without its declared `prepare` task.
+
+### RED
+
+Three built-public regressions were added before production changes:
+
+```text
+pnpm --filter @three-cubes/tc-sdlc build
+pnpm --filter @three-cubes/tc-sdlc exec vitest run \
+  test/graph.test.ts test/runtime.test.ts \
+  -t 'closes affected selection|runs every prerequisite|rejects a caller selection'
+```
+
+Exit 1: 3 failed and 70 skipped.
+
+- The transitive multi-project selector case returned only `web:check` rather
+  than all nine required `prepare`/`build`/`check` tasks across `schema`, `api`
+  and `web`.
+- The end-to-end affected selection returned only `fixture:check`, so the
+  prerequisite-created state was absent.
+- Direct `runGraph([check])` resolved successfully and started `check` despite
+  its omitted `prepare` dependency.
+
+### Implementation
+
+- `selectAffected` now recursively selects every declared task prerequisite as
+  well as retaining generated-output and downstream-consumer propagation.
+- The public result remains in canonical graph order, independent of recursive
+  traversal order.
+- `runGraph` now validates every selected task's complete direct dependency set
+  before capacity detection, process start or receipt creation and rejects an
+  incomplete caller selection with `RUN_SELECTION_INVALID`.
+- Scheduler dependency handling now uses the complete declared dependency list;
+  it no longer filters omitted keys away.
+- Existing direct-change expectations now include the required upstream
+  `schema:test` while retaining downstream `web:test`.
+
+### GREEN and complete verification
+
+Targeted review cases:
+
+```text
+pnpm --filter @three-cubes/tc-sdlc build
+pnpm --filter @three-cubes/tc-sdlc exec vitest run \
+  test/graph.test.ts test/runtime.test.ts \
+  -t 'closes affected selection|runs every prerequisite|rejects a caller selection'
+```
+
+Exit 0: 3 passed and 70 skipped.
+
+Complete graph/runtime focus:
+
+```text
+pnpm --filter @three-cubes/tc-sdlc build
+pnpm --filter @three-cubes/tc-sdlc exec vitest run \
+  test/graph.test.ts test/runtime.test.ts
+```
+
+Exit 0: 2 files and 73 tests passed.
+
+Frozen dependency and complete package gate:
+
+```text
+corepack pnpm install --frozen-lockfile
+git diff --exit-code -- pnpm-lock.yaml
+pnpm build
+pnpm test
+```
+
+Exit 0: the root lock remained unchanged; 3 files and 83 tests passed.
+
+Repository Python suite:
+
+```text
+uv run --no-sync pytest -q
+```
+
+Exit 0: 1,974 passed in 89.46 seconds.
+
+Full fitness gate:
+
+```text
+uv run --no-sync tc-fitness run
+```
+
+Exit 0: 1,974 passed in 110.60 seconds, followed by PASS for all five
+self-gate checks with 0 skipped.
+
+Packed-consumer verification:
+
+```text
+corepack pnpm --filter @three-cubes/tc-sdlc pack --pack-destination <temp>
+corepack pnpm --dir <empty-consumer> add <tarball>
+node --input-type=module <public export/arity probe>
+```
+
+Exit 0. A clean consumer imported `buildGraph`, `selectAffected` and `runGraph`;
+the two-argument `buildGraph` and three-argument `runGraph` interfaces remain
+unchanged. The tarball retained the graph/runtime JavaScript and declaration
+files.
+
+The remediation uses only built-package functions and real processes/files. No
+mock, monkeypatch, test seam, baseline, suppression, threshold change or
+source-form assertion was added. Downstream affected and generated-output
+closure remain covered by the complete graph suite.
