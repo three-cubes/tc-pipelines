@@ -52,7 +52,7 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "oneOf": [
+        "anyOf": [
           { "required": ["command"], "properties": { "command": {} } },
           { "required": ["executor"], "properties": { "executor": {} } }
         ],

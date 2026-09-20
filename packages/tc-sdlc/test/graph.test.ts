@@ -45,11 +45,26 @@ function declaration(projects: readonly Record<string, unknown>[]) {
   } as const;
 }
 
-function lockedGraph(input: ReturnType<typeof declaration>) {
+function emptyTaskInputs(input: ReturnType<typeof declaration>) {
+  return Object.fromEntries(
+    input.projects.flatMap((project) =>
+      Object.keys(input.targets).map((target) => [`${project.name}:${target}`, []]),
+    ),
+  );
+}
+
+function lockedGraph(
+  input: ReturnType<typeof declaration>,
+  inputs: Readonly<Record<string, readonly Record<string, string>[]>> =
+    emptyTaskInputs(input),
+) {
   const catalogue = sdlc.createReleaseCatalogue(release);
   const lock = sdlc.resolveLock(input as never, catalogue);
   return {
-    graph: (sdlc as Record<string, any>).buildGraph(input, lock),
+    graph: (sdlc as Record<string, any>).buildGraph(input, lock, {
+      catalogue,
+      inputs,
+    }),
     serialise: (sdlc as Record<string, any>).serialiseGraph as (value: unknown) => string,
   };
 }
@@ -105,8 +120,16 @@ describe("tc-sdlc graph", () => {
         traversalOrder: 1,
       },
       [
-        { path: "services/api/src/main.ts", digest: "sha256:2222" },
-        { path: "shared/config.json", digest: "sha256:1111" },
+        {
+          path: "services/api/src/main.ts",
+          digest:
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        },
+        {
+          path: "shared/config.json",
+          digest:
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        },
       ],
       lockDigest,
     );
@@ -124,8 +147,16 @@ describe("tc-sdlc graph", () => {
         traversalOrder: 99,
       },
       [
-        { path: "shared\\config.json", digest: "sha256:1111" },
-        { path: "services\\api\\src\\main.ts", digest: "sha256:2222" },
+        {
+          path: "shared\\config.json",
+          digest:
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        },
+        {
+          path: "services\\api\\src\\main.ts",
+          digest:
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        },
       ],
       lockDigest,
     );
@@ -153,7 +184,11 @@ describe("tc-sdlc graph", () => {
       "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const identity = identify(
       task,
-      [{ path: "services/api/src/main.ts", digest: "sha256:1111" }],
+      [{
+        path: "services/api/src/main.ts",
+        digest:
+          "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      }],
       lockDigest,
     );
 
@@ -162,17 +197,29 @@ describe("tc-sdlc graph", () => {
         identity,
         identify(
           { ...task, command: "make check-all" },
-          [{ path: "services/api/src/main.ts", digest: "sha256:1111" }],
+          [{
+            path: "services/api/src/main.ts",
+            digest:
+              "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          }],
           lockDigest,
         ),
         identify(
           task,
-          [{ path: "services/api/src/main.ts", digest: "sha256:2222" }],
+          [{
+            path: "services/api/src/main.ts",
+            digest:
+              "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          }],
           lockDigest,
         ),
         identify(
           task,
-          [{ path: "services/api/src/main.ts", digest: "sha256:1111" }],
+          [{
+            path: "services/api/src/main.ts",
+            digest:
+              "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          }],
           "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         ),
       ]).size,
@@ -185,7 +232,11 @@ describe("tc-sdlc graph", () => {
     [
       "traversing digested input",
       {},
-      [{ path: "../outside", digest: "sha256:1111" }],
+      [{
+        path: "../outside",
+        digest:
+          "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      }],
     ],
   ])("rejects %s when computing task identity", (_name, taskChange, inputs) => {
     const task = {
@@ -327,13 +378,158 @@ describe("tc-sdlc graph", () => {
     const changed = declaration([{ name: "api", root: "services/renamed-api" }]);
 
     expect(() =>
-      (sdlc as Record<string, any>).buildGraph(changed, staleLock),
+      (sdlc as Record<string, any>).buildGraph(changed, staleLock, {
+        catalogue,
+        inputs: emptyTaskInputs(changed),
+      }),
+    ).toThrowError(expect.objectContaining({ code: "LOCK_STALE" }));
+  });
+
+  test("emitted graph task identity binds canonical content input digests", () => {
+    const input = {
+      ...declaration([{ name: "api", root: "services/api" }]),
+      targets: {
+        check: { command: "make check", inputs: ["src/**"] },
+      },
+    } as const;
+    const firstInputs = {
+      "api:check": [
+        {
+          path: "services/api/src/main.ts",
+          digest:
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        },
+      ],
+    };
+    const secondInputs = {
+      "api:check": [
+        {
+          path: "services\\api\\src\\main.ts",
+          digest:
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        },
+      ],
+    };
+    const equivalentInputs = {
+      "api:check": [
+        {
+          path: "services\\api\\src\\main.ts",
+          digest:
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        },
+      ],
+    };
+
+    const first = lockedGraph(input as never, firstInputs).graph.tasks[0];
+    const second = lockedGraph(input as never, secondInputs).graph.tasks[0];
+    const equivalent = lockedGraph(
+      input as never,
+      equivalentInputs,
+    ).graph.tasks[0];
+
+    expect(first.identity).not.toBe(second.identity);
+    expect(first.identity).toBe(equivalent.identity);
+    expect(first.inputDigests).toEqual([
+      {
+        path: "services/api/src/main.ts",
+        digest:
+          "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      },
+    ]);
+    expect(second.inputDigests).toEqual([
+      {
+        path: "services/api/src/main.ts",
+        digest:
+          "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      },
+    ]);
+  });
+
+  test.each([
+    ["missing task inventory", {}],
+    ["unknown task inventory", { "api:check": [], "ghost:check": [] }],
+    [
+      "non-canonical content digest",
+      {
+        "api:check": [
+          { path: "services/api/src/main.ts", digest: "sha256:not-canonical" },
+        ],
+      },
+    ],
+    [
+      "unconsumed content path",
+      {
+        "api:check": [
+          {
+            path: "services/api/other.txt",
+            digest:
+              "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          },
+        ],
+      },
+    ],
+  ])("rejects %s at the pre-execution digest boundary", (_name, inputs) => {
+    const input = {
+      ...declaration([{ name: "api", root: "services/api" }]),
+      targets: {
+        check: { command: "make check", inputs: ["src/**"] },
+      },
+    } as const;
+
+    expect(() => lockedGraph(input as never, inputs)).toThrowError(
+      expect.objectContaining({ code: "GRAPH_INPUT_DIGEST_INVALID" }),
+    );
+  });
+
+  test("requires explicit lock authority and content inputs for graph planning", () => {
+    const input = declaration([{ name: "api", root: "services/api" }]);
+    const catalogue = sdlc.createReleaseCatalogue(release);
+    const lock = sdlc.resolveLock(input as never, catalogue);
+
+    expect(() =>
+      (sdlc as Record<string, any>).buildGraph(input, lock),
+    ).toThrowError(expect.objectContaining({ code: "GRAPH_CONTEXT_INVALID" }));
+  });
+
+  test.each([
+    ["catalogue digest", (lock: Record<string, any>) => {
+      lock.catalogueDigest =
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    }],
+    ["release", (lock: Record<string, any>) => {
+      lock.release = "9.9.9";
+    }],
+    ["package version", (lock: Record<string, any>) => {
+      lock.package.version = "9.9.9";
+    }],
+    ["workflow commit", (lock: Record<string, any>) => {
+      lock.workflowCommit = "abcdef1234567890abcdef1234567890abcdef12";
+    }],
+    ["image digest", (lock: Record<string, any>) => {
+      lock.imageDigest =
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    }],
+  ])("rejects a schema-valid hand edit to lock %s", (_name, sabotage) => {
+    const input = declaration([{ name: "api", root: "services/api" }]);
+    const catalogue = sdlc.createReleaseCatalogue(release);
+    const lock = structuredClone(sdlc.resolveLock(input as never, catalogue)) as Record<
+      string,
+      any
+    >;
+    sabotage(lock);
+
+    expect(() =>
+      (sdlc as Record<string, any>).buildGraph(input, lock, {
+        catalogue,
+        inputs: emptyTaskInputs(input),
+      }),
     ).toThrowError(expect.objectContaining({ code: "LOCK_STALE" }));
   });
 
   test.each([
     ["direct change and downstream consumers", ["services/api/src/main.ts"], ["api:test", "web:test"]],
     ["Windows path syntax", ["services\\api\\src\\main.ts"], ["api:test", "web:test"]],
+    ["case-equivalent path", ["Services/API/SRC/main.ts"], ["api:test", "web:test"]],
     [
       "generated-output propagation",
       ["packages/schema/spec.yaml"],
@@ -352,6 +548,7 @@ describe("tc-sdlc graph", () => {
       ["api:check", "docs:check", "schema:check", "web:check"],
     ],
     ["declaration invalidation", ["sdlc.yaml"], "all"],
+    ["case-equivalent declaration invalidation", ["SDLC.YAML"], "all"],
     ["lock invalidation", ["tc-sdlc.lock"], "all"],
     ["unrelated change", ["unrelated/notes.txt"], []],
   ])("selects affected tasks for %s", (_name, changedPaths, expected) => {
@@ -390,6 +587,33 @@ describe("tc-sdlc graph", () => {
     const allKeys = graph.tasks.map((task: { key: string }) => task.key);
 
     expect(selectedKeys).toEqual(expected === "all" ? allKeys : expected);
+  });
+
+  test.each([
+    ["wildcard output to literal input", "generated/**", "generated/client.ts"],
+    ["literal output to wildcard input", "generated/client.ts", "generated/**"],
+  ])("propagates generated %s", (_name, output, consumerInput) => {
+    const input = {
+      ...declaration([{ name: "api", root: "services/api" }]),
+      targets: {
+        check: { command: "make check", inputs: [consumerInput] },
+        generate: {
+          command: "make generate",
+          inputs: ["spec.yaml"],
+          outputs: [output],
+        },
+      },
+    } as const;
+    const { graph } = lockedGraph(input as never);
+    const identities = (sdlc as Record<string, any>).selectAffected(graph, [
+      "services/api/spec.yaml",
+    ]) as readonly string[];
+
+    expect(
+      graph.tasks
+        .filter((task: { identity: string }) => identities.includes(task.identity))
+        .map((task: { key: string }) => task.key),
+    ).toEqual(["api:check", "api:generate"]);
   });
 
   test.each(["/outside/file.ts", "C:\\outside\\file.ts", "src/../../outside.ts"])(
@@ -435,7 +659,7 @@ describe("tc-sdlc graph", () => {
       },
     } as const;
     expect(() => lockedGraph(ambiguous as never)).toThrowError(
-      expect.objectContaining({ code: "SCHEMA_INVALID" }),
+      expect.objectContaining({ code: "GRAPH_EXECUTOR_INVALID" }),
     );
   });
 });

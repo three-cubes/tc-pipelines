@@ -1,9 +1,10 @@
 import { canonicalJson, digest } from "../canonical.js";
 import { SdlcError } from "../errors.js";
-import { validateLock } from "../lock/index.js";
+import { assertCurrentLock, validateLock } from "../lock/index.js";
 import { buildPresetTasks } from "../preset/index.js";
 import { validateDeclaration } from "../schema/declaration.js";
 import type {
+  GraphBuildContext,
   GraphTask,
   SdlcDeclaration,
   SdlcGraph,
@@ -11,6 +12,11 @@ import type {
   TaskIdentity,
 } from "../schema/types.js";
 import { assertRelativePath, normalisePath } from "./path.js";
+import {
+  resolveProjectPath,
+  selectorPattern,
+  taskConsumesPath,
+} from "./selector.js";
 
 export { taskIdentity } from "./identity.js";
 
@@ -174,24 +180,35 @@ function sorted(values: readonly string[]): readonly string[] {
 export function buildGraph(
   declarationValue: SdlcDeclaration,
   lockValue: SdlcLock,
+  context: GraphBuildContext,
 ): SdlcGraph {
   const declaration = validateDeclaration(declarationValue);
   const lock = validateLock(lockValue);
   validateGraphDeclaration(declarationValue, declaration);
   const declarationDigest = digest(declaration);
-  if (lock.declarationDigest !== declarationDigest) {
+  if (
+    context === undefined ||
+    context.catalogue === undefined ||
+    context.inputs === undefined
+  ) {
     throw new SdlcError(
-      "LOCK_STALE",
-      "lock does not match the declaration used for graph planning",
+      "GRAPH_CONTEXT_INVALID",
+      "graph planning requires release catalogue authority and resolved input digests",
     );
   }
+  assertCurrentLock(lock, declaration, context.catalogue);
   const lockDigest = digest(lock);
   const projects = declaration.projects.map((project) => ({
     name: project.name,
     root: project.root,
     dependsOn: sorted(project.dependsOn ?? []),
   }));
-  const tasks = buildPresetTasks(declaration, projects, lockDigest);
+  const tasks = buildPresetTasks(
+    declaration,
+    projects,
+    lockDigest,
+    context.inputs,
+  );
   assertAcyclic(tasks);
 
   return {
@@ -207,47 +224,70 @@ export function serialiseGraph(graph: SdlcGraph): string {
   return canonicalJson(graph);
 }
 
-function resolveProjectPath(root: string, path: string): string {
-  return path === "." ? root : normalisePath(`${root}/${path}`);
+function hasWildcard(selector: string): boolean {
+  return /[*?]/.test(selector);
 }
 
-function selectorPattern(selector: string): RegExp {
-  let pattern = "";
+function selectorWitnesses(selector: string): readonly string[] {
+  let witnesses = [""];
   for (let index = 0; index < selector.length; index += 1) {
     const character = selector[index] ?? "";
-    if (character === "*" && selector[index + 1] === "*") {
-      if (selector[index + 2] === "/") {
-        pattern += "(?:.*/)?";
-        index += 2;
-      } else {
-        pattern += ".*";
-        index += 1;
-      }
+    let replacements: readonly string[] = [character];
+    if (
+      character === "*" &&
+      selector[index + 1] === "*" &&
+      selector[index + 2] === "/"
+    ) {
+      replacements = ["", "x/", "x/y/"];
+      index += 2;
+    } else if (character === "*" && selector[index + 1] === "*") {
+      replacements = ["", "x", "x/y"];
+      index += 1;
     } else if (character === "*") {
-      pattern += "[^/]*";
+      replacements = ["", "x"];
     } else if (character === "?") {
-      pattern += "[^/]";
-    } else {
-      pattern += character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      replacements = ["x"];
     }
+    witnesses = witnesses
+      .flatMap((prefix) =>
+        replacements.map((replacement) => `${prefix}${replacement}`),
+      )
+      .slice(0, 64);
   }
-  return new RegExp(`^${pattern}(?:/.*)?$`);
+  return witnesses;
 }
 
-function taskConsumes(task: GraphTask, changedPath: string): boolean {
+function selectorsOverlap(left: string, right: string): boolean {
+  if (!hasWildcard(left)) {
+    return selectorPattern(right).test(left);
+  }
+  if (!hasWildcard(right)) {
+    return selectorPattern(left).test(right);
+  }
+  return (
+    selectorWitnesses(left).some((witness) =>
+      selectorPattern(right).test(witness),
+    ) ||
+    selectorWitnesses(right).some((witness) =>
+      selectorPattern(left).test(witness),
+    )
+  );
+}
+
+function taskConsumesGeneratedSelector(
+  task: GraphTask,
+  outputSelector: string,
+): boolean {
   return (
     task.inputs.some((input) =>
-      selectorPattern(resolveProjectPath(task.projectRoot, input)).test(
-        changedPath,
+      selectorsOverlap(
+        outputSelector,
+        resolveProjectPath(task.projectRoot, input),
       ),
     ) ||
     (task.sharedInputs ?? []).some((input) =>
-      selectorPattern(input).test(changedPath),
-    ) ||
-    (task.inputs.length === 0 &&
-      (task.sharedInputs ?? []).length === 0 &&
-      (changedPath === task.projectRoot ||
-        changedPath.startsWith(`${task.projectRoot}/`)))
+      selectorsOverlap(outputSelector, input),
+    )
   );
 }
 
@@ -269,8 +309,9 @@ export function selectAffected(
   const pendingPaths: string[] = [];
   const seenPaths = new Set<string>();
   const enqueuePath = (path: string): void => {
-    if (!seenPaths.has(path)) {
-      seenPaths.add(path);
+    const pathIdentity = path.toLowerCase();
+    if (!seenPaths.has(pathIdentity)) {
+      seenPaths.add(pathIdentity);
       pendingPaths.push(path);
     }
   };
@@ -287,7 +328,13 @@ export function selectAffected(
     }
     selected.add(key);
     for (const output of task.outputs) {
-      enqueuePath(resolveProjectPath(task.projectRoot, output));
+      const outputSelector = resolveProjectPath(task.projectRoot, output);
+      enqueuePath(outputSelector);
+      for (const candidate of graph.tasks) {
+        if (taskConsumesGeneratedSelector(candidate, outputSelector)) {
+          selectTask(candidate.key);
+        }
+      }
     }
     for (const consumer of consumers.get(key) ?? []) {
       selectTask(consumer);
@@ -304,14 +351,15 @@ export function selectAffected(
     if (changedPath === undefined) {
       break;
     }
-    if (changedPath === "sdlc.yaml" || changedPath === "tc-sdlc.lock") {
+    const pathIdentity = changedPath.toLowerCase();
+    if (pathIdentity === "sdlc.yaml" || pathIdentity === "tc-sdlc.lock") {
       for (const task of graph.tasks) {
         selectTask(task.key);
       }
       continue;
     }
     for (const task of graph.tasks) {
-      if (taskConsumes(task, changedPath)) {
+      if (taskConsumesPath(task, changedPath)) {
         selectTask(task.key);
       }
     }

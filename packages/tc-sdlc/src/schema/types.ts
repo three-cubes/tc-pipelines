@@ -75,6 +75,15 @@ export type InputDigest = Readonly<{
   digest: string;
 }>;
 
+export type TaskInputDigests = Readonly<
+  Record<string, readonly InputDigest[]>
+>;
+
+export type GraphBuildContext = Readonly<{
+  catalogue: ReleaseCatalogue;
+  inputs: TaskInputDigests;
+}>;
+
 export type TaskDeclaration = Readonly<{
   project: string;
   target: string;
@@ -91,6 +100,7 @@ export type GraphTask = TaskDeclaration &
   Readonly<{
     key: string;
     identity: TaskIdentity;
+    inputDigests: readonly InputDigest[];
     execution: ExecutorContract;
   }>;
 

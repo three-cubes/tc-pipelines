@@ -7,6 +7,7 @@ export { assertCurrentLock, loadLock, resolveLock, validateLock, writeLock } fro
 export { loadDeclaration, validateDeclaration } from "./schema/declaration.js";
 export type {
   GraphProject,
+  GraphBuildContext,
   GraphTask,
   InputDigest,
   ProjectDeclaration,
@@ -19,5 +20,6 @@ export type {
   SdlcToolchains,
   TaskDeclaration,
   TaskIdentity,
+  TaskInputDigests,
   TargetDeclaration,
 } from "./schema/types.js";
