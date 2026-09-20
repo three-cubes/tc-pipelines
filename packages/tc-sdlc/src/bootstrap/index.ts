@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   accessSync,
   chmodSync,
+  copyFileSync,
   constants,
   existsSync,
   lstatSync,
@@ -95,8 +96,15 @@ type CapabilityContract = Readonly<{
 
 type ResolvedAdapter = BootstrapAdapterEvidence &
   Readonly<{
-    source: string;
+    artifact: string;
   }>;
+
+type DiscoveredAdapter = Readonly<{
+  name: BootstrapCapabilityName;
+  version: string;
+  source: string;
+  executableDigest: string;
+}>;
 
 type BootstrapState = Readonly<{
   schema: "tc.sdlc/bootstrap-state/v1";
@@ -220,6 +228,32 @@ function validateStateRoot(root: string, stateRootValue: string): string {
     ]);
   }
   return stateRoot;
+}
+
+function rejectSymlinkComponents(stateRoot: string, target: string): void {
+  const suffix = relative(stateRoot, target);
+  if (suffix === "" || suffix === ".." || suffix.startsWith(`..${sep}`)) {
+    throw new BootstrapFailure("state_corrupt", [
+      {
+        code: "BOOTSTRAP_STATE_PATH_INVALID",
+        message: "managed state path escapes its owned root",
+        action: "discard the corrupt state root and bootstrap online again",
+      },
+    ]);
+  }
+  let cursor = stateRoot;
+  for (const segment of suffix.split(sep)) {
+    cursor = join(cursor, segment);
+    if (existsSync(cursor) && lstatSync(cursor).isSymbolicLink()) {
+      throw new BootstrapFailure("state_corrupt", [
+        {
+          code: "BOOTSTRAP_STATE_SYMLINK",
+          message: "managed release state may not traverse symbolic links",
+          action: "discard the corrupt state root and bootstrap online again",
+        },
+      ]);
+    }
+  }
 }
 
 function readCanonical(path: string): unknown {
@@ -361,7 +395,7 @@ function adapterEvidence(adapter: ResolvedAdapter): BootstrapAdapterEvidence {
 function discoverAdapters(
   declaration: SdlcDeclaration,
   host: BootstrapHost,
-): readonly Omit<ResolvedAdapter, "launcher" | "launcherDigest" | "adapterDigest">[] {
+): readonly DiscoveredAdapter[] {
   const missing = contracts
     .filter((contract) => resolveExecutable(host.path, contract.executable) === null)
     .map((contract): BootstrapDiagnostic => {
@@ -399,6 +433,7 @@ function materializeAdapters(
   discovered: ReturnType<typeof discoverAdapters>,
 ): readonly ResolvedAdapter[] {
   const directory = resolve(stateRoot, stateKey);
+  rejectSymlinkComponents(stateRoot, directory);
   if (existsSync(directory)) {
     throw new BootstrapFailure("state_corrupt", [
       {
@@ -410,21 +445,50 @@ function materializeAdapters(
   }
   const parent = dirname(directory);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
+  rejectSymlinkComponents(stateRoot, parent);
   const staging = `${directory}.tmp-${process.pid}-${randomUUID()}`;
   const bin = resolve(staging, "bin");
-  const adapterPath = [...new Set(discovered.map((adapter) => dirname(adapter.source)))].join(
-    delimiter,
-  );
+  const artifacts = resolve(staging, "artifacts");
   try {
     mkdirSync(bin, { recursive: true, mode: 0o700 });
+    mkdirSync(artifacts, { recursive: true, mode: 0o700 });
+    for (const adapter of discovered) {
+      const artifact = resolve(artifacts, adapter.name);
+      copyFileSync(adapter.source, artifact, constants.COPYFILE_EXCL);
+      chmodSync(artifact, 0o755);
+      if (fileDigest(artifact) !== adapter.executableDigest) {
+        throw new BootstrapFailure("capability_changed", [
+          {
+            code: "CAPABILITY_CHANGED",
+            capability: adapter.name,
+            expected: adapter.executableDigest,
+            observed: fileDigest(artifact),
+            message: `${adapter.name} changed while bootstrap was materialising it`,
+            action: "retry bootstrap with a stable catalogue-owned capability",
+          },
+        ]);
+      }
+    }
+    const adapterPath = artifacts;
     const adapters = discovered.map((adapter): ResolvedAdapter => {
       const launcherRelative = posix.join(stateKey, "bin", adapter.name);
       const launcher = resolve(bin, adapter.name);
-      const bytes = `#!/bin/sh\nset -eu\nPATH=${shellQuote(adapterPath)}\nexport PATH\nexec ${shellQuote(adapter.source)} "$@"\n`;
+      const artifactRelative = posix.join(stateKey, "artifacts", adapter.name);
+      const finalArtifact = resolve(stateRoot, artifactRelative);
+      const verified = probe(
+        contracts.find((contract) => contract.name === adapter.name)!,
+        resolve(artifacts, adapter.name),
+        adapter.version,
+        adapterPath,
+      );
+      const bytes = `#!/bin/sh\nset -eu\nPATH=${shellQuote(resolve(stateRoot, stateKey, "artifacts"))}\nexport PATH\nexec ${shellQuote(finalArtifact)} "$@"\n`;
       writeAtomicExecutable(launcher, bytes);
       const launcherDigest = bytesDigest(bytes);
       return {
-        ...adapter,
+        name: adapter.name,
+        version: adapter.version,
+        executableDigest: verified.executableDigest,
+        artifact: artifactRelative,
         launcher: launcherRelative,
         launcherDigest,
         adapterDigest: digest({
@@ -461,6 +525,7 @@ function validateWarmState(
   declaration: SdlcDeclaration,
 ): readonly ResolvedAdapter[] | null {
   const statePath = resolve(stateRoot, stateKey, "state.json");
+  rejectSymlinkComponents(stateRoot, statePath);
   if (!existsSync(statePath)) {
     if (existsSync(dirname(statePath))) {
       throw new BootstrapFailure("state_corrupt", [
@@ -489,33 +554,37 @@ function validateWarmState(
     ) {
       throw new Error("state bindings mismatch");
     }
-    const adapterPath = [...new Set(state.adapters.map((adapter) => dirname(adapter.source)))].join(
-      delimiter,
-    );
+    const adapterPath = resolve(stateRoot, stateKey, "artifacts");
     for (const [index, contract] of contracts.entries()) {
       const adapter = state.adapters[index];
       if (
         adapter === undefined ||
         adapter.name !== contract.name ||
         adapter.version !== contract.expected(declaration) ||
-        !isAbsolute(adapter.source) ||
-        !adapter.launcher.startsWith(`${stateKey}/`)
+        adapter.artifact !== posix.join(stateKey, "artifacts", adapter.name) ||
+        adapter.launcher !== posix.join(stateKey, "bin", adapter.name)
       ) {
         throw new Error("adapter bindings mismatch");
       }
       const launcher = resolve(stateRoot, adapter.launcher);
+      const artifact = resolve(stateRoot, adapter.artifact);
+      rejectSymlinkComponents(stateRoot, launcher);
+      rejectSymlinkComponents(stateRoot, artifact);
       if (
         !existsSync(launcher) ||
         lstatSync(launcher).isSymbolicLink() ||
         !lstatSync(launcher).isFile() ||
         fileDigest(launcher) !== adapter.launcherDigest ||
-        fileDigest(adapter.source) !== adapter.executableDigest
+        !existsSync(artifact) ||
+        lstatSync(artifact).isSymbolicLink() ||
+        !lstatSync(artifact).isFile() ||
+        fileDigest(artifact) !== adapter.executableDigest
       ) {
         throw new Error("adapter artifact mismatch");
       }
       const observed = probe(
         contract,
-        adapter.source,
+        artifact,
         adapter.version,
         adapterPath,
       );

@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -109,9 +110,13 @@ describe("tc-sdlc bootstrap", () => {
     ];
     const states = roots.map(() => mkdtempSync(join(tmpdir(), "tc-sdlc-state-")));
     const path = capabilityPath();
-    const options = roots.map((root, index) =>
-      bootstrapOptions(root, states[index]!, path, `cold-${index}`),
-    );
+    const options = roots.map((root, index) => ({
+      ...bootstrapOptions(root, states[index]!, path, `cold-${index}`),
+      host:
+        index === 0
+          ? host(path)
+          : { platform: "linux", architecture: "x64", path, offline: false } as const,
+    }));
 
     const receipts = await Promise.all(
       options.map((value) => (sdlc as Record<string, any>).bootstrap(value)),
@@ -123,8 +128,8 @@ describe("tc-sdlc bootstrap", () => {
         status: "succeeded",
         reason: null,
         release: "3.0.0",
-        platform: "darwin",
-        architecture: "arm64",
+        platform: options[index]!.host.platform,
+        architecture: options[index]!.host.architecture,
         reused: false,
         diagnostics: [],
         diagnosticsCount: 0,
@@ -180,6 +185,7 @@ describe("tc-sdlc bootstrap", () => {
       bootstrapOptions(root, stateRoot, path, "online"),
     );
     expect(first.status).toBe("succeeded");
+    rmSync(path, { recursive: true });
 
     const emptyPath = mkdtempSync(join(tmpdir(), "tc-sdlc-empty-path-"));
     const warm = await (sdlc as Record<string, any>).bootstrap({
@@ -187,6 +193,13 @@ describe("tc-sdlc bootstrap", () => {
       host: host(emptyPath, true),
     });
     expect(warm).toMatchObject({ status: "succeeded", reused: true });
+    for (const adapter of warm.adapters) {
+      const invocation = spawnSync(join(stateRoot, adapter.launcher), ["--version"], {
+        encoding: "utf8",
+        env: { PATH: "" },
+      });
+      expect(invocation.status, invocation.stderr).toBe(0);
+    }
 
     const coldState = join(tmpdir(), `tc-sdlc-cold-${process.pid}-${Date.now()}`);
     const cold = await (sdlc as Record<string, any>).bootstrap({
@@ -271,6 +284,21 @@ describe("tc-sdlc bootstrap", () => {
       reason: "state_root_invalid",
     });
     expect(existsSync(inside)).toBe(false);
+
+    const redirectedRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-redirect-state-"));
+    const redirectOptions = bootstrapOptions(root, redirectedRoot, capabilityPath(), "redirect");
+    const redirectFirst = await (sdlc as Record<string, any>).bootstrap(redirectOptions);
+    expect(redirectFirst.status).toBe("succeeded");
+    const releases = join(redirectedRoot, "releases");
+    const redirectedTarget = `${redirectedRoot}-outside`;
+    rmSync(redirectedTarget, { force: true, recursive: true });
+    renameSync(releases, redirectedTarget);
+    symlinkSync(redirectedTarget, releases);
+    const redirected = await (sdlc as Record<string, any>).bootstrap({
+      ...redirectOptions,
+      receiptPath: `${redirectOptions.receiptPath}.redirected`,
+    });
+    expect(redirected).toMatchObject({ status: "failed", reason: "state_corrupt" });
   });
 
   test("rejects corrupted warm state and a stale lock without repair", async () => {
