@@ -29,7 +29,29 @@ RUN apt-get update \
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 
-FROM toolchain AS builder
+# Package compilation is architecture-neutral and runs on the build host. The
+# final toolchain stage below is still built and verified for each target.
+FROM --platform=$BUILDPLATFORM python:3.13.15-slim-bookworm@sha256:2325bb286ec344af3e5898cc224b5844e2707ac6e26b1632516fd3edc84a5e26 AS builder
+ARG BUILDARCH
+ARG NODE_VERSION=24.21.0
+ARG NODE_SHA256_AMD64=fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6
+ARG NODE_SHA256_ARM64=6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates curl xz-utils \
+    && case "$BUILDARCH" in \
+         amd64) node_arch=x64; node_sha="$NODE_SHA256_AMD64" ;; \
+         arm64) node_arch=arm64; node_sha="$NODE_SHA256_ARM64" ;; \
+         *) echo "unsupported BUILDARCH: $BUILDARCH" >&2; exit 1 ;; \
+       esac \
+    && curl --fail --show-error --silent --location \
+         "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
+         --output /tmp/node.tar.xz \
+    && echo "${node_sha}  /tmp/node.tar.xz" | sha256sum --check --strict \
+    && tar --extract --xz --file /tmp/node.tar.xz --directory /usr/local --strip-components=1 \
+    && rm /tmp/node.tar.xz \
+    && corepack disable pnpm \
+    && npm install --global pnpm@11.22.0 \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY schemas ./schemas
