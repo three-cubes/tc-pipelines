@@ -1,3 +1,5 @@
+import type { ExecutorContract } from "../executors/index.js";
+
 export type ProjectDeclaration = Readonly<{
   name: string;
   root: string;
@@ -9,6 +11,7 @@ export type TargetDeclaration = Readonly<{
   executor?: string;
   dependsOn?: readonly string[];
   inputs?: readonly string[];
+  sharedInputs?: readonly string[];
   outputs?: readonly string[];
 }>;
 
@@ -63,4 +66,44 @@ export type SdlcLock = Readonly<{
   declarationSchema: "tc.sdlc/v1";
   fitness: ReleaseEntry["fitness"];
   toolchains: Readonly<Record<string, string>>;
+}>;
+
+export type TaskIdentity = string;
+
+export type InputDigest = Readonly<{
+  path: string;
+  digest: string;
+}>;
+
+export type TaskDeclaration = Readonly<{
+  project: string;
+  target: string;
+  projectRoot: string;
+  command?: string;
+  executor?: string;
+  dependsOn: readonly string[];
+  inputs: readonly string[];
+  sharedInputs?: readonly string[];
+  outputs: readonly string[];
+}>;
+
+export type GraphTask = TaskDeclaration &
+  Readonly<{
+    key: string;
+    identity: TaskIdentity;
+    execution: ExecutorContract;
+  }>;
+
+export type GraphProject = Readonly<{
+  name: string;
+  root: string;
+  dependsOn: readonly string[];
+}>;
+
+export type SdlcGraph = Readonly<{
+  schema: "tc.sdlc/graph/v1";
+  declarationDigest: string;
+  lockDigest: string;
+  projects: readonly GraphProject[];
+  tasks: readonly GraphTask[];
 }>;

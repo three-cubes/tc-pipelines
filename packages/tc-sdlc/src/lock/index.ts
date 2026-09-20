@@ -78,11 +78,16 @@ export function loadLock(path: string): Readonly<{ lock: SdlcLock; bytes: string
       `could not read lock ${path}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  assertSchema<SdlcLock>("tc-sdlc-lock-v1.schema.json", parsed, "lock");
+  const lock = validateLock(parsed);
   if (bytes !== canonicalJson(parsed)) {
     throw new SdlcError("LOCK_NON_CANONICAL", "lock bytes are not canonical");
   }
-  return { lock: parsed, bytes };
+  return { lock, bytes };
+}
+
+export function validateLock(value: unknown): SdlcLock {
+  assertSchema<SdlcLock>("tc-sdlc-lock-v1.schema.json", value, "lock");
+  return value;
 }
 
 export function assertCurrentLock(

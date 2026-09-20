@@ -52,7 +52,7 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "anyOf": [
+        "oneOf": [
           { "required": ["command"], "properties": { "command": {} } },
           { "required": ["executor"], "properties": { "executor": {} } }
         ],
@@ -65,6 +65,11 @@
             "items": { "type": "string", "minLength": 1 }
           },
           "inputs": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "sharedInputs": {
             "type": "array",
             "uniqueItems": true,
             "items": { "type": "string", "minLength": 1 }

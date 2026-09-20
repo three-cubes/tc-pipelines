@@ -14,21 +14,34 @@ function normalisePath(value: string): string {
 function normalisePaths(declaration: SdlcDeclaration): SdlcDeclaration {
   return {
     ...declaration,
-    projects: declaration.projects.map((project) => ({
-      ...project,
-      root: normalisePath(project.root),
-    })),
+    projects: declaration.projects
+      .map((project) => ({
+        ...project,
+        root: normalisePath(project.root),
+        ...(project.dependsOn === undefined
+          ? {}
+          : { dependsOn: [...project.dependsOn].sort() }),
+      }))
+      .sort((left, right) =>
+        left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+      ),
     targets: Object.fromEntries(
       Object.entries(declaration.targets).map(([name, target]) => [
         name,
         {
           ...target,
+          ...(target.dependsOn === undefined
+            ? {}
+            : { dependsOn: [...target.dependsOn].sort() }),
           ...(target.inputs === undefined
             ? {}
-            : { inputs: target.inputs.map(normalisePath) }),
+            : { inputs: target.inputs.map(normalisePath).sort() }),
+          ...(target.sharedInputs === undefined
+            ? {}
+            : { sharedInputs: target.sharedInputs.map(normalisePath).sort() }),
           ...(target.outputs === undefined
             ? {}
-            : { outputs: target.outputs.map(normalisePath) }),
+            : { outputs: target.outputs.map(normalisePath).sort() }),
         },
       ]),
     ),
