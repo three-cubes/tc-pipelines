@@ -51,6 +51,8 @@ export function buildPresetTasks(
         project: project.name,
         target: targetName,
         projectRoot: project.root,
+        mode: target.mode,
+        trustBoundary: target.trustBoundary,
         ...(target.command === undefined ? {} : { command: target.command }),
         ...(target.executor === undefined ? {} : { executor: target.executor }),
         dependsOn: sorted([

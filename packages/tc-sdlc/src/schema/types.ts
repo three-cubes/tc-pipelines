@@ -6,7 +6,12 @@ export type ProjectDeclaration = Readonly<{
   dependsOn?: readonly string[];
 }>;
 
+export type TaskMode = "prepare" | "evaluate";
+export type TrustBoundary = "portable" | "hosted" | "live" | "deployment";
+
 export type TargetDeclaration = Readonly<{
+  mode: TaskMode;
+  trustBoundary: TrustBoundary;
   command?: string;
   executor?: string;
   dependsOn?: readonly string[];
@@ -88,6 +93,8 @@ export type TaskIdentity = string;
 export type InputDigest = Readonly<{
   path: string;
   digest: string;
+  mode?: number;
+  symlink?: string | null;
 }>;
 
 export type TaskInputDigests = Readonly<
@@ -104,6 +111,8 @@ export type TaskDeclaration = Readonly<{
   project: string;
   target: string;
   projectRoot: string;
+  mode: TaskMode;
+  trustBoundary: TrustBoundary;
   command?: string;
   executor?: string;
   dependsOn: readonly string[];

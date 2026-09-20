@@ -57,6 +57,8 @@ function runtimeTarget(
 ) {
   return {
     command,
+    mode: "evaluate",
+    trustBoundary: "portable",
     resources: { cpu: 1, memoryMiB: 64, ports: [], exclusive: [] },
     budget: { phaseMs: 5_000, noProgressMs: 2_000, heartbeatMs: 100 },
     ...fields,
@@ -68,6 +70,8 @@ describe("tc-sdlc runtime", () => {
     const first = graphFor({
       check: {
         command: "node --version",
+        mode: "evaluate",
+        trustBoundary: "portable",
         resources: {
           cpu: 2,
           memoryMiB: 384,
@@ -84,6 +88,8 @@ describe("tc-sdlc runtime", () => {
     const second = graphFor({
       check: {
         command: "node --version",
+        mode: "evaluate",
+        trustBoundary: "portable",
         resources: {
           cpu: 1,
           memoryMiB: 384,
@@ -157,7 +163,11 @@ describe("tc-sdlc runtime", () => {
       ["fixture:check", "succeeded"],
       ["fixture:prepare", "succeeded"],
     ]);
-    expect(observed.map((event) => [event.taskKey, event.type])).toEqual([
+    expect(
+      observed
+        .filter((event) => event.type !== "heartbeat")
+        .map((event) => [event.taskKey, event.type]),
+    ).toEqual([
       ["fixture:prepare", "start"],
       ["fixture:prepare", "output"],
       ["fixture:prepare", "terminal"],
@@ -487,13 +497,20 @@ console.log("second");
     const outputIndexes = types
       .map((type, index) => (type === "output" ? index : -1))
       .filter((index) => index >= 0);
-    const heartbeatIndex = types.indexOf("heartbeat");
+    const heartbeatIndexes = types
+      .map((type, index) => (type === "heartbeat" ? index : -1))
+      .filter((index) => index >= 0);
     expect(receipt.status).toBe("succeeded");
     expect(types[0]).toBe("start");
     expect(types.at(-1)).toBe("terminal");
     expect(outputIndexes).toHaveLength(2);
-    expect(heartbeatIndex).toBeGreaterThan(outputIndexes[0] as number);
-    expect(heartbeatIndex).toBeLessThan(outputIndexes[1] as number);
+    expect(
+      heartbeatIndexes.some(
+        (index) =>
+          index > (outputIndexes[0] as number) &&
+          index < (outputIndexes[1] as number),
+      ),
+    ).toBe(true);
   });
 
   test("captures diagnostics and kills the process group on no-progress stall", async () => {

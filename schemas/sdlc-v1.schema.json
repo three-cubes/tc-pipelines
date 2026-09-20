@@ -52,11 +52,16 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
+        "required": ["mode", "trustBoundary"],
         "anyOf": [
           { "required": ["command"], "properties": { "command": {} } },
           { "required": ["executor"], "properties": { "executor": {} } }
         ],
         "properties": {
+          "mode": { "enum": ["prepare", "evaluate"] },
+          "trustBoundary": {
+            "enum": ["portable", "hosted", "live", "deployment"]
+          },
           "command": { "type": "string", "minLength": 1 },
           "executor": { "type": "string", "minLength": 1 },
           "dependsOn": {

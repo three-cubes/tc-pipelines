@@ -34,7 +34,12 @@ export function canonicalInputDigests(
       );
     }
     identities.add(identity);
-    return { path, digest: input.digest };
+    return {
+      path,
+      digest: input.digest,
+      ...(input.mode === undefined ? {} : { mode: input.mode }),
+      ...(input.symlink === undefined ? {} : { symlink: input.symlink }),
+    };
   });
   return canonical.sort((left, right) =>
     left.path === right.path
@@ -68,6 +73,8 @@ export function taskIdentity(
       project: task.project,
       target: task.target,
       projectRoot: normalisePath(task.projectRoot),
+      mode: task.mode,
+      trustBoundary: task.trustBoundary,
       ...(task.command === undefined ? {} : { command: task.command }),
       ...(task.executor === undefined ? {} : { executor: task.executor }),
       dependsOn: sorted(task.dependsOn),

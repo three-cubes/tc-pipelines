@@ -35,11 +35,15 @@ function declaration(projects: readonly Record<string, unknown>[]) {
     targets: {
       check: {
         command: "make check",
+        mode: "evaluate",
+        trustBoundary: "portable",
         dependsOn: ["prepare"],
         inputs: ["shared/config.json"],
       },
       prepare: {
         command: "make prepare",
+        mode: "prepare",
+        trustBoundary: "portable",
       },
     },
   } as const;
@@ -75,6 +79,48 @@ function lockedGraph(
 }
 
 describe("tc-sdlc graph", () => {
+  test("requires task mode and trust boundary and binds both into identity", () => {
+    const input = {
+      ...declaration([{ name: "api", root: "services/api" }]),
+      targets: {
+        prepare: {
+          command: "make prepare",
+          mode: "prepare",
+          trustBoundary: "portable",
+        },
+        check: {
+          command: "make check",
+          mode: "evaluate",
+          trustBoundary: "hosted",
+        },
+      },
+    } as const;
+    const portable = lockedGraph(input as never).graph;
+    const changed = lockedGraph({
+      ...input,
+      targets: {
+        ...input.targets,
+        check: { ...input.targets.check, trustBoundary: "live" },
+      },
+    } as never).graph;
+
+    expect(portable.tasks.map((task: Record<string, unknown>) => [
+      task.key,
+      task.mode,
+      task.trustBoundary,
+    ])).toEqual([
+      ["api:check", "evaluate", "hosted"],
+      ["api:prepare", "prepare", "portable"],
+    ]);
+    expect(portable.tasks[0]?.identity).not.toBe(changed.tasks[0]?.identity);
+
+    const missing = structuredClone(input) as Record<string, any>;
+    delete missing.targets.check.mode;
+    expect(() => lockedGraph(missing as never)).toThrowError(
+      expect.objectContaining({ code: "SCHEMA_INVALID" }),
+    );
+  });
+
   test("serialises equivalent project order and path syntax to identical canonical bytes", () => {
     const first = lockedGraph(
       declaration([
@@ -286,8 +332,8 @@ describe("tc-sdlc graph", () => {
       {
         ...declaration([{ name: "api", root: "services/api" }]),
         targets: {
-          check: { command: "make check" },
-          CHECK: { command: "make other-check" },
+          check: { command: "make check", mode: "evaluate", trustBoundary: "portable" },
+          CHECK: { command: "make other-check", mode: "evaluate", trustBoundary: "portable" },
         },
       },
       "GRAPH_PLATFORM_AMBIGUITY",
@@ -301,7 +347,7 @@ describe("tc-sdlc graph", () => {
       "unknown target dependency",
       {
         ...declaration([{ name: "api", root: "services/api" }]),
-        targets: { check: { command: "make check", dependsOn: ["missing"] } },
+        targets: { check: { command: "make check", mode: "evaluate", trustBoundary: "portable", dependsOn: ["missing"] } },
       },
       "GRAPH_UNKNOWN_DEPENDENCY",
     ],
@@ -318,8 +364,8 @@ describe("tc-sdlc graph", () => {
       {
         ...declaration([{ name: "api", root: "services/api" }]),
         targets: {
-          check: { command: "make check", dependsOn: ["prepare"] },
-          prepare: { command: "make prepare", dependsOn: ["check"] },
+          check: { command: "make check", mode: "evaluate", trustBoundary: "portable", dependsOn: ["prepare"] },
+          prepare: { command: "make prepare", mode: "prepare", trustBoundary: "portable", dependsOn: ["check"] },
         },
       },
       "GRAPH_CYCLE",
@@ -344,7 +390,7 @@ describe("tc-sdlc graph", () => {
       {
         ...declaration([{ name: "api", root: "services/api" }]),
         targets: {
-          check: { command: "make check", inputs: ["../../outside"] },
+          check: { command: "make check", mode: "evaluate", trustBoundary: "portable", inputs: ["../../outside"] },
         },
       },
       "GRAPH_PATH_INVALID",
@@ -364,6 +410,8 @@ describe("tc-sdlc graph", () => {
         targets: {
           check: {
             command: "make check",
+            mode: "evaluate",
+            trustBoundary: "portable",
             inputs: ["src/config.json", "src\\config.json"],
           },
         },
@@ -397,7 +445,7 @@ describe("tc-sdlc graph", () => {
     const input = {
       ...declaration([{ name: "api", root: "services/api" }]),
       targets: {
-        check: { command: "make check", inputs: ["src/**"] },
+        check: { command: "make check", mode: "evaluate", trustBoundary: "portable", inputs: ["src/**"] },
       },
     } as const;
     const firstInputs = {
@@ -480,7 +528,7 @@ describe("tc-sdlc graph", () => {
     const input = {
       ...declaration([{ name: "api", root: "services/api" }]),
       targets: {
-        check: { command: "make check", inputs: ["src/**"] },
+        check: { command: "make check", mode: "evaluate", trustBoundary: "portable", inputs: ["src/**"] },
       },
     } as const;
 
@@ -597,16 +645,22 @@ describe("tc-sdlc graph", () => {
       targets: {
         check: {
           command: "make check",
+          mode: "evaluate",
+          trustBoundary: "portable",
           inputs: ["generated.ts"],
           sharedInputs: ["shared/config.json"],
         },
         generate: {
           command: "make generate",
+          mode: "prepare",
+          trustBoundary: "portable",
           inputs: ["spec.yaml"],
           outputs: ["generated.ts"],
         },
         test: {
           command: "make test",
+          mode: "evaluate",
+          trustBoundary: "portable",
           inputs: ["src/**"],
         },
       },
@@ -633,14 +687,18 @@ describe("tc-sdlc graph", () => {
         { name: "schema", root: "packages/schema" },
       ]),
       targets: {
-        prepare: { command: "make prepare", inputs: ["prepare.trigger"] },
+        prepare: { command: "make prepare", mode: "prepare", trustBoundary: "portable", inputs: ["prepare.trigger"] },
         build: {
           command: "make build",
+          mode: "evaluate",
+          trustBoundary: "portable",
           dependsOn: ["prepare"],
           inputs: ["build.trigger"],
         },
         check: {
           command: "make check",
+          mode: "evaluate",
+          trustBoundary: "portable",
           dependsOn: ["build"],
           inputs: ["check.trigger"],
         },
@@ -672,7 +730,7 @@ describe("tc-sdlc graph", () => {
     const input = {
       ...declaration([{ name: "api", root: "services/api" }]),
       targets: {
-        test: { command: "make test", inputs: ["src/**"] },
+        test: { command: "make test", mode: "evaluate", trustBoundary: "portable", inputs: ["src/**"] },
       },
     } as const;
     const sensitive = lockedGraph(
@@ -717,9 +775,11 @@ describe("tc-sdlc graph", () => {
     const input = {
       ...declaration([{ name: "api", root: "services/api" }]),
       targets: {
-        check: { command: "make check", inputs: [consumerInput] },
+        check: { command: "make check", mode: "evaluate", trustBoundary: "portable", inputs: [consumerInput] },
         generate: {
           command: "make generate",
+          mode: "prepare",
+          trustBoundary: "portable",
           inputs: ["spec.yaml"],
           outputs: [output],
         },
@@ -754,8 +814,8 @@ describe("tc-sdlc graph", () => {
     const input = {
       ...declaration([{ name: "api", root: "services/api" }]),
       targets: {
-        check: { executor: "tc-sdlc:affected-check" },
-        prepare: { command: "make prepare" },
+        check: { executor: "tc-sdlc:affected-check", mode: "evaluate", trustBoundary: "portable" },
+        prepare: { command: "make prepare", mode: "prepare", trustBoundary: "portable" },
       },
     } as const;
     const { graph } = lockedGraph(input as never);
@@ -776,6 +836,8 @@ describe("tc-sdlc graph", () => {
         check: {
           command: "make check",
           executor: "tc-sdlc:affected-check",
+          mode: "evaluate",
+          trustBoundary: "portable",
         },
       },
     } as const;

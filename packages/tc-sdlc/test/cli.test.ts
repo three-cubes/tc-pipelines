@@ -24,8 +24,12 @@ projects:
 targets:
   prepare:
     command: make prepare
+    mode: prepare
+    trustBoundary: portable
   check:
     command: make check
+    mode: evaluate
+    trustBoundary: portable
     dependsOn: [prepare]
 `;
 
@@ -143,8 +147,8 @@ describe("tc-sdlc lock", () => {
     const firstBytes = createLock(first);
 
     const reorderedDeclaration = `targets:
-  check: {dependsOn: [prepare], command: make check}
-  prepare: {command: make prepare}
+  check: {dependsOn: [prepare], command: make check, mode: evaluate, trustBoundary: portable}
+  prepare: {command: make prepare, mode: prepare, trustBoundary: portable}
 projects: [{root: services\\api, name: api}]
 fitness: {version: "0.16.1", package: three-cubes-fitness}
 toolchains: {uv: "0.12.5", packageManager: pnpm@11.22.0, node: "24", python: "3.13"}

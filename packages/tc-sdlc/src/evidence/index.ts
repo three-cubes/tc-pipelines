@@ -71,9 +71,13 @@ export function serialiseRunReceipt(receipt: RunReceipt): string {
 }
 
 export function writeRunReceipt(path: string, receipt: RunReceipt): void {
+  writeCanonicalEvidence(path, receipt);
+}
+
+export function writeCanonicalEvidence(path: string, value: unknown): void {
   const temporary = `${path}.tmp-${process.pid}`;
   try {
-    writeFileSync(temporary, serialiseRunReceipt(receipt), { mode: 0o600 });
+    writeFileSync(temporary, canonicalJson(value), { mode: 0o600 });
     const descriptor = openSync(temporary, "r");
     try {
       fsyncSync(descriptor);
