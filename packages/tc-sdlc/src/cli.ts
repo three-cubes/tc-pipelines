@@ -4,7 +4,11 @@ import { readFileSync } from "node:fs";
 
 import { bootstrap } from "./bootstrap/index.js";
 import { bytesDigest, canonicalJson } from "./canonical.js";
-import { loadCatalogue } from "./catalogue/index.js";
+import {
+  generateReleaseCatalogue,
+  loadCatalogue,
+  writeReleaseCatalogue,
+} from "./catalogue/index.js";
 import { SdlcError } from "./errors.js";
 import type { PreparationReceipt } from "./evidence/task4.js";
 import { assertCurrentLock, loadLock, resolveLock, writeLock } from "./lock/index.js";
@@ -12,7 +16,14 @@ import { loadDeclaration } from "./schema/declaration.js";
 import { check, checkAll } from "./tasks/check.js";
 import { prepare } from "./tasks/prepare.js";
 
-type Command = "lock" | "validate" | "bootstrap" | "prepare" | "check" | "check-all";
+type Command =
+  | "catalogue"
+  | "lock"
+  | "validate"
+  | "bootstrap"
+  | "prepare"
+  | "check"
+  | "check-all";
 
 function parseOptions(
   args: readonly string[],
@@ -52,6 +63,27 @@ function success(command: Command, payload: Record<string, unknown>): void {
 }
 
 async function run(command: Command, args: readonly string[]): Promise<void> {
+  if (command === "catalogue") {
+    const options = parseOptions(args, [
+      "version",
+      "workflow-commit",
+      "image-digest",
+      "output",
+    ]);
+    const catalogue = generateReleaseCatalogue({
+      releaseVersion: options.version!,
+      workflowCommit: options["workflow-commit"]!,
+      imageDigest: options["image-digest"]!,
+    });
+    writeReleaseCatalogue(options.output!, catalogue);
+    success(command, {
+      release: catalogue.release.version,
+      catalogueDigest: bytesDigest(canonicalJson(catalogue)),
+      output: options.output,
+    });
+    return;
+  }
+
   if (command === "lock") {
     const options = parseOptions(args, ["declaration", "catalogue", "output"]);
     const declaration = loadDeclaration(options.declaration!);
@@ -179,6 +211,7 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
 
 const rawCommand = process.argv[2];
 const commands: readonly Command[] = [
+  "catalogue",
   "lock",
   "validate",
   "bootstrap",
@@ -192,7 +225,7 @@ try {
   if (!commands.includes(rawCommand as Command)) {
     throw new SdlcError(
       "USAGE",
-      "command must be lock, validate, bootstrap, prepare, check or check-all",
+      "command must be catalogue, lock, validate, bootstrap, prepare, check or check-all",
     );
   }
   await run(rawCommand as Command, process.argv.slice(3));

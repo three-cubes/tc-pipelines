@@ -1,4 +1,13 @@
-export { createReleaseCatalogue, loadCatalogue, validateCatalogue } from "./catalogue/index.js";
+export {
+  CANONICAL_SDLC_FITNESS,
+  CANONICAL_SDLC_TOOLCHAINS,
+  createReleaseCatalogue,
+  generateReleaseCatalogue,
+  loadCatalogue,
+  validateCatalogue,
+  writeReleaseCatalogue,
+} from "./catalogue/index.js";
+export type { ReleaseCatalogueGeneration } from "./catalogue/index.js";
 export { bootstrap, serialiseBootstrapReceipt } from "./bootstrap/index.js";
 export type {
   BootstrapAdapterEvidence,
