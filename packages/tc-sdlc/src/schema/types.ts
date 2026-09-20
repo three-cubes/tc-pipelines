@@ -13,6 +13,21 @@ export type TargetDeclaration = Readonly<{
   inputs?: readonly string[];
   sharedInputs?: readonly string[];
   outputs?: readonly string[];
+  resources?: TaskResources;
+  budget?: TaskBudget;
+}>;
+
+export type TaskResources = Readonly<{
+  cpu: number;
+  memoryMiB: number;
+  ports: readonly number[];
+  exclusive: readonly string[];
+}>;
+
+export type TaskBudget = Readonly<{
+  phaseMs: number;
+  noProgressMs: number;
+  heartbeatMs: number;
 }>;
 
 export type SdlcToolchains = Readonly<{
@@ -95,14 +110,18 @@ export type TaskDeclaration = Readonly<{
   inputs: readonly string[];
   sharedInputs?: readonly string[];
   outputs: readonly string[];
+  resources?: TaskResources;
+  budget?: TaskBudget;
 }>;
 
-export type GraphTask = TaskDeclaration &
+export type GraphTask = Omit<TaskDeclaration, "resources" | "budget"> &
   Readonly<{
     key: string;
     identity: TaskIdentity;
     inputDigests: readonly InputDigest[];
     execution: ExecutorContract;
+    resources: TaskResources;
+    budget: TaskBudget;
   }>;
 
 export type GraphProject = Readonly<{

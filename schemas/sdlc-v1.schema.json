@@ -78,6 +78,35 @@
             "type": "array",
             "uniqueItems": true,
             "items": { "type": "string", "minLength": 1 }
+          },
+          "resources": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cpu", "memoryMiB", "ports", "exclusive"],
+            "properties": {
+              "cpu": { "type": "number", "exclusiveMinimum": 0 },
+              "memoryMiB": { "type": "integer", "minimum": 1 },
+              "ports": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "type": "integer", "minimum": 1, "maximum": 65535 }
+              },
+              "exclusive": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "budget": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["phaseMs", "noProgressMs", "heartbeatMs"],
+            "properties": {
+              "phaseMs": { "type": "integer", "minimum": 1 },
+              "noProgressMs": { "type": "integer", "minimum": 1 },
+              "heartbeatMs": { "type": "integer", "minimum": 1 }
+            }
           }
         }
       }

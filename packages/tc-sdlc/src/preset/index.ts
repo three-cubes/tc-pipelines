@@ -7,8 +7,23 @@ import type {
   GraphTask,
   SdlcDeclaration,
   TaskDeclaration,
+  TaskBudget,
   TaskInputDigests,
+  TaskResources,
 } from "../schema/types.js";
+
+const DEFAULT_RESOURCES = {
+  cpu: 1,
+  memoryMiB: 256,
+  ports: [],
+  exclusive: [],
+} as const;
+
+const DEFAULT_BUDGET = {
+  phaseMs: 60_000,
+  noProgressMs: 30_000,
+  heartbeatMs: 5_000,
+} as const;
 
 function sorted(values: readonly string[]): readonly string[] {
   return [...values].sort((left, right) =>
@@ -29,7 +44,10 @@ export function buildPresetTasks(
 
   for (const project of projects) {
     for (const [targetName, target] of targetEntries) {
-      const task: TaskDeclaration = {
+      const resources = target.resources ?? DEFAULT_RESOURCES;
+      const budget = target.budget ?? DEFAULT_BUDGET;
+      const task: TaskDeclaration &
+        Readonly<{ resources: TaskResources; budget: TaskBudget }> = {
         project: project.name,
         target: targetName,
         projectRoot: project.root,
@@ -46,7 +64,18 @@ export function buildPresetTasks(
         inputs: sorted(target.inputs ?? []),
         sharedInputs: sorted(target.sharedInputs ?? []),
         outputs: sorted(target.outputs ?? []),
+        resources,
+        budget,
       };
+      if (
+        task.budget.heartbeatMs > task.budget.noProgressMs ||
+        task.budget.noProgressMs > task.budget.phaseMs
+      ) {
+        throw new SdlcError(
+          "GRAPH_BUDGET_INVALID",
+          `task budget intervals must satisfy heartbeatMs <= noProgressMs <= phaseMs for ${task.project}:${task.target}`,
+        );
+      }
       const key = `${task.project}:${task.target}`;
       if (!Object.hasOwn(resolvedInputs, key)) {
         throw new SdlcError(

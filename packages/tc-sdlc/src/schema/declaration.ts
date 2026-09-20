@@ -42,6 +42,17 @@ function normalisePaths(declaration: SdlcDeclaration): SdlcDeclaration {
           ...(target.outputs === undefined
             ? {}
             : { outputs: target.outputs.map(normalisePath).sort() }),
+          ...(target.resources === undefined
+            ? {}
+            : {
+                resources: {
+                  ...target.resources,
+                  ports: [...target.resources.ports].sort(
+                    (left, right) => left - right,
+                  ),
+                  exclusive: [...target.resources.exclusive].sort(),
+                },
+              }),
         },
       ]),
     ),

@@ -74,6 +74,19 @@ export function taskIdentity(
       inputs: sorted(task.inputs.map(normalisePath)),
       sharedInputs: sorted((task.sharedInputs ?? []).map(normalisePath)),
       outputs: sorted(task.outputs.map(normalisePath)),
+      ...(task.resources === undefined
+        ? {}
+        : {
+            resources: {
+              cpu: task.resources.cpu,
+              memoryMiB: task.resources.memoryMiB,
+              ports: [...task.resources.ports].sort(
+                (left, right) => left - right,
+              ),
+              exclusive: sorted(task.resources.exclusive),
+            },
+          }),
+      ...(task.budget === undefined ? {} : { budget: task.budget }),
     },
     inputs: canonicalInputs,
     lockDigest,
