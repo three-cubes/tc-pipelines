@@ -103,13 +103,46 @@ recorded digest and performs no application rebuild. The protected
 Environment approves the deployment. The target verifies the release assets and
 candidate receipt before apply.
 
+### Runtime-state authority
+
+The consumer adapter defines the product state that crosses a deployment:
+persistent data, harvested learning artefacts, resolved runtime configuration
+and the product-specific recovery point. `tc-pipelines` records those inputs in
+one append-only authority graph.
+
+Each authority record contains:
+
+- authority schema and stable identity;
+- candidate image digest and release-closure digest;
+- resolved configuration digest;
+- state-snapshot digest and inventory;
+- qualification suite identity and receipt digest;
+- predecessor authority identity;
+- lifecycle state: `candidate`, `deployed`, `held` or `rolled-back`; and
+- production writer identity and transaction attempt.
+
+One protected deployment transaction writes production authority. Bootstrap
+uses that writer to validate the existing live state and establish the first
+known-good authority. Later transactions harvest and validate current state,
+qualify one candidate authority, reopen that exact authority before apply, and
+advance the current head only after successful PVT. Hold and rollback retain the
+failed record and select its predecessor. Scheduled capture, harvesting,
+verification and cleanup resolve the same current head through the public
+reader.
+
+State-schema migration is a separate bounded transaction. Its receipt names the
+source and target schemas, source authority, migrated snapshot and verification
+result. Completion removes the superseded reader, writer, schema, fixtures,
+retention rules and operational path in one change set.
+
 ## Production verification and PVT
 
 The product deployment workflow runs live PVT after target-side apply and smoke
 checks. The PVT runner writes a receipt containing the release identity, runtime
 identity, probes, and evidence. A green receipt promotes the candidate to
-known-good. A held or failed receipt preserves the evidence and selects the
-product's hold, rollback, or fix-forward path.
+known-good and atomically advances the current runtime-state authority. A held
+or failed receipt preserves the candidate authority and selects the product's
+hold, rollback, or fix-forward path.
 
 Same-repository `workflow_dispatch` uses the scoped `GITHUB_TOKEN`. A
 cross-repository handoff or App-audited handoff uses a short-lived GitHub App
@@ -142,7 +175,7 @@ workflow summary indexes the retained evidence.
 | PR to merge admission | PR head plus exact integration identity | Successful required contexts bound to the admitted tree |
 | Merge to publish | Preparation or candidate receipt plus immutable asset digests | Tag, release and published artifact identities |
 | Publish to deploy | Published candidate identity and protected-environment decision | Target-side admission receipt |
-| Deploy to production verdict | Target receipt, runtime identity and product probes | PVT receipt, candidate state and recovery decision |
+| Deploy to production verdict | Target receipt, runtime identity, candidate authority and product probes | PVT receipt, authority-head transition, candidate state and recovery decision |
 
 A failed or cancelled stage retains its stage name, run and attempt identity,
 exit classification, bounded sanitized diagnostics, receipt or locator digest,
@@ -207,11 +240,15 @@ merge.
 3. Enable merge queue and prove every required context on a synthetic merge, or
    retain the exact-main evidence path where queue support is unavailable.
 4. Build and qualify one immutable candidate digest.
-5. Connect candidate publication to protected deployment through the typed
-   receipt.
-6. Bind live PVT, rollback and cleanup receipts to candidate state.
-7. Remove equivalent post-merge evaluation and superseded deployment paths
+5. Establish the product's runtime-state authority through the production
+   writer and public reader.
+6. Connect candidate publication to protected deployment through the typed
+   receipt and exact qualified authority.
+7. Bind live PVT, rollback and cleanup receipts to candidate and authority state.
+8. Remove equivalent post-merge evaluation and superseded deployment paths
    after their consumer counts reach zero.
+9. Complete each state migration by deleting its superseded read/write path and
+   recording the current schema in the release catalogue.
 
 Shared environment, graph, evidence and deployment transaction behaviour belongs
 in `tc-pipelines`. Fitness evaluation belongs in `tc-fitness`. Product build
