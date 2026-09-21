@@ -64,7 +64,8 @@ RUN pnpm install --frozen-lockfile \
 
 FROM builder AS package-tests
 COPY --from=uv /uv /uvx /usr/local/bin/
-RUN pnpm --filter @three-cubes/tc-sdlc test
+RUN pnpm --filter @three-cubes/tc-sdlc test \
+    && pnpm --filter @three-cubes/tc-sdlc test:integration:consumers
 
 FROM toolchain
 LABEL org.opencontainers.image.source="https://github.com/three-cubes/tc-pipelines" \
