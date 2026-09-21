@@ -133,11 +133,15 @@ not an operator memory task.
 - materialised toolchain and dependency states are retained while referenced as
   a consumer's current state or immediate predecessor; only old states made
   explicitly unreferenced by canonical producer metadata can expire. Reference
-  publication uses a separate identity-bound pending transaction before final
-  state validation, followed by an atomic committed
-  `tc.sdlc/bootstrap-reference/v2` reference. Maintenance refreshes both
+  publication uses a separate identity-bound pending transaction before a
+  per-consumer, fsynced hard-link commit lock encloses final validation and the
+  atomic committed `tc.sdlc/bootstrap-reference/v2` write. Live or ambiguously
+  owned locks are retained; only exact locks whose PID and process-start owner
+  is proven dead can be recovered. Maintenance refreshes both
   pending and committed authorities after identity-bound quarantine and during
-  interrupted-quarantine recovery. Device and inode bind the move; birthtime is
+  interrupted-quarantine recovery, and its receipt separately counts expired
+  dead pending, linked-lock and orphan-marker metadata removed after 48 hours.
+  Device and inode bind the move; birthtime is
   retained as evidence without assuming it is stable across rename;
 - release artefacts and evidence retain catalogue, current, predecessor and
   incident references. Failed staging is removed immediately, while successful

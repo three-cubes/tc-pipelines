@@ -146,14 +146,20 @@ only through their public tool interfaces under tc-sdlc-owned roots or named
 builders. Materialised toolchain state is deleted only when canonical producer
 references prove it is neither a consumer's current state nor its predecessor.
 Bootstrap publishes a separate identity-bound pending transaction, revalidates
-the exact state, atomically commits `tc.sdlc/bootstrap-reference/v2`, and then
-removes only its unchanged pending file. Maintenance performs an identity-bound
+the exact state under a crash-durable per-consumer commit lock, atomically
+commits `tc.sdlc/bootstrap-reference/v2`, and then removes only unchanged lock
+and pending evidence. The lock is a hard link to a fully fsynced marker bound to
+PID and operating-system process-start identity; live or ambiguous owners are
+never stolen. Maintenance performs an identity-bound
 move to quarantine, refreshes pending and committed authorities, and restores
 the candidate when a matching authority appears during the move or before
 interrupted-quarantine recovery. Device and inode are the stable move identity;
 birthtime is retained as evidence but is not assumed stable across rename.
 Quarantine-creation failure retains state
 and produces a failed receipt rather than an unrecorded exception.
+Expired pending transactions, proven-dead linked commit locks and orphan
+pre-link markers are reclaimed only after 48 hours, with a dedicated reference
+metadata count in the maintenance receipt.
 Release artefacts similarly require catalogue/current/predecessor or incident
 reference authority. Deployment and VM data is outside this local maintenance
 boundary. All cleanup is receipt-bearing, identity-checked immediately before an

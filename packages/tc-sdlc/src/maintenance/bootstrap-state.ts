@@ -146,6 +146,7 @@ type RemovalResult = Readonly<{
   reclaimedBytes: number;
   failures: number;
   peakWorkers: number;
+  referenceMetadataRemovedCount: number;
   retained: MaintenanceRetainedEntry[];
 }>;
 
@@ -370,7 +371,7 @@ export async function removeBootstrapStates(
   await Promise.all(
     Array.from({ length: Math.min(workers, candidates.length) }, () => worker()),
   );
-  cleanupExpiredDeadPending(stateRoot, cutoff);
+  const referenceMetadataRemovedCount = cleanupExpiredDeadPending(stateRoot, cutoff);
   let removedCount = 0;
   let reclaimedBytes = 0;
   let failures = 0;
@@ -384,5 +385,12 @@ export async function removeBootstrapStates(
       if (result.failed) failures += 1;
     }
   }
-  return { removedCount, reclaimedBytes, failures, peakWorkers, retained };
+  return {
+    removedCount,
+    reclaimedBytes,
+    failures,
+    peakWorkers,
+    referenceMetadataRemovedCount,
+    retained,
+  };
 }

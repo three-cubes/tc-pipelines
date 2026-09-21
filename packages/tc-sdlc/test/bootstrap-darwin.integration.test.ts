@@ -88,7 +88,276 @@ function input(
   };
 }
 
+function bootstrapReferenceStem(project: string, root: string): string {
+  return sdlc.digest({ consumer: project, consumerRoot: realpathSync(root) })
+    .slice("sha256:".length);
+}
+
+async function waitForPath(path: string, child: ReturnType<typeof spawn>): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (!existsSync(path) && child.exitCode === null && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  expect(existsSync(path)).toBe(true);
+}
+
+function referenceFixture(prefix: string) {
+  const root = mkdtempSync(join(tmpdir(), `${prefix}-consumer-`));
+  const stateRoot = mkdtempSync(join(tmpdir(), `${prefix}-state-`));
+  const evidence = mkdtempSync(join(tmpdir(), `${prefix}-evidence-`));
+  writeFileSync(join(root, "input.txt"), "input\n");
+  const catalogue = input(root, ["input.txt"]).catalogue;
+  const project = prefix;
+  const declarationFor = (generation: string) =>
+    sdlc.validateDeclaration({
+      schema: "tc.sdlc/v1",
+      project,
+      toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
+      fitness: sdlc.CANONICAL_SDLC_FITNESS,
+      projects: [{ name: "consumer", root: "." }],
+      targets: {
+        check: {
+          command: `node -e 'process.stdout.write("${generation}")'`,
+          mode: "evaluate",
+          trustBoundary: "portable",
+          inputs: ["input.txt"],
+        },
+      },
+    });
+  const optionsFor = (generation: string, receipt = `${generation}.json`) => {
+    const declaration = declarationFor(generation);
+    return {
+      root,
+      declaration,
+      catalogue,
+      lock: sdlc.resolveLock(declaration, catalogue),
+      stateRoot,
+      receiptPath: join(evidence, receipt),
+      host: { platform: "darwin" as const, architecture: process.arch, offline: false },
+    };
+  };
+  const stem = bootstrapReferenceStem(project, root);
+  const runner = join(evidence, "bootstrap-child.mjs");
+  writeFileSync(
+    runner,
+    `import {readFileSync} from "node:fs"; import * as sdlc from ${JSON.stringify(PUBLIC_PACKAGE)}; const receipt=await sdlc.bootstrap(JSON.parse(readFileSync(process.argv[2], "utf8"))); process.stdout.write(JSON.stringify(receipt));\n`,
+  );
+  const spawnBootstrap = (generation: string) => {
+    const optionsPath = join(evidence, `${generation}-options.json`);
+    writeFileSync(optionsPath, JSON.stringify(optionsFor(generation)));
+    const child = spawn(process.execPath, [runner, optionsPath], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const outcome = new Promise<Readonly<{ status: number | null; stdout: string; stderr: string }>>(
+      (resolve) => {
+        let stdout = "";
+        let stderr = "";
+        child.stdout?.setEncoding("utf8");
+        child.stderr?.setEncoding("utf8");
+        child.stdout?.on("data", (value) => { stdout += value; });
+        child.stderr?.on("data", (value) => { stderr += value; });
+        child.once("exit", (status) => resolve({ status, stdout, stderr }));
+      },
+    );
+    return { child, outcome };
+  };
+  return {
+    root,
+    stateRoot,
+    evidence,
+    project,
+    optionsFor,
+    spawnBootstrap,
+    referencePath: join(stateRoot, "references", `${stem}.json`),
+    lockPath: join(stateRoot, "references", "locks", `${stem}.lock`),
+  };
+}
+
 describe("reviewed macOS bootstrap host and dependency boundary", () => {
+  test("serialises concurrent commits for one consumer without losing either successful state", async () => {
+    expect(process.platform).toBe("darwin");
+    const fixture = referenceFixture("bootstrap-reference-commit");
+    const initial = await sdlc.bootstrap(fixture.optionsFor("A"));
+    expect(initial.status).toBe("succeeded");
+    const transitionB = fixture.spawnBootstrap("B");
+    await waitForPath(fixture.lockPath, transitionB.child);
+    expect(transitionB.child.kill("SIGSTOP")).toBe(true);
+
+    const transitionC = fixture.spawnBootstrap("C");
+    const cFinishedBeforeRelease = await Promise.race([
+      transitionC.outcome.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 500)),
+    ]);
+    expect(cFinishedBeforeRelease).toBe(false);
+    expect(transitionB.child.kill("SIGCONT")).toBe(true);
+    const [resultB, resultC] = await Promise.all([
+      transitionB.outcome,
+      transitionC.outcome,
+    ]);
+    expect(resultB.status, resultB.stderr).toBe(0);
+    expect(resultC.status, resultC.stderr).toBe(0);
+    const receiptB = JSON.parse(resultB.stdout);
+    const receiptC = JSON.parse(resultC.stdout);
+    expect(receiptB).toMatchObject({ status: "succeeded" });
+    expect(receiptC).toMatchObject({ status: "succeeded" });
+    const reference = JSON.parse(readFileSync(fixture.referencePath, "utf8"));
+    expect(new Set([reference.currentStateKey, reference.predecessorStateKey])).toEqual(
+      new Set([receiptB.stateKey, receiptC.stateKey]),
+    );
+  }, 180_000);
+
+  test("recovers an exact commit lock whose owner was killed", async () => {
+    expect(process.platform).toBe("darwin");
+    const fixture = referenceFixture("bootstrap-reference-killed-owner");
+    expect(await sdlc.bootstrap(fixture.optionsFor("A"))).toMatchObject({ status: "succeeded" });
+    const { child, outcome } = fixture.spawnBootstrap("B");
+    await waitForPath(fixture.lockPath, child);
+    expect(child.kill("SIGKILL")).toBe(true);
+    await outcome;
+
+    const recoveredC = fixture.spawnBootstrap("C");
+    const recoveredD = fixture.spawnBootstrap("D");
+    const [outcomeC, outcomeD] = await Promise.all([
+      recoveredC.outcome,
+      recoveredD.outcome,
+    ]);
+    expect(outcomeC.status, outcomeC.stderr).toBe(0);
+    expect(outcomeD.status, outcomeD.stderr).toBe(0);
+    const receiptC = JSON.parse(outcomeC.stdout);
+    const receiptD = JSON.parse(outcomeD.stdout);
+    expect(receiptC).toMatchObject({ status: "succeeded" });
+    expect(receiptD).toMatchObject({ status: "succeeded" });
+    expect(existsSync(fixture.lockPath)).toBe(false);
+    const reference = JSON.parse(readFileSync(fixture.referencePath, "utf8"));
+    expect(new Set([reference.currentStateKey, reference.predecessorStateKey])).toEqual(
+      new Set([receiptC.stateKey, receiptD.stateKey]),
+    );
+
+    const interrupted = fixture.spawnBootstrap("E");
+    await waitForPath(fixture.lockPath, interrupted.child);
+    expect(interrupted.child.kill("SIGKILL")).toBe(true);
+    await interrupted.outcome;
+    const locksRoot = dirname(fixture.lockPath);
+    const markerPath = join(
+      locksRoot,
+      readdirSync(locksRoot).find((name) => name.endsWith(".marker"))!,
+    );
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(fixture.lockPath, old, old);
+    utimesSync(markerPath, old, old);
+    const maintained = await sdlc.maintain({
+      stateRoot: fixture.stateRoot,
+      temporaryRoot: mkdtempSync(join(tmpdir(), "tc-sdlc-reference-lock-maintenance-")),
+      receiptPath: join(fixture.evidence, "maintenance.json"),
+      mode: "apply",
+    });
+    expect(maintained).toMatchObject({
+      status: "succeeded",
+      referenceMetadataRemovedCount: 1,
+    });
+    expect(existsSync(fixture.lockPath)).toBe(false);
+    expect(existsSync(markerPath)).toBe(false);
+
+    const beforeLinkCrash = fixture.spawnBootstrap("F");
+    await waitForPath(fixture.lockPath, beforeLinkCrash.child);
+    expect(beforeLinkCrash.child.kill("SIGKILL")).toBe(true);
+    await beforeLinkCrash.outcome;
+    rmSync(fixture.lockPath);
+    const orphanMarker = join(
+      locksRoot,
+      readdirSync(locksRoot).find((name) => name.endsWith(".marker"))!,
+    );
+    utimesSync(orphanMarker, old, old);
+    const orphanCleanup = await sdlc.maintain({
+      stateRoot: fixture.stateRoot,
+      temporaryRoot: mkdtempSync(join(tmpdir(), "tc-sdlc-reference-marker-maintenance-")),
+      receiptPath: join(fixture.evidence, "orphan-maintenance.json"),
+      mode: "apply",
+    });
+    expect(orphanCleanup).toMatchObject({
+      status: "succeeded",
+      referenceMetadataRemovedCount: 1,
+    });
+    expect(existsSync(orphanMarker)).toBe(false);
+  }, 60_000);
+
+  test("does not steal a live commit lock and returns actionable bounded evidence", async () => {
+    expect(process.platform).toBe("darwin");
+    const fixture = referenceFixture("bootstrap-reference-live-owner");
+    expect(await sdlc.bootstrap(fixture.optionsFor("A"))).toMatchObject({ status: "succeeded" });
+    const { child, outcome } = fixture.spawnBootstrap("B");
+    await waitForPath(fixture.lockPath, child);
+    expect(child.kill("SIGSTOP")).toBe(true);
+    const identity = filesystemIdentity(fixture.lockPath);
+    try {
+      const contended = await sdlc.bootstrap(fixture.optionsFor("C"));
+      expect(contended).toMatchObject({
+        status: "failed",
+        reason: "reference_commit_busy",
+        diagnostics: [{ code: "BOOTSTRAP_REFERENCE_COMMIT_BUSY" }],
+      });
+      expect(filesystemIdentity(fixture.lockPath)).toEqual(identity);
+    } finally {
+      child.kill("SIGCONT");
+    }
+    const completed = await outcome;
+    expect(completed.status, completed.stderr).toBe(0);
+    expect(JSON.parse(completed.stdout)).toMatchObject({ status: "succeeded" });
+  }, 60_000);
+
+  test("fails closed on symlinked or replaced commit lock markers", async () => {
+    expect(process.platform).toBe("darwin");
+    const fixture = referenceFixture("bootstrap-reference-hostile-lock");
+    const initial = await sdlc.bootstrap(fixture.optionsFor("A"));
+    expect(initial).toMatchObject({ status: "succeeded" });
+    mkdirSync(dirname(fixture.lockPath), { recursive: true });
+    const foreign = join(fixture.evidence, "foreign-lock");
+    writeFileSync(foreign, "foreign-lock-bytes");
+
+    const acquired = fixture.spawnBootstrap("B");
+    await waitForPath(fixture.lockPath, acquired.child);
+    expect(acquired.child.kill("SIGSTOP")).toBe(true);
+    const displaced = join(fixture.evidence, "displaced-owned-lock");
+    renameSync(fixture.lockPath, displaced);
+    writeFileSync(fixture.lockPath, "replacement-lock-bytes");
+    expect(acquired.child.kill("SIGCONT")).toBe(true);
+    const replacedWhileHeld = await acquired.outcome;
+    expect(replacedWhileHeld.status, replacedWhileHeld.stderr).toBe(0);
+    expect(JSON.parse(replacedWhileHeld.stdout)).toMatchObject({
+      status: "failed",
+      reason: "reference_commit_invalid",
+      diagnostics: [{ code: "BOOTSTRAP_REFERENCE_COMMIT_INVALID" }],
+    });
+    expect(readFileSync(fixture.lockPath, "utf8")).toBe("replacement-lock-bytes");
+    rmSync(fixture.lockPath);
+    rmSync(displaced);
+    for (const name of readdirSync(dirname(fixture.lockPath))) {
+      if (name.endsWith(".marker")) rmSync(join(dirname(fixture.lockPath), name));
+    }
+
+    symlinkSync(foreign, fixture.lockPath);
+
+    const symlinked = await sdlc.bootstrap(fixture.optionsFor("C"));
+    expect(symlinked).toMatchObject({
+      status: "failed",
+      reason: "reference_commit_invalid",
+      diagnostics: [{ code: "BOOTSTRAP_REFERENCE_COMMIT_INVALID" }],
+    });
+    expect(readFileSync(foreign, "utf8")).toBe("foreign-lock-bytes");
+    rmSync(fixture.lockPath);
+    writeFileSync(fixture.lockPath, "replacement-lock-bytes");
+
+    const replaced = await sdlc.bootstrap(fixture.optionsFor("D"));
+    expect(replaced).toMatchObject({
+      status: "failed",
+      reason: "reference_commit_invalid",
+      diagnostics: [{ code: "BOOTSTRAP_REFERENCE_COMMIT_INVALID" }],
+    });
+    expect(readFileSync(fixture.lockPath, "utf8")).toBe("replacement-lock-bytes");
+    const reference = JSON.parse(readFileSync(fixture.referencePath, "utf8"));
+    expect(reference.currentStateKey).toBe(initial.stateKey);
+  }, 60_000);
+
   test("never leaves a reference to state quarantined by concurrent maintenance", async () => {
     expect(process.platform).toBe("darwin");
     const raceRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-bootstrap-race-consumer-"));
@@ -311,6 +580,7 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       receiptPath: join(evidence, "healed.json"),
       mode: "apply",
     });
+    expect(healed.referenceMetadataRemovedCount).toBe(1);
     expect(healed.retained).toContainEqual({ path: initial.stateKey, reason: "referenced" });
     expect(existsSync(pendingPath)).toBe(false);
     const restarted = await sdlc.bootstrap({

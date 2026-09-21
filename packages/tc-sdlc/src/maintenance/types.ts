@@ -65,6 +65,7 @@ export type MaintenanceReceipt = Readonly<{
   cleanupWorkerMs: number;
   peakCleanupWorkers: number;
   cleanupFailures: number;
+  referenceMetadataRemovedCount: number;
   candidates: readonly MaintenanceEntry[];
   retained: readonly MaintenanceRetainedEntry[];
   tools: Readonly<{

@@ -12,6 +12,11 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import { canonicalJson, digest } from "../canonical.js";
 import { writeCanonicalEvidence } from "../evidence/index.js";
 import type { FilesystemIdentity } from "../maintenance/types.js";
+import {
+  assertBootstrapReferenceCommitLock,
+  cleanupExpiredDeadReferenceLockMarkers,
+  type BootstrapReferenceCommitLock,
+} from "./reference-lock.js";
 
 const OWNER = "@three-cubes/tc-sdlc";
 const COMMITTED_SCHEMA = "tc.sdlc/bootstrap-reference/v2";
@@ -177,6 +182,11 @@ export function readBootstrapReferenceAuthorities(
     let observed = false;
     for (const name of readdirSync(references).sort()) {
       const path = join(references, name);
+      if (name === "locks") {
+        const locksRoot = lstatSync(path);
+        if (!locksRoot.isDirectory() || locksRoot.isSymbolicLink()) return undefined;
+        continue;
+      }
       if (name === "pending") {
         const pendingRoot = lstatSync(path);
         if (!pendingRoot.isDirectory() || pendingRoot.isSymbolicLink()) return undefined;
@@ -220,7 +230,9 @@ function processIsOwner(value: PendingBootstrapReference): boolean {
   }
 }
 
-function referenceDirectories(stateRoot: string): Readonly<{ references: string; pending: string }> {
+function referenceDirectories(
+  stateRoot: string,
+): Readonly<{ references: string; pending: string }> {
   const references = join(stateRoot, "references");
   const pending = join(references, "pending");
   safeOwnedPath(stateRoot, references);
@@ -270,7 +282,9 @@ function exactPending(publication: PendingPublication): boolean {
 export function commitBootstrapReference(
   stateRoot: string,
   publication: PendingPublication,
+  lock: BootstrapReferenceCommitLock,
 ): BootstrapReference {
+  assertBootstrapReferenceCommitLock(lock);
   if (!exactPending(publication)) throw new Error("pending reference changed");
   const { references } = referenceDirectories(stateRoot);
   const path = join(references, committedName(publication.value));
@@ -316,7 +330,9 @@ export function cleanupExpiredDeadPending(stateRoot: string, cutoff: number): nu
   try {
     safeOwnedPath(stateRoot, pending);
     const details = lstatSync(pending);
-    if (!details.isDirectory() || details.isSymbolicLink()) return 0;
+    if (!details.isDirectory() || details.isSymbolicLink()) {
+      return cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
+    }
     for (const name of readdirSync(pending).sort()) {
       const path = join(pending, name);
       const file = lstatSync(path);
@@ -331,7 +347,7 @@ export function cleanupExpiredDeadPending(stateRoot: string, cutoff: number): nu
       removed += 1;
     }
   } catch {
-    return removed;
+    return removed + cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
   }
-  return removed;
+  return removed + cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
 }

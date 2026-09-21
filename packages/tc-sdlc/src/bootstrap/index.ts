@@ -32,6 +32,11 @@ import {
 } from "../maintenance/index.js";
 import type { ReleaseCatalogue, SdlcDeclaration, SdlcLock } from "../schema/types.js";
 import {
+  acquireBootstrapReferenceCommitLock,
+  BootstrapReferenceCommitError,
+  releaseBootstrapReferenceCommitLock,
+} from "./reference-lock.js";
+import {
   commitBootstrapReference,
   removePendingBootstrapReference,
   writePendingBootstrapReference,
@@ -1449,6 +1454,22 @@ function failureReason(error: unknown): Readonly<{
   diagnostics: readonly BootstrapDiagnostic[];
 }> {
   if (error instanceof BootstrapFailure) return error;
+  if (error instanceof BootstrapReferenceCommitError) {
+    return {
+      reason: error.kind === "busy" ? "reference_commit_busy" : "reference_commit_invalid",
+      diagnostics: [
+        {
+          code: error.kind === "busy"
+            ? "BOOTSTRAP_REFERENCE_COMMIT_BUSY"
+            : "BOOTSTRAP_REFERENCE_COMMIT_INVALID",
+          message: error.message,
+          action: error.kind === "busy"
+            ? "allow the active bootstrap to finish, then retry"
+            : "preserve the reference evidence and inspect the owned commit-lock path",
+        },
+      ],
+    };
+  }
   if (error instanceof SdlcError && error.code === "LOCK_STALE") {
     return {
       reason: "stale_lock",
@@ -1624,7 +1645,9 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       verifiedIdentity,
     );
     let finalState: BootstrapState | null = null;
+    let commitLock: Awaited<ReturnType<typeof acquireBootstrapReferenceCommitLock>> | undefined;
     try {
+      commitLock = await acquireBootstrapReferenceCommitLock(stateRoot, publication);
       finalState = validateWarmState(
         options,
         host,
@@ -1647,11 +1670,13 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
           },
         ]);
       }
-      commitBootstrapReference(stateRoot, publication);
-      removePendingBootstrapReference(publication);
-    } catch (error) {
-      removePendingBootstrapReference(publication);
-      throw error;
+      commitBootstrapReference(stateRoot, publication, commitLock);
+    } finally {
+      try {
+        if (commitLock !== undefined) releaseBootstrapReferenceCommitLock(commitLock);
+      } finally {
+        removePendingBootstrapReference(publication);
+      }
     }
     adapters = finalState.adapters.map(adapterEvidence);
     dependencyEvidence = finalState.dependencies;
