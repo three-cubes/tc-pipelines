@@ -31,6 +31,11 @@ import {
   type AutomaticRecoveryReceipt,
 } from "../maintenance/index.js";
 import type { ReleaseCatalogue, SdlcDeclaration, SdlcLock } from "../schema/types.js";
+import {
+  commitBootstrapReference,
+  removePendingBootstrapReference,
+  writePendingBootstrapReference,
+} from "./references.js";
 
 export type BootstrapPlatform = "darwin" | "linux";
 export type BootstrapCapabilityName = "node" | "pnpm" | "python" | "uv";
@@ -151,28 +156,10 @@ type BootstrapState = Readonly<{
   dependencies: readonly BootstrapDependencyEvidence[];
 }>;
 
-type BootstrapReference = Readonly<{
-  schema: "tc.sdlc/bootstrap-reference/v1";
-  owner: "@three-cubes/tc-sdlc";
-  consumer: string;
-  consumerRoot: string;
-  currentStateKey: string;
-  currentStateIdentity: FilesystemIdentity;
-  predecessorStateKey?: string;
-  predecessorStateIdentity?: FilesystemIdentity;
-}>;
-
 type FilesystemIdentity = Readonly<{
   device: string;
   inode: string;
   birthtimeNanoseconds: string;
-}>;
-
-type ReferencePublication = Readonly<{
-  path: string;
-  identity: FilesystemIdentity;
-  bytes: string;
-  previous?: BootstrapReference;
 }>;
 
 const OWNER = { schema: "tc.sdlc/state-owner/v1", owner: "@three-cubes/tc-sdlc" } as const;
@@ -234,14 +221,6 @@ function sameFilesystemIdentity(path: string, expected: FilesystemIdentity): boo
   } catch {
     return false;
   }
-}
-
-function validFilesystemIdentity(value: unknown): value is FilesystemIdentity {
-  if (typeof value !== "object" || value === null) return false;
-  const identity = value as Record<string, unknown>;
-  return ["device", "inode", "birthtimeNanoseconds"].every(
-    (key) => typeof identity[key] === "string" && identity[key] !== "",
-  );
 }
 
 function isPythonRuntimeCache(path: string): boolean {
@@ -1530,87 +1509,6 @@ function failedReceipt(
   };
 }
 
-function writeBootstrapReference(
-  stateRoot: string,
-  consumer: string,
-  consumerRoot: string,
-  stateKey: string,
-  stateIdentity: FilesystemIdentity,
-): ReferencePublication {
-  const directory = join(stateRoot, "references");
-  rejectSymlinkComponents(stateRoot, directory);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const referencePath = join(
-    directory,
-    `${digest({ consumer, consumerRoot }).slice("sha256:".length)}.json`,
-  );
-  rejectSymlinkComponents(stateRoot, referencePath);
-  let previous: BootstrapReference | undefined;
-  if (existsSync(referencePath)) {
-    const value = readCanonical(referencePath) as BootstrapReference;
-    if (
-      value.schema !== "tc.sdlc/bootstrap-reference/v1" ||
-      value.owner !== OWNER.owner ||
-      value.consumer !== consumer ||
-      value.consumerRoot !== consumerRoot ||
-      !validFilesystemIdentity(value.currentStateIdentity) ||
-      (value.predecessorStateKey !== undefined &&
-        !validFilesystemIdentity(value.predecessorStateIdentity))
-    ) {
-      throw new BootstrapFailure("state_corrupt", [
-        {
-          code: "BOOTSTRAP_REFERENCE_CORRUPT",
-          message: "bootstrap state reference metadata is invalid",
-          action: "inspect the owned reference metadata before retrying bootstrap",
-        },
-      ]);
-    }
-    previous = value;
-  }
-  const predecessorStateKey =
-    previous?.currentStateKey !== undefined && previous.currentStateKey !== stateKey
-      ? previous.currentStateKey
-      : previous?.predecessorStateKey;
-  const predecessorStateIdentity =
-    previous?.currentStateKey !== undefined && previous.currentStateKey !== stateKey
-      ? previous.currentStateIdentity
-      : previous?.predecessorStateIdentity;
-  const value = {
-    schema: "tc.sdlc/bootstrap-reference/v1",
-    owner: OWNER.owner,
-    consumer,
-    consumerRoot,
-    currentStateKey: stateKey,
-    currentStateIdentity: stateIdentity,
-    ...(predecessorStateKey === undefined || predecessorStateIdentity === undefined
-      ? {}
-      : { predecessorStateKey, predecessorStateIdentity }),
-  } satisfies BootstrapReference;
-  writeCanonicalEvidence(referencePath, value);
-  return {
-    path: referencePath,
-    identity: filesystemIdentity(referencePath),
-    bytes: canonicalJson(value),
-    ...(previous === undefined ? {} : { previous }),
-  };
-}
-
-function rollbackBootstrapReference(publication: ReferencePublication): void {
-  try {
-    if (
-      !sameFilesystemIdentity(publication.path, publication.identity) ||
-      readFileSync(publication.path, "utf8") !== publication.bytes
-    ) return;
-    if (publication.previous === undefined) {
-      rmSync(publication.path);
-    } else {
-      writeCanonicalEvidence(publication.path, publication.previous);
-    }
-  } catch {
-    // A changed publication belongs to a later bootstrap and is never removed here.
-  }
-}
-
 export async function bootstrap(options: BootstrapOptions): Promise<BootstrapReceipt> {
   const recovery = await recoverInterruptedTemporaryState();
   const maximumDiagnostics = options.maxDiagnostics ?? 20;
@@ -1718,7 +1616,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       ]);
     }
     const verifiedIdentity = filesystemIdentity(finalStatePath);
-    const publication = writeBootstrapReference(
+    const publication = writePendingBootstrapReference(
       stateRoot,
       options.declaration.project,
       realpathSync(options.root),
@@ -1749,8 +1647,10 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
           },
         ]);
       }
+      commitBootstrapReference(stateRoot, publication);
+      removePendingBootstrapReference(publication);
     } catch (error) {
-      rollbackBootstrapReference(publication);
+      removePendingBootstrapReference(publication);
       throw error;
     }
     adapters = finalState.adapters.map(adapterEvidence);

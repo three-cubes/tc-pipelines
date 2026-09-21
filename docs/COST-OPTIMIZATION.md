@@ -133,10 +133,12 @@ not an operator memory task.
 - materialised toolchain and dependency states are retained while referenced as
   a consumer's current state or immediate predecessor; only old states made
   explicitly unreferenced by canonical producer metadata can expire. Reference
-  publication binds the exact state filesystem identity. Maintenance refreshes
-  references after identity-bound quarantine and restores a newly referenced
-  candidate; bootstrap revalidates the same state identity after publication
-  and rolls back only its unchanged reference if the state moved;
+  publication uses a separate identity-bound pending transaction before final
+  state validation, followed by an atomic committed
+  `tc.sdlc/bootstrap-reference/v2` reference. Maintenance refreshes both
+  pending and committed authorities after identity-bound quarantine and during
+  interrupted-quarantine recovery. Device and inode bind the move; birthtime is
+  retained as evidence without assuming it is stable across rename;
 - release artefacts and evidence retain catalogue, current, predecessor and
   incident references. Failed staging is removed immediately, while successful
   outputs cannot expire until their producer emits sufficient reference

@@ -5,9 +5,15 @@ import {
   readFileSync,
   renameSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 
-import { canonicalJson, digest } from "../canonical.js";
+import { canonicalJson } from "../canonical.js";
+import {
+  cleanupExpiredDeadPending,
+  readBootstrapReferenceAuthorities,
+  referenceMatches,
+  type BootstrapReferenceAuthorities,
+} from "../bootstrap/references.js";
 import {
   QUARANTINE_PREFIX,
   createQuarantine,
@@ -15,33 +21,16 @@ import {
   filesystemIdentity,
   finishQuarantine,
   inspectQuarantine,
+  inspectQuarantinePayload,
   removeQuarantineCandidate,
   sameIdentity,
+  sameMoveIdentity,
 } from "./quarantine.js";
 import type {
   FilesystemIdentity,
   MaintenanceEntry,
   MaintenanceRetainedEntry,
 } from "./types.js";
-
-const OWNER = "@three-cubes/tc-sdlc";
-
-type BootstrapReference = Readonly<{
-  schema: "tc.sdlc/bootstrap-reference/v1";
-  owner: typeof OWNER;
-  consumer: string;
-  consumerRoot: string;
-  currentStateKey: string;
-  currentStateIdentity: FilesystemIdentity;
-  predecessorStateKey?: string;
-  predecessorStateIdentity?: FilesystemIdentity;
-}>;
-
-type BootstrapReferences = ReadonlyMap<string, ReadonlySet<string>>;
-
-function stableIdentityKey(identity: FilesystemIdentity): string {
-  return canonicalJson({ device: identity.device, inode: identity.inode });
-}
 
 function directoryBytes(path: string): number {
   let total = 0;
@@ -119,97 +108,13 @@ function bootstrapQuarantinePaths(stateRoot: string): readonly string[] {
   return paths;
 }
 
-function referencePathIsValid(name: string, value: BootstrapReference): boolean {
-  return (
-    value.schema === "tc.sdlc/bootstrap-reference/v1" &&
-    value.owner === OWNER &&
-    typeof value.consumer === "string" &&
-    value.consumer.length > 0 &&
-    typeof value.consumerRoot === "string" &&
-    isAbsolute(value.consumerRoot) &&
-    name ===
-      `${digest({ consumer: value.consumer, consumerRoot: value.consumerRoot }).slice("sha256:".length)}.json`
-  );
-}
-
-function stateKeyIsValid(value: string): boolean {
-  return /^releases\/[^/]+\/[^/]+\/(darwin|linux)-[^/]+$/.test(value);
-}
-
-function identityIsValid(value: unknown): value is FilesystemIdentity {
-  if (typeof value !== "object" || value === null) return false;
-  const identity = value as Record<string, unknown>;
-  return ["device", "inode", "birthtimeNanoseconds"].every(
-    (key) => typeof identity[key] === "string" && identity[key] !== "",
-  );
-}
-
-function bindReference(
-  referenced: Map<string, Set<string>>,
-  stateKey: string,
-  identity: FilesystemIdentity,
-): void {
-  const identities = referenced.get(stateKey) ?? new Set<string>();
-  identities.add(stableIdentityKey(identity));
-  referenced.set(stateKey, identities);
-}
-
-function referenceMatches(
-  references: BootstrapReferences | undefined,
-  stateKey: string,
-  identity: FilesystemIdentity,
-): boolean {
-  return references?.get(stateKey)?.has(stableIdentityKey(identity)) === true;
-}
-
-function bootstrapReferences(stateRoot: string): BootstrapReferences | undefined {
-  const directory = join(stateRoot, "references");
-  try {
-    const root = lstatSync(directory);
-    if (!root.isDirectory() || root.isSymbolicLink()) return undefined;
-    const referenced = new Map<string, Set<string>>();
-    const files = readdirSync(directory).sort();
-    if (files.length === 0) return undefined;
-    for (const name of files) {
-      if (!/^[a-zA-Z0-9._-]+\.json$/.test(name)) return undefined;
-      const path = join(directory, name);
-      const details = lstatSync(path);
-      if (!details.isFile() || details.isSymbolicLink()) return undefined;
-      const bytes = readFileSync(path, "utf8");
-      const value = JSON.parse(bytes) as BootstrapReference;
-      if (bytes !== canonicalJson(value) || !referencePathIsValid(name, value)) {
-        return undefined;
-      }
-      if (
-        !stateKeyIsValid(value.currentStateKey) ||
-        !identityIsValid(value.currentStateIdentity)
-      ) return undefined;
-      bindReference(referenced, value.currentStateKey, value.currentStateIdentity);
-      if (value.predecessorStateKey !== undefined) {
-        if (
-          !stateKeyIsValid(value.predecessorStateKey) ||
-          !identityIsValid(value.predecessorStateIdentity)
-        ) return undefined;
-        bindReference(
-          referenced,
-          value.predecessorStateKey,
-          value.predecessorStateIdentity,
-        );
-      }
-    }
-    return referenced;
-  } catch {
-    return undefined;
-  }
-}
-
 export function inspectBootstrapStates(
   stateRoot: string,
   cutoff: number,
 ): Readonly<{ candidates: MaintenanceEntry[]; retained: MaintenanceRetainedEntry[] }> {
   const candidates: MaintenanceEntry[] = [];
   const retained: MaintenanceRetainedEntry[] = [];
-  const references = bootstrapReferences(stateRoot);
+  const references = readBootstrapReferenceAuthorities(stateRoot);
   for (const path of bootstrapQuarantinePaths(stateRoot)) {
     const inspected = inspectQuarantine(join(stateRoot, path), path, cutoff);
     if (inspected.candidate !== undefined) candidates.push(inspected.candidate);
@@ -245,7 +150,7 @@ type RemovalResult = Readonly<{
 }>;
 
 function retainedReason(
-  references: BootstrapReferences | undefined,
+  references: BootstrapReferenceAuthorities | undefined,
   path: string,
   identity: FilesystemIdentity,
 ): MaintenanceRetainedEntry["reason"] {
@@ -258,13 +163,39 @@ type BootstrapDeletionPreparation =
   | Readonly<{ kind: "retained"; retained: MaintenanceRetainedEntry; failed: boolean }>
   | Readonly<{ kind: "quarantined"; root: string; payload: string }>;
 
+function restoreReferencedQuarantine(
+  stateRoot: string,
+  candidate: MaintenanceEntry,
+): MaintenanceRetainedEntry | undefined {
+  const root = join(stateRoot, candidate.path);
+  try {
+    if (!sameIdentity(root, candidate.identity)) return undefined;
+    const payload = inspectQuarantinePayload(root);
+    if (payload?.kind !== "bootstrap-state") return undefined;
+    const parentKey = dirname(candidate.path).replaceAll("\\", "/");
+    const stateKey = `${parentKey}/${payload.originalName}`;
+    const references = readBootstrapReferenceAuthorities(stateRoot);
+    if (!referenceMatches(references, stateKey, payload.identity)) return undefined;
+    const original = join(stateRoot, stateKey);
+    if (existsSync(original)) throw new Error("referenced state path already exists");
+    renameSync(payload.payload, original);
+    if (!sameMoveIdentity(original, payload.identity)) {
+      throw new Error("restored state identity changed");
+    }
+    finishQuarantine(root);
+    return { path: stateKey, reason: "referenced" };
+  } catch {
+    return undefined;
+  }
+}
+
 function prepareBootstrapDeletion(
   stateRoot: string,
   candidate: MaintenanceEntry,
   cutoff: number,
 ): BootstrapDeletionPreparation {
   const path = join(stateRoot, candidate.path);
-  const references = bootstrapReferences(stateRoot);
+  const references = readBootstrapReferenceAuthorities(stateRoot);
   try {
     if (
       references === undefined ||
@@ -290,7 +221,7 @@ function prepareBootstrapDeletion(
       candidate.identity,
     );
     renameSync(path, created.payload);
-    if (!sameIdentity(created.payload, candidate.identity)) {
+    if (!sameMoveIdentity(created.payload, candidate.identity)) {
       if (!existsSync(path)) {
         renameSync(created.payload, path);
         finishQuarantine(created.root);
@@ -301,7 +232,7 @@ function prepareBootstrapDeletion(
         failed: existsSync(created.payload),
       };
     }
-    const refreshedReferences = bootstrapReferences(stateRoot);
+    const refreshedReferences = readBootstrapReferenceAuthorities(stateRoot);
     if (
       refreshedReferences === undefined ||
       referenceMatches(refreshedReferences, candidate.path, candidate.identity)
@@ -356,6 +287,11 @@ export async function removeBootstrapStates(
       const candidate = candidates[index]!;
       const path = join(stateRoot, candidate.path);
       if (candidate.kind === "quarantine") {
+        const restored = restoreReferencedQuarantine(stateRoot, candidate);
+        if (restored !== undefined) {
+          results[index] = { removed: false, retained: restored, failed: false };
+          continue;
+        }
         activeWorkers += 1;
         peakWorkers = Math.max(peakWorkers, activeWorkers);
         let recovered: Awaited<ReturnType<typeof removeQuarantineCandidate>>;
@@ -434,6 +370,7 @@ export async function removeBootstrapStates(
   await Promise.all(
     Array.from({ length: Math.min(workers, candidates.length) }, () => worker()),
   );
+  cleanupExpiredDeadPending(stateRoot, cutoff);
   let removedCount = 0;
   let reclaimedBytes = 0;
   let failures = 0;

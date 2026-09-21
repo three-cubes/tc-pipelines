@@ -288,12 +288,19 @@ cannot redirect an asynchronous recursive delete. Worker terminal budgets and
 observed peak concurrency are recorded in maintenance evidence. Materialised
 bootstrap states carry stable local-consumer references: maintenance retains
 every current state and immediate predecessor and expires only old states made
-explicitly unreferenced by valid producer metadata. Bootstrap references bind
-the exact state filesystem identity; after atomic publication bootstrap
-revalidates that identity and rolls back only its unchanged publication if
-state moved. Maintenance moves an identity-matched candidate into quarantine,
-refreshes references, and restores the candidate when a matching reference
-appeared during the move. A changed identity never grants deletion authority.
+explicitly unreferenced by valid producer metadata. The first released
+`tc.sdlc/bootstrap-reference/v2` contract separates committed consumer
+references from identity-bound pending transactions. Bootstrap publishes a
+pending transaction, revalidates the exact state, atomically commits v2, then
+removes only its unchanged pending file. Maintenance moves an identity-matched
+candidate into quarantine, refreshes both pending and committed authorities,
+and restores the candidate when either matching authority appeared during the
+move or before interrupted-quarantine recovery. Dead pending transactions are
+retained as authority for that run and expire only after their owner is proven
+absent and the 48-hour window has elapsed. Device and inode provide stable move
+authority; birthtime remains richer evidence but cannot veto a proven same-file
+rename on filesystems where it changes with ctime. A changed stable identity
+never grants deletion authority.
 Cleanup setup failures retain the candidate and terminate in a canonical failed
 maintenance receipt. The release-image producer uses a named tc-sdlc BuildKit
 builder and state-owned Docker configuration with explicit daemon routing;

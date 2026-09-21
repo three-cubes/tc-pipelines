@@ -145,11 +145,14 @@ sweep for interrupted work. Rebuildable uv, pnpm and BuildKit caches are pruned
 only through their public tool interfaces under tc-sdlc-owned roots or named
 builders. Materialised toolchain state is deleted only when canonical producer
 references prove it is neither a consumer's current state nor its predecessor.
-Bootstrap publishes a reference bound to the validated state filesystem
-identity, then revalidates that exact identity and rolls back only its unchanged
-publication if the state moved. Maintenance performs an identity-bound move to
-quarantine, refreshes references, and restores the candidate when a matching
-reference appeared during the move. Quarantine-creation failure retains state
+Bootstrap publishes a separate identity-bound pending transaction, revalidates
+the exact state, atomically commits `tc.sdlc/bootstrap-reference/v2`, and then
+removes only its unchanged pending file. Maintenance performs an identity-bound
+move to quarantine, refreshes pending and committed authorities, and restores
+the candidate when a matching authority appears during the move or before
+interrupted-quarantine recovery. Device and inode are the stable move identity;
+birthtime is retained as evidence but is not assumed stable across rename.
+Quarantine-creation failure retains state
 and produces a failed receipt rather than an unrecorded exception.
 Release artefacts similarly require catalogue/current/predecessor or incident
 reference authority. Deployment and VM data is outside this local maintenance

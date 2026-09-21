@@ -155,8 +155,11 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     const sentinelIdentity = filesystemIdentity(join(stateRoot, initialSentinel.stateKey));
     for (let index = 0; index < 5_000; index += 1) {
       const value = {
-        schema: "tc.sdlc/bootstrap-reference/v1",
+        schema: "tc.sdlc/bootstrap-reference/v2",
         owner: "@three-cubes/tc-sdlc",
+        phase: "committed",
+        transaction: "00000000-0000-4000-8000-000000000001",
+        committedAtMs: 1,
         consumer: `lock-holder-${index}`,
         consumerRoot: `/private/tmp/tc-sdlc-lock-holder-${index}`,
         currentStateKey: initialSentinel.stateKey,
@@ -228,6 +231,101 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     );
   }, 180_000);
 
+  test("retains state after bootstrap is killed with an identity-bound pending transaction", async () => {
+    expect(process.platform).toBe("darwin");
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-pending-crash-consumer-"));
+    for (const name of ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"]) {
+      writeFileSync(join(root, name), readFileSync(join(consumer, name)));
+    }
+    const stateRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-pending-crash-state-"));
+    const evidence = mkdtempSync(join(tmpdir(), "tc-sdlc-pending-crash-evidence-"));
+    const temporaryRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-pending-crash-temp-"));
+    const options = {
+      ...input(root),
+      stateRoot,
+      receiptPath: join(evidence, "initial.json"),
+      host: { platform: "darwin" as const, architecture: process.arch, offline: false },
+    };
+    const initial = await sdlc.bootstrap(options);
+    expect(initial.status).toBe("succeeded");
+    const referencePath = join(
+      stateRoot,
+      "references",
+      `${sdlc.digest({ consumer: options.declaration.project, consumerRoot: realpathSync(root) }).slice("sha256:".length)}.json`,
+    );
+    rmSync(referencePath);
+
+    const pythonRoot = join(stateRoot, initial.stateKey, "dependencies", "python");
+    for (let index = 0; index < 20_000; index += 1) {
+      writeFileSync(join(pythonRoot, `pending-window-${index}.pyc`), "");
+    }
+    const runner = join(evidence, "pending-child.mjs");
+    const optionsPath = join(evidence, "pending-options.json");
+    writeFileSync(
+      runner,
+      `import {readFileSync} from "node:fs"; import * as sdlc from ${JSON.stringify(PUBLIC_PACKAGE)}; await sdlc.bootstrap(JSON.parse(readFileSync(process.argv[2], "utf8")));\n`,
+    );
+    writeFileSync(
+      optionsPath,
+      JSON.stringify({
+        ...options,
+        receiptPath: join(evidence, "killed.json"),
+        host: { ...options.host, offline: true },
+      }),
+    );
+    const child = spawn(process.execPath, [runner, optionsPath], { stdio: "ignore" });
+    const pendingRoot = join(stateRoot, "references", "pending");
+    let pendingName: string | undefined;
+    const deadline = Date.now() + 30_000;
+    while (pendingName === undefined && child.exitCode === null && Date.now() < deadline) {
+      pendingName = readdirSync(pendingRoot).find((name) => name.endsWith(".json"));
+      if (pendingName === undefined) await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    expect(pendingName).toBeDefined();
+    expect(child.kill("SIGKILL")).toBe(true);
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    expect(existsSync(referencePath)).toBe(false);
+    const pendingPath = join(pendingRoot, pendingName!);
+    expect(JSON.parse(readFileSync(pendingPath, "utf8"))).toMatchObject({
+      schema: "tc.sdlc/bootstrap-reference-pending/v1",
+      phase: "pending",
+      stateKey: initial.stateKey,
+      stateIdentity: filesystemIdentity(join(stateRoot, initial.stateKey)),
+    });
+
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(join(stateRoot, initial.stateKey), old, old);
+    const retained = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot,
+      receiptPath: join(evidence, "retained.json"),
+      mode: "apply",
+    });
+    expect(retained.retained).toContainEqual({ path: initial.stateKey, reason: "referenced" });
+    expect(existsSync(join(stateRoot, initial.stateKey, "state.json"))).toBe(true);
+
+    utimesSync(pendingPath, old, old);
+    const healed = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot,
+      receiptPath: join(evidence, "healed.json"),
+      mode: "apply",
+    });
+    expect(healed.retained).toContainEqual({ path: initial.stateKey, reason: "referenced" });
+    expect(existsSync(pendingPath)).toBe(false);
+    const restarted = await sdlc.bootstrap({
+      ...options,
+      receiptPath: join(evidence, "restarted.json"),
+      host: { ...options.host, offline: true },
+    });
+    expect(restarted).toMatchObject({ status: "succeeded", reused: true });
+    expect(JSON.parse(readFileSync(referencePath, "utf8"))).toMatchObject({
+      schema: "tc.sdlc/bootstrap-reference/v2",
+      phase: "committed",
+      currentStateKey: initial.stateKey,
+    });
+  }, 180_000);
+
   test("producer advances A to B to C and maintenance expires only unreferenced A", async () => {
     expect(process.platform).toBe("darwin");
     const root = mkdtempSync(join(tmpdir(), "tc-sdlc-reference-journey-"));
@@ -259,8 +357,10 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       states.push(receipt.stateKey);
     }
     expect(new Set(states).size).toBe(3);
-    const referenceFiles = readdirSync(join(stateRoot, "references"));
+    const referenceFiles = readdirSync(join(stateRoot, "references"))
+      .filter((name) => name.endsWith(".json"));
     expect(referenceFiles).toHaveLength(1);
+    expect(readdirSync(join(stateRoot, "references", "pending"))).toEqual([]);
     const finalReference = JSON.parse(
       readFileSync(join(stateRoot, "references", referenceFiles[0]!), "utf8"),
     );
@@ -504,13 +604,17 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       env: { HOME: emptyHome, PATH: "/usr/bin:/bin", COREPACK_ENABLE_NETWORK: "0" },
     }).trim()).toBe("11.22.0");
     expect(readFileSync(receiptPath, "utf8")).toBe(sdlc.serialiseBootstrapReceipt(receipt));
-    const referenceFiles = readdirSync(join(stateRoot, "references"));
+    const referenceFiles = readdirSync(join(stateRoot, "references"))
+      .filter((name) => name.endsWith(".json"));
     expect(referenceFiles).toHaveLength(1);
+    expect(readdirSync(join(stateRoot, "references", "pending"))).toEqual([]);
     expect(
       JSON.parse(readFileSync(join(stateRoot, "references", referenceFiles[0]!), "utf8")),
     ).toMatchObject({
-      schema: "tc.sdlc/bootstrap-reference/v1",
+      schema: "tc.sdlc/bootstrap-reference/v2",
       owner: "@three-cubes/tc-sdlc",
+      phase: "committed",
+      transaction: expect.stringMatching(/^[0-9a-f-]{36}$/),
       consumerRoot: realpathSync(root),
       currentStateKey: receipt.stateKey,
     });
@@ -528,7 +632,9 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     });
     expect(relocated).toMatchObject({ status: "succeeded", reused: true });
     expect(relocated.dependencies).toEqual(receipt.dependencies);
-    expect(readdirSync(join(stateRoot, "references"))).toHaveLength(2);
+    expect(
+      readdirSync(join(stateRoot, "references")).filter((name) => name.endsWith(".json")),
+    ).toHaveLength(2);
 
     const warm = await sdlc.bootstrap({
       ...options,

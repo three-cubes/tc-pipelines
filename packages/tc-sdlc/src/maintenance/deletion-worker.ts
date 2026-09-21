@@ -47,6 +47,15 @@ function same(path: string, expected: FilesystemIdentity): boolean {
   }
 }
 
+function sameMove(path: string, expected: FilesystemIdentity): boolean {
+  try {
+    const observed = identity(path);
+    return observed.device === expected.device && observed.inode === expected.inode;
+  } catch {
+    return false;
+  }
+}
+
 function validIdentity(value: unknown): value is FilesystemIdentity {
   if (typeof value !== "object" || value === null) return false;
   const identity = value as Record<string, unknown>;
@@ -85,7 +94,7 @@ function validateLayout(root: string): Marker | undefined {
     entries.length !== 2 ||
     entries[0] !== MARKER ||
     (entries[1] !== "candidate" && entries[1] !== "deleting") ||
-    !same(join(root, entries[1]), value.payloadIdentity)
+    !sameMove(join(root, entries[1]), value.payloadIdentity)
   ) return undefined;
   return value;
 }
@@ -109,12 +118,12 @@ function envelopeAndDelete(input: Input): void {
   });
   const candidate = join(envelope, "candidate");
   renameSync(input.root, candidate);
-  if (!same(candidate, envelopeIdentity)) {
+  if (!sameMove(candidate, envelopeIdentity)) {
     throw new Error("re-quarantined identity changed");
   }
   const deleting = join(envelope, "deleting");
   renameSync(candidate, deleting);
-  if (!same(deleting, envelopeIdentity)) {
+  if (!sameMove(deleting, envelopeIdentity)) {
     throw new Error("deleting identity changed");
   }
   // This worker performs no asynchronous work between the final identity check

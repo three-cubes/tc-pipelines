@@ -19,6 +19,7 @@ import {
   inspectQuarantine,
   removeQuarantineCandidate,
   sameIdentity,
+  sameMoveIdentity,
 } from "./quarantine.js";
 import { validateExecutable } from "./tools.js";
 import type {
@@ -306,7 +307,7 @@ export async function removeTemporaryCandidates(
       const quarantine = created.payload;
       try {
         renameSync(path, quarantine);
-        if (!sameIdentity(quarantine, candidate.identity)) {
+        if (!sameMoveIdentity(quarantine, candidate.identity)) {
           if (!existsSync(path)) {
             renameSync(quarantine, path);
             finishQuarantine(quarantineRoot);

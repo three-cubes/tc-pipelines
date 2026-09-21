@@ -44,6 +44,15 @@ export function sameIdentity(path: string, expected: FilesystemIdentity): boolea
   }
 }
 
+export function sameMoveIdentity(path: string, expected: FilesystemIdentity): boolean {
+  try {
+    const observed = filesystemIdentity(path);
+    return observed.device === expected.device && observed.inode === expected.inode;
+  } catch {
+    return false;
+  }
+}
+
 function validIdentity(value: unknown): value is FilesystemIdentity {
   if (typeof value !== "object" || value === null) return false;
   const identity = value as Record<string, unknown>;
@@ -83,9 +92,32 @@ function payloadPhase(
   if (
     entries.length !== 2 ||
     (entries[1] !== "candidate" && entries[1] !== "deleting") ||
-    !sameIdentity(join(root, entries[1]), marker.payloadIdentity)
+    !sameMoveIdentity(join(root, entries[1]), marker.payloadIdentity)
   ) return undefined;
   return entries[1];
+}
+
+export function inspectQuarantinePayload(root: string): Readonly<{
+  kind: QuarantineKind;
+  originalName: string;
+  phase: "candidate" | "deleting";
+  payload: string;
+  identity: FilesystemIdentity;
+}> | undefined {
+  try {
+    const marker = readMarker(root);
+    const phase = payloadPhase(root, marker);
+    if (marker === undefined || phase === undefined || phase === "empty") return undefined;
+    return {
+      kind: marker.kind,
+      originalName: marker.originalName,
+      phase,
+      payload: join(root, phase),
+      identity: marker.payloadIdentity,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export function deleteQuarantineRoot(
