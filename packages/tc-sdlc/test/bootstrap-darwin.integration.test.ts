@@ -278,6 +278,7 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       writeFileSync(join(root, name), readFileSync(join(consumer, name)));
     }
     writeFileSync(join(root, "input.txt"), "input\n");
+    writeFileSync(join(root, "shape-input.txt"), "shape check input\n");
     writeFileSync(
       join(root, "check.mjs"),
       `import { existsSync, writeFileSync } from "node:fs";\n` +
@@ -313,6 +314,12 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
           mode: "prepare",
           trustBoundary: "portable",
           inputs: ["input.txt"],
+        },
+        shapeCheck: {
+          command: "node --version",
+          mode: "evaluate",
+          trustBoundary: "portable",
+          inputs: ["shape-input.txt"],
         },
         check: {
           command: `node check.mjs ${JSON.stringify(ready)} ${JSON.stringify(release)}`,
@@ -423,7 +430,77 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     ]);
     expect(rejectedPreparation.status).not.toBe(0);
     expect(existsSync(rejectedPreparationPath)).toBe(false);
-    rmSync(undeclaredMember);
+    const offlineBootstrapPath = join(evidence, "offline-corrupt-state-bootstrap.json");
+    const offlineBootstrap = invoke("bootstrap", [
+      "--offline", "true",
+      "--receipt", offlineBootstrapPath,
+    ]);
+    expect(offlineBootstrap.status).not.toBe(0);
+    expect(JSON.parse(readFileSync(offlineBootstrapPath, "utf8"))).toMatchObject({
+      status: "failed",
+      reason: "state_corrupt",
+    });
+    expect(filesystemIdentity(poisonedPath)).toEqual(poisonedIdentity);
+    expect(existsSync(undeclaredMember)).toBe(true);
+    expect(existsSync(join(stateRoot, "invalidated"))).toBe(false);
+
+    const shapeRebuilt = bootstrap("shape-rebuilt");
+    expect(shapeRebuilt.receipt).toMatchObject({
+      status: "succeeded",
+      reused: false,
+      stateKey: initial.receipt.stateKey,
+    });
+    const shapeRebuiltIdentity = filesystemIdentity(poisonedPath);
+    expect(shapeRebuiltIdentity.device).toBe(poisonedIdentity.device);
+    expect(shapeRebuiltIdentity.inode).not.toBe(poisonedIdentity.inode);
+    const shapePoisonedGenerationIdentity = sdlc.digest({
+      type: "directory",
+      device: poisonedIdentity.device,
+      inode: poisonedIdentity.inode,
+    });
+    const shapeTombstone = readdirSync(join(stateRoot, "invalidated"))
+      .find((name) => JSON.parse(readFileSync(join(stateRoot, "invalidated", name), "utf8"))
+        .poisonedDirectoryIdentity === shapePoisonedGenerationIdentity);
+    expect(shapeTombstone).toBeDefined();
+    expect(existsSync(undeclaredMember)).toBe(false);
+    const shapeQuarantine = readdirSync(dirname(poisonedPath))
+      .filter((name) => name.startsWith(".tc-sdlc-quarantine-"))
+      .map((name) => join(dirname(poisonedPath), name))
+      .find((path) => existsSync(join(path, "candidate", "foreign-cache.json")));
+    expect(shapeQuarantine).toBeDefined();
+    expect(readFileSync(join(shapeQuarantine!, "candidate", "foreign-cache.json"), "utf8"))
+      .toBe("not declared by bootstrap state\n");
+    const shapePreparation = prepare("shape-rebuilt", shapeRebuilt.receiptPath);
+    const shapeExecutionPath = join(evidence, "shape-rebuild-execution.json");
+    const shapeExecution = invoke("check", [
+      "--bootstrap-receipt", shapeRebuilt.receiptPath,
+      "--receipt", shapeExecutionPath,
+      "--changed", "shape-input.txt",
+      "--environment", "native-darwin",
+      "--producer", "f6-generation-rebuild-test",
+      "--preparation-receipt", shapePreparation,
+    ]);
+    expect(shapeExecution.status, shapeExecution.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(shapeExecutionPath, "utf8"))).toMatchObject({
+      status: "succeeded",
+      scheduler: { status: "succeeded", scratchCleanup: "removed" },
+    });
+    const secondRebound = join(evidence, "second-consumer-rebound.json");
+    const secondReboundResult = invoke(
+      "bootstrap",
+      ["--receipt", secondRebound],
+      secondRoot,
+    );
+    expect(secondReboundResult.status, secondReboundResult.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(secondRebound, "utf8"))).toMatchObject({
+      status: "succeeded",
+      reused: true,
+      stateKey: initial.receipt.stateKey,
+    });
+    expect(JSON.parse(readFileSync(secondReferencePath, "utf8")).currentStateIdentity).toMatchObject({
+      device: shapeRebuiltIdentity.device,
+      inode: shapeRebuiltIdentity.inode,
+    });
 
     const uvDependency = initial.receipt.dependencies.find(
       (dependency: Record<string, string>) => dependency.manager === "uv",
@@ -446,13 +523,13 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     };
     const mutatedStateFile = firstPythonSource(join(poisonedPath, uvDependency!.environment));
     expect(mutatedStateFile).toBeDefined();
-    const initialPreparation = prepare("initial", initial.receiptPath);
+    const initialPreparation = prepare("shape-rebuilt", shapeRebuilt.receiptPath);
     const poisonedEvaluationPath = join(evidence, "poisoned-evaluation.json");
     const poisonedChild = spawn(process.execPath, [
       CLI,
       "check",
       ...publicArgsFor(),
-      "--bootstrap-receipt", initial.receiptPath,
+      "--bootstrap-receipt", shapeRebuilt.receiptPath,
       "--receipt", poisonedEvaluationPath,
       "--changed", "input.txt",
       "--environment", "native-darwin",
@@ -506,9 +583,16 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(existsSync(downstreamSentinel)).toBe(true);
 
     const stateParent = dirname(poisonedPath);
-    const quarantineName = readdirSync(stateParent).find((name) =>
-      name.startsWith(".tc-sdlc-quarantine-"),
-    );
+    const quarantineName = readdirSync(stateParent)
+      .filter((name) => name.startsWith(".tc-sdlc-quarantine-"))
+      .find((name) => {
+        const marker = JSON.parse(readFileSync(
+          join(stateParent, name, ".tc-sdlc-quarantine.json"),
+          "utf8",
+        ));
+        return marker.payloadIdentity.device === shapeRebuiltIdentity.device &&
+          marker.payloadIdentity.inode === shapeRebuiltIdentity.inode;
+      });
     expect(quarantineName).toBeDefined();
     const quarantineRoot = join(stateParent, quarantineName!);
     const quarantinePayload = join(quarantineRoot, "candidate");
@@ -517,13 +601,19 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       readFileSync(join(quarantineRoot, ".tc-sdlc-quarantine.json"), "utf8"),
     );
     expect(quarantineMarker.payloadIdentity).toMatchObject({
-      device: poisonedIdentity.device,
-      inode: poisonedIdentity.inode,
+      device: shapeRebuiltIdentity.device,
+      inode: shapeRebuiltIdentity.inode,
     });
     const invalidationStem = `${sdlc.digest(initial.receipt.stateKey).slice("sha256:".length)}.`;
-    const tombstoneName = readdirSync(join(stateRoot, "invalidated")).find((name) =>
-      name.startsWith(invalidationStem),
-    );
+    const poisonedGenerationIdentity = sdlc.digest({
+      type: "directory",
+      device: shapeRebuiltIdentity.device,
+      inode: shapeRebuiltIdentity.inode,
+    });
+    const tombstoneName = readdirSync(join(stateRoot, "invalidated"))
+      .filter((name) => name.startsWith(invalidationStem))
+      .find((name) => JSON.parse(readFileSync(join(stateRoot, "invalidated", name), "utf8"))
+        .poisonedDirectoryIdentity === poisonedGenerationIdentity);
     expect(tombstoneName).toBeDefined();
     const tombstonePath = join(stateRoot, "invalidated", tombstoneName!);
     expect(JSON.parse(readFileSync(tombstonePath, "utf8"))).toMatchObject({
@@ -547,8 +637,8 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(existsSync(tombstonePath)).toBe(true);
     expect(filesystemIdentity(poisonedPath)).toEqual(rebuiltIdentityBeforeMaintenance);
     expect(JSON.parse(readFileSync(secondReferencePath, "utf8")).currentStateIdentity).toMatchObject({
-      device: poisonedIdentity.device,
-      inode: poisonedIdentity.inode,
+      device: shapeRebuiltIdentity.device,
+      inode: shapeRebuiltIdentity.inode,
     });
 
     const expired = new Date(Date.now() - 49 * 60 * 60 * 1_000);
@@ -563,6 +653,9 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(atCutoff.removedCount).toBeGreaterThan(0);
     expect(existsSync(quarantineRoot)).toBe(false);
     expect(existsSync(tombstonePath)).toBe(false);
+    expect(existsSync(shapeQuarantine)).toBe(true);
+    expect(readFileSync(join(shapeQuarantine!, "candidate", "foreign-cache.json"), "utf8"))
+      .toBe("not declared by bootstrap state\n");
     expect(existsSync(poisonedPath)).toBe(true);
     expect(filesystemIdentity(poisonedPath)).toEqual(rebuiltIdentityBeforeMaintenance);
     const firstReferenceAfterMaintenance = JSON.parse(readFileSync(

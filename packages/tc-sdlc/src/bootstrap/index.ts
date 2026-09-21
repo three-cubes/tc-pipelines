@@ -57,7 +57,13 @@ import {
   referenceMatches,
   writePendingBootstrapReference,
 } from "./references.js";
-import { bootstrapStateGenerationInvalidated, assertBootstrapStateAdmitted } from "./state-integrity.js";
+import {
+  bootstrapStateGenerationInvalidated,
+  assertBootstrapStateAdmitted,
+  invalidateBootstrapState,
+  stableDirectoryIdentity,
+} from "./state-integrity.js";
+import { assertBootstrapStateShape } from "./state-shape.js";
 
 export type BootstrapPlatform = "darwin" | "linux";
 export type BootstrapCapabilityName = "node" | "pnpm" | "python" | "uv";
@@ -258,8 +264,31 @@ function quarantineInvalidatedState(
   stateRoot: string,
   stateKey: string,
   stateDirectory: string,
+  expectedGenerationIdentity?: string,
+  beforeQuarantine?: (generationIdentity: string) => void,
 ): void {
+  const generationIdentity = stableDirectoryIdentity(stateDirectory);
+  if (
+    expectedGenerationIdentity !== undefined &&
+    generationIdentity !== expectedGenerationIdentity
+  ) {
+    throw new BootstrapFailure("state_changed", [{
+      code: "BOOTSTRAP_STATE_CHANGED",
+      message: "release state generation changed before it could be quarantined",
+      action: "retry bootstrap after inspecting the changed state generation",
+    }]);
+  }
   const identity = filesystemIdentity(stateDirectory);
+  if (
+    expectedGenerationIdentity !== undefined &&
+    stableDirectoryIdentity(stateDirectory) !== expectedGenerationIdentity
+  ) {
+    throw new BootstrapFailure("state_changed", [{
+      code: "BOOTSTRAP_STATE_CHANGED",
+      message: "release state generation changed before quarantine authority was checked",
+      action: "retry bootstrap after inspecting the changed state generation",
+    }]);
+  }
   const authorities = readBootstrapReferenceAuthorities(stateRoot);
   if (authorities === undefined) {
     throw new BootstrapFailure("reference_metadata_invalid", [{
@@ -275,6 +304,17 @@ function quarantineInvalidatedState(
       action: "wait for the active consumer to terminate, then retry bootstrap",
     }]);
   }
+  beforeQuarantine?.(generationIdentity);
+  if (
+    expectedGenerationIdentity !== undefined &&
+    stableDirectoryIdentity(stateDirectory) !== expectedGenerationIdentity
+  ) {
+    throw new BootstrapFailure("state_changed", [{
+      code: "BOOTSTRAP_STATE_CHANGED",
+      message: "release state generation changed before quarantine publication",
+      action: "retry bootstrap after inspecting the changed state generation",
+    }]);
+  }
   const quarantine = createQuarantine(
     dirname(stateDirectory),
     stateDirectory,
@@ -283,7 +323,11 @@ function quarantineInvalidatedState(
   );
   try {
     renameSync(stateDirectory, quarantine.payload);
-    if (!sameMoveIdentity(quarantine.payload, identity)) {
+    if (
+      !sameMoveIdentity(quarantine.payload, identity) ||
+      (expectedGenerationIdentity !== undefined &&
+        stableDirectoryIdentity(quarantine.payload) !== expectedGenerationIdentity)
+    ) {
       throw new Error("invalidated state identity changed during quarantine");
     }
   } catch (error) {
@@ -1482,6 +1526,7 @@ function validateWarmState(
     ) {
       throw new Error("state bindings mismatch");
     }
+    assertBootstrapStateShape(resolve(stateRoot, stateKey), stateKey, state);
     const current = new Map(prerequisites.adapters.map((value) => [value.name, value]));
     const adapterPath = [
       ...new Set(state.adapters.map((adapter) => dirname(adapter.executable))),
@@ -1759,16 +1804,54 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
         }
       }
       if (!invalidatedGeneration) {
-        const warm = validateWarmState(
-          options,
-          host,
-          stateRoot,
-          stateKey,
-          lockDigest,
-          dependencyDigest,
-          dependencies,
-          prerequisites,
-        );
+        let warm: BootstrapState | null;
+        try {
+          warm = validateWarmState(
+            options,
+            host,
+            stateRoot,
+            stateKey,
+            lockDigest,
+            dependencyDigest,
+            dependencies,
+            prerequisites,
+          );
+        } catch (error) {
+          if (!(error instanceof BootstrapFailure) || error.reason !== "state_corrupt") {
+            throw error;
+          }
+          if (host.offline) {
+            throw error;
+          }
+          const generationIdentity = stableDirectoryIdentity(expectedStateDirectory);
+          const expectedMetadata = digest({
+            stateKey,
+            release: options.catalogue.release.version,
+            lockDigest,
+            dependencyDigest,
+            platform: host.platform,
+            architecture: host.architecture,
+          });
+          const observedMetadata = digest({
+            generationIdentity,
+            failureCode: error.diagnostics[0]?.code ?? "BOOTSTRAP_STATE_CORRUPT",
+          });
+          quarantineInvalidatedState(
+            stateRoot,
+            stateKey,
+            expectedStateDirectory,
+            generationIdentity,
+            (observedGenerationIdentity) => invalidateBootstrapState(
+              stateRoot,
+              stateKey,
+              observedGenerationIdentity,
+              expectedMetadata,
+              observedMetadata,
+              observedGenerationIdentity,
+            ),
+          );
+          warm = null;
+        }
         if (warm !== null) {
           reused = true;
           adapters = warm.adapters.map(adapterEvidence);

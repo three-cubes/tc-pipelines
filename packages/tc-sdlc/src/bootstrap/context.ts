@@ -14,6 +14,10 @@ import { SdlcError } from "../errors.js";
 import type { ReleaseCatalogue, SdlcLock } from "../schema/types.js";
 import { acquireBootstrapExecutionLease, type BootstrapExecutionLease } from "./execution-lease.js";
 import {
+  assertBootstrapStateShape,
+  BOOTSTRAP_ADAPTER_NAMES,
+} from "./state-shape.js";
+import {
   assertBootstrapStateAdmitted,
   captureBootstrapStateMetadata,
   fileMetadataIdentity,
@@ -43,7 +47,7 @@ type BootstrapState = Readonly<{
 }>;
 
 const OWNER = { schema: "tc.sdlc/state-owner/v1", owner: "@three-cubes/tc-sdlc" } as const;
-const adapterNames: readonly BootstrapCapabilityName[] = ["node", "pnpm", "python", "uv"];
+const adapterNames: readonly BootstrapCapabilityName[] = BOOTSTRAP_ADAPTER_NAMES;
 
 function bytesDigest(path: string): string {
   return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
@@ -67,103 +71,6 @@ function rejectLinkedPath(root: string, target: string): void {
     if (existsSync(cursor) && lstatSync(cursor).isSymbolicLink()) {
       throw new Error("managed release state may not traverse symbolic links");
     }
-  }
-}
-
-function assertDirectoryEntries(
-  directory: string,
-  expectedNames: ReadonlySet<string>,
-  description: string,
-): void {
-  const metadata = lstatSync(directory);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-    throw new Error(`${description} is not a real directory`);
-  }
-  const observed = readdirSync(directory).sort();
-  const expected = [...expectedNames].sort();
-  if (canonicalJson(observed) !== canonicalJson(expected)) {
-    throw new Error(`${description} contains undeclared entries`);
-  }
-}
-
-function assertBootstrapStateShape(
-  stateDirectory: string,
-  stateKey: string,
-  state: BootstrapState,
-): void {
-  if (
-    state.adapters.length !== adapterNames.length ||
-    canonicalJson(state.adapters.map((adapter) => adapter.name)) !== canonicalJson(adapterNames)
-  ) {
-    throw new Error("bootstrap adapter inventory does not match the release contract");
-  }
-  const expectedTopLevel = new Set(["state.json", "bin"]);
-  const expectedDependencyRoots = new Set<string>();
-  for (const dependency of state.dependencies) {
-    const parts = dependency.environment.split("/");
-    const expectedEnvironment = dependency.manager === "pnpm"
-      ? "dependencies/node"
-      : dependency.manager === "uv"
-        ? "dependencies/python"
-        : "";
-    if (
-      (dependency.manager !== "pnpm" && dependency.manager !== "uv") ||
-      dependency.environment !== expectedEnvironment ||
-      parts.length !== 2 || parts[0] !== "dependencies" ||
-      !/^[a-z0-9-]+$/.test(parts[1]!) || expectedDependencyRoots.has(parts[1]!)
-    ) {
-      throw new Error("bootstrap dependency environment path is invalid");
-    }
-    expectedTopLevel.add("dependencies");
-    expectedDependencyRoots.add(parts[1]!);
-  }
-  if (state.platform === "darwin") {
-    for (const directory of ["home", "corepack", "downloads", "toolchains"]) {
-      expectedTopLevel.add(directory);
-    }
-  } else if (state.dependencies.length > 0) {
-    expectedTopLevel.add("home");
-  }
-
-  assertDirectoryEntries(stateDirectory, expectedTopLevel, "bootstrap release state");
-  const stateFileMetadata = lstatSync(join(stateDirectory, "state.json"));
-  if (!stateFileMetadata.isFile() || stateFileMetadata.isSymbolicLink()) {
-    throw new Error("bootstrap state manifest is not a regular file");
-  }
-  const binDirectory = join(stateDirectory, "bin");
-  const expectedLaunchers = new Set(adapterNames);
-  assertDirectoryEntries(binDirectory, expectedLaunchers, "bootstrap adapter directory");
-  for (const launcher of expectedLaunchers) {
-    const metadata = lstatSync(join(binDirectory, launcher));
-    if (!metadata.isFile() || metadata.isSymbolicLink()) {
-      throw new Error("bootstrap adapter launcher is not a regular file");
-    }
-  }
-  for (const dependency of state.dependencies) {
-    const dependencyRoot = join(stateDirectory, dependency.environment);
-    const metadata = lstatSync(dependencyRoot);
-    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-      throw new Error("bootstrap dependency environment is not a real directory");
-    }
-  }
-  if (expectedDependencyRoots.size > 0) {
-    assertDirectoryEntries(
-      join(stateDirectory, "dependencies"),
-      expectedDependencyRoots,
-      "bootstrap dependency environment directory",
-    );
-  }
-  for (const directory of expectedTopLevel) {
-    if (directory === "state.json" || directory === "bin" || directory === "dependencies") continue;
-    const path = join(stateDirectory, directory);
-    if (!existsSync(path)) throw new Error(`bootstrap release directory is missing: ${directory}`);
-    const metadata = lstatSync(path);
-    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-      throw new Error(`bootstrap release directory is not a real directory: ${directory}`);
-    }
-  }
-  if (state.adapters.some((adapter) => adapter.launcher !== posix.join(stateKey, "bin", adapter.name))) {
-    throw new Error("bootstrap adapter launcher path is invalid");
   }
 }
 
