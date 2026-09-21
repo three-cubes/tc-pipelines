@@ -34,6 +34,13 @@ import type {
   TaskEvidenceDeclaration,
   TaskIdentity,
 } from "../schema/types.js";
+import {
+  finaliseFitnessReceipt,
+  fitnessFailureReceipt,
+  prepareFitnessExecution,
+  writeFitnessReceipt,
+  type FitnessExecution,
+} from "../executors/fitness.js";
 
 export type HostCapacity = Readonly<{
   cpu: number;
@@ -528,13 +535,27 @@ async function executeTask(
     evidence: taskEvidence,
     missingEvidence: (task.evidence ?? []).map((item) => posix.normalize(item.path)),
   };
+  const events: RunEvent[] = [];
+  emit(task, events, options, { type: "start" });
   try {
     options.executionContext.assertIdentity();
     options.executionContext.lease.assertCurrent();
   } catch {
     const reason = "bootstrap_state_changed";
-    const events: RunEvent[] = [];
-    emit(task, events, options, { type: "start" });
+    if (task.execution.kind === "fitness") {
+      try {
+        mkdirSync(evidenceDirectory, { recursive: true, mode: 0o700 });
+        writeFitnessReceipt(
+          join(evidenceDirectory, "fitness.json"),
+          fitnessFailureReceipt(task, options.executionContext, options.cwd, reason),
+        );
+        const captured = capturedTaskEvidence(evidenceDirectory, task.evidence ?? [], taskRedactions(options));
+        taskEvidence.push(...captured.evidence);
+        taskContext.missingEvidence.splice(0, taskContext.missingEvidence.length, ...captured.missing);
+      } catch {
+        // The task receipt below records the terminal evidence-write failure.
+      }
+    }
     emit(task, events, options, { type: "terminal", status: "failed", reason });
     return {
       key: task.key,
@@ -549,9 +570,7 @@ async function executeTask(
       events,
     };
   }
-  const events: RunEvent[] = [];
-  emit(task, events, options, { type: "start" });
-  if (task.execution.kind !== "command") {
+  if (task.execution.kind === "executor") {
     emit(task, events, options, {
       type: "terminal",
       status: "failed",
@@ -570,14 +589,32 @@ async function executeTask(
       events,
     };
   }
-  const command = task.execution.command;
-  let environment: NodeJS.ProcessEnv;
+  let command: string;
+  let commandArguments: readonly string[] = [];
+  let shell = true;
+  let fitnessExecution: FitnessExecution | undefined;
   try {
-    environment = taskEnvironment(options, taskScratch);
+    if (task.execution.kind === "command") {
+      command = task.execution.command;
+    } else {
+      fitnessExecution = prepareFitnessExecution(task, options.executionContext, options.cwd);
+      command = fitnessExecution.executable ?? "";
+      commandArguments = fitnessExecution.args;
+      shell = false;
+    }
   } catch (error) {
-    const reason = error instanceof SdlcError && error.code === "TASK_ENVIRONMENT_INVALID"
-      ? "task_environment_invalid"
-      : "task_environment_setup_failed";
+    let reason = "task_environment_setup_failed";
+    if (task.execution.kind === "fitness") {
+      try {
+        mkdirSync(evidenceDirectory, { recursive: true, mode: 0o700 });
+        writeFitnessReceipt(join(evidenceDirectory, "fitness.json"), fitnessFailureReceipt(task, options.executionContext, options.cwd, reason));
+        const captured = capturedTaskEvidence(evidenceDirectory, task.evidence ?? [], taskRedactions(options));
+        taskEvidence.push(...captured.evidence);
+        taskContext.missingEvidence.splice(0, taskContext.missingEvidence.length, ...captured.missing);
+      } catch {
+        reason = "fitness_evidence_write_failed";
+      }
+    }
     emit(task, events, options, { type: "terminal", status: "failed", reason });
     return {
       key: task.key,
@@ -587,6 +624,64 @@ async function executeTask(
       reason,
       stdout: "",
       stderr: error instanceof Error ? error.message : String(error),
+      outputTruncated: false,
+      ...taskContext,
+      events,
+    };
+  }
+  let environment: NodeJS.ProcessEnv;
+  try {
+    environment = taskEnvironment(options, taskScratch);
+  } catch (error) {
+    let reason = error instanceof SdlcError && error.code === "TASK_ENVIRONMENT_INVALID"
+      ? "task_environment_invalid"
+      : "task_environment_setup_failed";
+    if (fitnessExecution !== undefined) {
+      try {
+        mkdirSync(evidenceDirectory, { recursive: true, mode: 0o700 });
+        writeFitnessReceipt(join(evidenceDirectory, "fitness.json"), finaliseFitnessReceipt(fitnessExecution.receipt, "failed", reason, null));
+        const captured = capturedTaskEvidence(evidenceDirectory, task.evidence ?? [], taskRedactions(options));
+        taskEvidence.push(...captured.evidence);
+        taskContext.missingEvidence.splice(0, taskContext.missingEvidence.length, ...captured.missing);
+      } catch {
+        reason = "fitness_evidence_write_failed";
+      }
+    }
+    emit(task, events, options, { type: "terminal", status: "failed", reason });
+    return {
+      key: task.key,
+      identity: task.identity,
+      status: "failed",
+      exitCode: null,
+      reason,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
+      outputTruncated: false,
+      ...taskContext,
+      events,
+    };
+  }
+  if (fitnessExecution?.failureReason !== undefined) {
+    let reason = fitnessExecution.failureReason;
+    try {
+      mkdirSync(evidenceDirectory, { recursive: true, mode: 0o700 });
+      writeFitnessReceipt(join(evidenceDirectory, "fitness.json"), fitnessExecution.receipt);
+    } catch {
+      reason = "fitness_evidence_write_failed";
+    }
+    const redactions = taskRedactions(options);
+    const captured = capturedTaskEvidence(evidenceDirectory, task.evidence ?? [], redactions);
+    taskEvidence.push(...captured.evidence);
+    taskContext.missingEvidence.splice(0, taskContext.missingEvidence.length, ...captured.missing);
+    emit(task, events, options, { type: "terminal", status: "failed", reason });
+    return {
+      key: task.key,
+      identity: task.identity,
+      status: "failed",
+      exitCode: null,
+      reason,
+      stdout: "",
+      stderr: "",
       outputTruncated: false,
       ...taskContext,
       events,
@@ -608,10 +703,10 @@ async function executeTask(
           diagnostic?: ProcessDiagnostic;
         }>
       | undefined;
-    const child = spawn(command, {
+    const child = spawn(command, commandArguments, {
       cwd: join(options.cwd, task.projectRoot),
       env: environment,
-      shell: true,
+      shell,
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
     });
@@ -714,6 +809,16 @@ async function executeTask(
       captureOutput("stderr", "", true);
       let status: TaskReceipt["status"] = forced?.status ?? (code === 0 ? "succeeded" : "failed");
       let reason = forced?.reason ?? (code === 0 ? null : "process_exit_nonzero");
+      if (fitnessExecution !== undefined) {
+        const receipt = finaliseFitnessReceipt(fitnessExecution.receipt, status, reason, code);
+        try {
+          mkdirSync(evidenceDirectory, { recursive: true, mode: 0o700 });
+          writeFitnessReceipt(join(evidenceDirectory, "fitness.json"), receipt);
+        } catch {
+          status = "failed";
+          reason = "fitness_evidence_write_failed";
+        }
+      }
       try {
         options.executionContext.assertIdentity();
         options.executionContext.lease.assertCurrent();

@@ -517,7 +517,7 @@ requires-dist = [
     { name = "coverage", specifier = ">=7.0" },
     { name = "jsonschema", specifier = ">=4.23,<5" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "three-cubes-fitness", git = "https://github.com/three-cubes/tc-fitness.git?rev=73d7ffc4b563849edcd607b377fbb3ee4ba6da32" },
+    { name = "three-cubes-fitness", git = "https://github.com/three-cubes/tc-fitness.git?rev=b9b28cd839925e10c14a03638ffb8fa37b6ef09a" },
 ]
 
 [package.metadata.requires-dev]
@@ -532,8 +532,8 @@ dev = [
 
 [[package]]
 name = "three-cubes-fitness"
-version = "0.17.0"
-source = { git = "https://github.com/three-cubes/tc-fitness.git?rev=73d7ffc4b563849edcd607b377fbb3ee4ba6da32#73d7ffc4b563849edcd607b377fbb3ee4ba6da32" }
+version = "0.17.1"
+source = { git = "https://github.com/three-cubes/tc-fitness.git?rev=b9b28cd839925e10c14a03638ffb8fa37b6ef09a#b9b28cd839925e10c14a03638ffb8fa37b6ef09a" }
 dependencies = [
     { name = "coverage" },
     { name = "packaging" },

@@ -22,10 +22,15 @@
     "fitness": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["package", "version"],
+      "required": ["package", "config", "profiles"],
       "properties": {
         "package": { "const": "three-cubes-fitness" },
-        "version": { "const": "0.17.0" }
+        "config": { "enum": ["pyproject.toml", ".tc-fitness.toml"] },
+        "profiles": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
       }
     },
     "projects": {
@@ -62,8 +67,10 @@
           "trustBoundary": {
             "enum": ["portable", "hosted", "live", "deployment"]
           },
+          "scope": { "enum": ["project", "repository"] },
           "command": { "type": "string", "minLength": 1 },
           "executor": { "type": "string", "minLength": 1 },
+          "profile": { "type": "string", "minLength": 1 },
           "dependsOn": {
             "type": "array",
             "uniqueItems": true,

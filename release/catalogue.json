@@ -27,7 +27,7 @@
     "declarationSchema": "tc.sdlc/v1",
     "fitness": {
       "package": "three-cubes-fitness",
-      "version": "0.17.0"
+      "version": "0.17.1"
     },
     "imageDigest": "sha256:734ca688cb22b078b2e684b1ec72aec5eafcf872ea5d1a4b2c4deda2c0e7f0a9",
     "lockSchema": "tc.sdlc/lock/v1",

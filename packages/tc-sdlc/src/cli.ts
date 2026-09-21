@@ -11,12 +11,18 @@ import {
   writeReleaseCatalogue,
 } from "./catalogue/index.js";
 import { SdlcError } from "./errors.js";
+import {
+  preflightFitnessReceipt,
+  unavailableFitnessReceipt,
+  writeFitnessReceipt,
+} from "./executors/fitness.js";
 import type { PreparationReceipt } from "./evidence/task4.js";
 import { assertCurrentLock, loadLock, resolveLock, writeLock } from "./lock/index.js";
 import { maintain } from "./maintenance/index.js";
 import { loadDeclaration } from "./schema/declaration.js";
 import { check, checkAll } from "./tasks/check.js";
 import { prepare } from "./tasks/prepare.js";
+import { fitness } from "./tasks/fitness.js";
 
 type Command =
   | "catalogue"
@@ -26,7 +32,8 @@ type Command =
   | "maintain"
   | "prepare"
   | "check"
-  | "check-all";
+  | "check-all"
+  | "fitness";
 
 function parseOptions(
   args: readonly string[],
@@ -63,6 +70,11 @@ function success(command: Command, payload: Record<string, unknown>): void {
       ...payload,
     })}\n`,
   );
+}
+
+function requestedReceipt(args: readonly string[]): string | undefined {
+  const index = args.indexOf("--receipt");
+  return index === -1 ? undefined : args[index + 1];
 }
 
 async function run(command: Command, args: readonly string[]): Promise<void> {
@@ -132,12 +144,14 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
   if (command === "catalogue") {
     const options = parseOptions(args, [
       "version",
+      "fitness-version",
       "workflow-commit",
       "image-digest",
       "output",
     ]);
     const catalogue = generateReleaseCatalogue({
       releaseVersion: options.version!,
+      fitnessVersion: options["fitness-version"]!,
       workflowCommit: options["workflow-commit"]!,
       imageDigest: options["image-digest"]!,
     });
@@ -221,6 +235,81 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
     return;
   }
 
+  if (command === "fitness") {
+    let options: Record<string, string>;
+    try {
+      options = parseOptions(args, ["declaration", "catalogue", "lock", "root", "state-root", "bootstrap-receipt", "receipt"]);
+    } catch (error) {
+      const receipt = requestedReceipt(args);
+      if (receipt !== undefined) writeFitnessReceipt(receipt, preflightFitnessReceipt("fitness_input_invalid"));
+      throw error;
+    }
+    let declaration;
+    let catalogue;
+    let loaded;
+    try {
+      declaration = loadDeclaration(options.declaration!);
+      catalogue = loadCatalogue(options.catalogue!);
+      loaded = loadLock(options.lock!);
+    } catch (error) {
+      writeFitnessReceipt(options.receipt!, preflightFitnessReceipt("fitness_input_invalid"));
+      throw error;
+    }
+    try {
+      assertCurrentLock(loaded.lock, declaration, catalogue);
+    } catch (error) {
+      writeFitnessReceipt(
+        options.receipt!,
+        unavailableFitnessReceipt(
+          declaration,
+          catalogue,
+          loaded.lock,
+          options.root!,
+          "fitness_lock_invalid",
+        ),
+      );
+      throw error;
+    }
+    let executionContext;
+    try {
+      executionContext = loadBootstrapExecutionContext(
+        options["bootstrap-receipt"]!,
+        options["state-root"]!,
+        loaded.lock,
+        catalogue,
+      );
+    } catch (error) {
+      writeFitnessReceipt(
+        options.receipt!,
+        unavailableFitnessReceipt(
+          declaration,
+          catalogue,
+          loaded.lock,
+          options.root!,
+          "fitness_bootstrap_context_invalid",
+        ),
+      );
+      throw new SdlcError(
+        "FITNESS_BOOTSTRAP_CONTEXT_INVALID",
+        error instanceof Error ? error.message : "fitness bootstrap context is unavailable",
+      );
+    }
+    try {
+      const receipt = await fitness({
+        root: options.root!,
+        declaration,
+        catalogue,
+        lock: loaded.lock,
+        receiptPath: options.receipt!,
+        runOptions: { executionContext },
+      });
+      success(command, { receipt: options.receipt, receiptSchema: receipt.schema });
+    } finally {
+      executionContext.lease.release();
+    }
+    return;
+  }
+
   const required = ["declaration", "catalogue", "lock", "root", "receipt"];
   required.push("bootstrap-receipt", "state-root");
   if (command === "check") {
@@ -300,6 +389,7 @@ const commands: readonly Command[] = [
   "prepare",
   "check",
   "check-all",
+  "fitness",
 ];
 const envelopeCommand = commands.includes(rawCommand as Command) ? rawCommand : "unknown";
 
@@ -307,7 +397,7 @@ try {
   if (!commands.includes(rawCommand as Command)) {
     throw new SdlcError(
       "USAGE",
-      "command must be catalogue, lock, validate, bootstrap, maintain, prepare, check or check-all",
+      "command must be catalogue, lock, validate, bootstrap, maintain, prepare, check, check-all or fitness",
     );
   }
   await run(rawCommand as Command, process.argv.slice(3));

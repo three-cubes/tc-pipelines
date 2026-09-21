@@ -49,7 +49,7 @@ function taskRunOptions(capacity = { cpu: 1, memoryMiB: 64 }) {
         bootstrapReceiptDigest: `sha256:${"b".repeat(64)}`,
         stateDigest: `sha256:${"c".repeat(64)}`,
         dependencyDigest: `sha256:${"d".repeat(64)}`,
-        fitness: { package: "three-cubes-fitness", version: "0.17.0" },
+        fitness: { package: "three-cubes-fitness", version: "0.17.1" },
         adapters: [],
       },
       stateRoot: tmpdir(),
@@ -1278,7 +1278,7 @@ describe("tc-sdlc managed lifecycle", () => {
       schema: "tc.sdlc/v1",
       project: "lifecycle-fixture",
       toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
-      fitness: sdlc.CANONICAL_SDLC_FITNESS,
+      fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
       projects: [{ name: "fixture", root: "." }],
       targets: {
         check: {
@@ -1294,6 +1294,7 @@ describe("tc-sdlc managed lifecycle", () => {
     });
     const catalogue = sdlc.generateReleaseCatalogue({
       releaseVersion: "3.0.0",
+      fitnessVersion: "0.17.1",
       workflowCommit: "1234567890abcdef1234567890abcdef12345678",
       imageDigest:
         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1352,6 +1353,7 @@ describe("tc-sdlc managed lifecycle", () => {
     writeFileSync(join(root, "input.txt"), "input\n");
     const catalogue = sdlc.generateReleaseCatalogue({
       releaseVersion: "3.0.0",
+      fitnessVersion: "0.17.1",
       workflowCommit: "1234567890abcdef1234567890abcdef12345678",
       imageDigest:
         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1361,7 +1363,7 @@ describe("tc-sdlc managed lifecycle", () => {
         schema: "tc.sdlc/v1",
         project: "lifecycle-prepare",
         toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
-        fitness: sdlc.CANONICAL_SDLC_FITNESS,
+        fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
         projects: [{ name: "fixture", root: "." }],
         targets: {
           prepare: {

@@ -44,24 +44,34 @@ export function buildPresetTasks(
 
   for (const project of projects) {
     for (const [targetName, target] of targetEntries) {
+      const scope = target.scope ?? "project";
+      if (scope === "repository" && project !== projects[0]) continue;
+      const taskProject = scope === "repository"
+        ? { name: declaration.project, root: ".", dependsOn: [] }
+        : project;
       const resources = target.resources ?? DEFAULT_RESOURCES;
       const budget = target.budget ?? DEFAULT_BUDGET;
       const task: TaskDeclaration &
         Readonly<{ resources: TaskResources; budget: TaskBudget }> = {
-        project: project.name,
+        project: taskProject.name,
         target: targetName,
-        projectRoot: project.root,
+        projectRoot: taskProject.root,
         mode: target.mode,
         trustBoundary: target.trustBoundary,
+        ...(scope === "project" ? {} : { scope }),
         ...(target.command === undefined ? {} : { command: target.command }),
         ...(target.executor === undefined ? {} : { executor: target.executor }),
+        ...(target.profile === undefined ? {} : { profile: target.profile }),
         dependsOn: sorted([
           ...(target.dependsOn ?? []).map(
-            (dependency) => `${project.name}:${dependency}`,
+            (dependency) =>
+              declaration.targets[dependency]?.scope === "repository"
+                ? `${declaration.project}:${dependency}`
+                : `${taskProject.name}:${dependency}`,
           ),
-          ...project.dependsOn.map(
+          ...(scope === "repository" ? [] : taskProject.dependsOn.map(
             (dependency) => `${dependency}:${targetName}`,
-          ),
+          )),
         ]),
         inputs: sorted(target.inputs ?? []),
         sharedInputs: sorted(target.sharedInputs ?? []),
@@ -104,7 +114,7 @@ export function buildPresetTasks(
         key,
         identity: taskIdentity(task, inputDigests, lockDigest),
         inputDigests,
-        execution: resolveExecutorContract(target),
+        execution: resolveExecutorContract(target, declaration.fitness),
       });
     }
   }

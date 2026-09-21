@@ -2,7 +2,6 @@ from pathlib import Path
 
 import idna
 
-
 root = Path(__file__).resolve().parents[1]
 source = (root / "src/input.txt").read_text().strip()
 output = root / "generated/value.txt"

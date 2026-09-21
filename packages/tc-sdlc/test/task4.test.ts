@@ -30,7 +30,7 @@ const release = {
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   declarationSchema: "tc.sdlc/v1",
   lockSchema: "tc.sdlc/lock/v1",
-  fitness: { package: "three-cubes-fitness", version: "0.17.0" },
+  fitness: { package: "three-cubes-fitness", version: "0.17.1" },
   toolchains: {
     node: "24",
     packageManager: "pnpm@11.22.0",
@@ -38,6 +38,12 @@ const release = {
     uv: "0.12.5",
   },
   bootstrap: sdlc.CANONICAL_SDLC_BOOTSTRAP,
+} as const;
+
+const declarationFitness = {
+  package: "three-cubes-fitness",
+  config: "pyproject.toml",
+  profiles: { full: "full" },
 } as const;
 
 function target(
@@ -65,7 +71,7 @@ function planning(
     schema: "tc.sdlc/v1",
     project: "task4-fixture",
     toolchains: release.toolchains,
-    fitness: release.fitness,
+    fitness: declarationFitness,
     projects: [{ name: "fixture", root: "." }],
     targets,
   } as const;
@@ -89,7 +95,7 @@ function taskRunOptions(extra: Readonly<Record<string, unknown>> = {}) {
         bootstrapReceiptDigest: `sha256:${"b".repeat(64)}`,
         stateDigest: `sha256:${"c".repeat(64)}`,
         dependencyDigest: `sha256:${"d".repeat(64)}`,
-        fitness: release.fitness,
+        fitness: declarationFitness,
         adapters: [],
       },
       stateRoot: tmpdir(),
@@ -846,7 +852,7 @@ describe("tc-sdlc Task 4", () => {
       `schema: tc.sdlc/v1
 project: cli-fixture
 toolchains: {python: "3.13", node: "24", packageManager: pnpm@11.22.0, uv: "0.12.5"}
-fitness: {package: three-cubes-fitness, version: "0.17.0"}
+fitness: {package: three-cubes-fitness, config: pyproject.toml, profiles: {full: full}}
 projects: [{name: fixture, root: .}]
 targets:
   prepare:

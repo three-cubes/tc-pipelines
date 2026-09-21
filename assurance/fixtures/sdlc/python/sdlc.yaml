@@ -7,11 +7,26 @@ toolchains:
   uv: "0.12.5"
 fitness:
   package: three-cubes-fitness
-  version: "0.17.0"
+  config: pyproject.toml
+  profiles:
+    full: full
 projects:
   - name: python-service
     root: .
 targets:
+  fitness:
+    executor: tc-sdlc:fitness
+    profile: full
+    scope: repository
+    mode: evaluate
+    trustBoundary: portable
+    inputs:
+      - pyproject.toml
+      - uv.lock
+      - sdlc.yaml
+    evidence:
+      - path: fitness.json
+        mediaType: application/json
   prepare:
     command: uv run --locked python -B scripts/prepare.py
     mode: prepare

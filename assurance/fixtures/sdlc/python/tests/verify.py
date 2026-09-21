@@ -1,9 +1,7 @@
+import os
 from pathlib import Path
 
-import os
-
 import idna
-
 
 root = Path(__file__).resolve().parents[1]
 if idna.__version__ != "3.10":

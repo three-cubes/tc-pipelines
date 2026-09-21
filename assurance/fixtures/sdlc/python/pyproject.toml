@@ -2,4 +2,16 @@
 name = "tc-sdlc-python-consumer"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = ["idna==3.10"]
+dependencies = [
+    "idna==3.10",
+    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@b9b28cd839925e10c14a03638ffb8fa37b6ef09a",
+]
+
+[tool.tc_fitness]
+name = "tc-sdlc disposable fitness consumer"
+
+[[tool.tc_fitness.steps]]
+id = "consumer-check"
+summary = "disposable consumer verification"
+run = ["python", "-B", "-c", "import idna"]
+tags = ["full"]

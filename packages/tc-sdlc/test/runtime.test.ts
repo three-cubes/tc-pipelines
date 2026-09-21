@@ -19,7 +19,7 @@ const release = {
   lockSchema: "tc.sdlc/lock/v1",
   fitness: {
     package: "three-cubes-fitness",
-    version: "0.17.0",
+    version: "0.17.1",
   },
   toolchains: {
     node: "24",
@@ -30,12 +30,18 @@ const release = {
   bootstrap: sdlc.CANONICAL_SDLC_BOOTSTRAP,
 } as const;
 
+const declarationFitness = {
+  package: "three-cubes-fitness",
+  config: "pyproject.toml",
+  profiles: { full: "full" },
+} as const;
+
 function graphFor(targets: Readonly<Record<string, Record<string, unknown>>>) {
   const declaration = {
     schema: "tc.sdlc/v1",
     project: "runtime-fixture",
     toolchains: release.toolchains,
-    fitness: release.fitness,
+    fitness: declarationFitness,
     projects: [{ name: "fixture", root: "." }],
     targets,
   } as const;
@@ -80,7 +86,7 @@ function testExecutionContext() {
       bootstrapReceiptDigest: `sha256:${"b".repeat(64)}`,
       stateDigest: `sha256:${"c".repeat(64)}`,
       dependencyDigest: `sha256:${"d".repeat(64)}`,
-      fitness: { package: "three-cubes-fitness", version: "0.17.0" },
+      fitness: { package: "three-cubes-fitness", version: "0.17.1" },
       adapters: [],
     },
     stateRoot: "/tmp/test-state",

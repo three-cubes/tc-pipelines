@@ -4,7 +4,7 @@ consumers:
     fixture: python
     languages: [python]
     changed: src/input.txt
-    complete_tasks: [python-service:check]
+    complete_tasks: [python-service:check, tc-sdlc-python-consumer:fitness]
     affected_tasks: [python-service:check]
   - id: pnpm
     fixture: pnpm

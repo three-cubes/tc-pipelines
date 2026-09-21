@@ -67,7 +67,7 @@ function input(
     schema: "tc.sdlc/v1",
     project: "bootstrap-real-consumer",
     toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
-    fitness: sdlc.CANONICAL_SDLC_FITNESS,
+    fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
     projects: [{ name: "consumer", root: "." }],
     targets: {
       check: {
@@ -80,6 +80,7 @@ function input(
   });
   const catalogue = sdlc.generateReleaseCatalogue({
     releaseVersion: "3.0.0",
+    fitnessVersion: "0.17.1",
     workflowCommit: "1234567890abcdef1234567890abcdef12345678",
     imageDigest,
   });
@@ -189,7 +190,7 @@ function referenceFixture(prefix: string, stateParent = tmpdir()) {
       schema: "tc.sdlc/v1",
       project,
       toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
-      fitness: sdlc.CANONICAL_SDLC_FITNESS,
+      fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
       projects: [{ name: "consumer", root: "." }],
       targets: {
         check: {
@@ -306,7 +307,7 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       schema: "tc.sdlc/v1",
       project: "bootstrap-state-generation-rebuild",
       toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
-      fitness: sdlc.CANONICAL_SDLC_FITNESS,
+      fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
       projects: [{ name: "consumer", root: "." }],
       targets: {
         prepare: {
