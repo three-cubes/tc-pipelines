@@ -145,6 +145,10 @@ atomically moves each identity-checked candidate into a private same-filesystem
 quarantine. This avoids serial permission walks over large read-only fixtures and
 prevents path replacement races from deleting foreign bytes. Restoring parent
 directory ownership is sufficient; cleanup does not recursively chmod content.
+Each quarantine has canonical owner and payload-identity metadata. A later
+routine recovery or explicit maintenance run inventories expired interrupted
+quarantines; it removes only the still-matching payload and preserves foreign or
+changed quarantine bytes.
 
 The persistent bootstrap inventory consists of referenced release states
 (including their dependency environments and toolchain launchers), managed
@@ -154,7 +158,10 @@ configuration and named `tc-sdlc-release` builder; ambient Docker context,
 daemon and BuildKit routing variables are not inherited. `tc-sdlc maintain`
 accepts an explicit managed pnpm or uv executable and an explicit named BuildKit
 builder, records reclaimed bytes, and never falls back to binaries discovered on
-ambient `PATH`.
+ambient `PATH`. Successful release artefacts currently have a safe-retention
+contract, not an automated collector: failed staging is removed, while
+successful outputs remain until the producer supplies a complete canonical
+reference inventory.
 
 ## Snapshot and rollback cost
 

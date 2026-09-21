@@ -2,17 +2,23 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   renameSync,
-  rmdirSync,
 } from "node:fs";
-import { rm, rmdir } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { canonicalJson } from "../canonical.js";
+import {
+  QUARANTINE_PREFIX,
+  createQuarantine,
+  filesystemIdentity,
+  finishQuarantine,
+  inspectQuarantine,
+  removeQuarantineCandidate,
+  sameIdentity,
+} from "./quarantine.js";
 import { validateExecutable } from "./tools.js";
 import type {
   AutomaticRecoveryReceipt,
@@ -112,23 +118,6 @@ function dirtyWorktree(path: string): boolean {
   return false;
 }
 
-function filesystemIdentity(path: string): FilesystemIdentity {
-  const details = lstatSync(path, { bigint: true });
-  return {
-    device: details.dev.toString(),
-    inode: details.ino.toString(),
-    birthtimeNanoseconds: details.birthtimeNs.toString(),
-  };
-}
-
-function sameIdentity(path: string, expected: FilesystemIdentity): boolean {
-  try {
-    return canonicalJson(filesystemIdentity(path)) === canonicalJson(expected);
-  } catch {
-    return false;
-  }
-}
-
 function readTemporaryMarker(path: string): TemporaryMarker | undefined {
   try {
     const markerPath = join(path, ".tc-sdlc-temporary.json");
@@ -169,12 +158,19 @@ export function inspectTemporaryRoot(
     return { candidates, retained, truncated };
   }
   for (const name of entries) {
-    if (!name.startsWith(TEMPORARY_PREFIX)) continue;
+    const isQuarantine = name.startsWith(QUARANTINE_PREFIX);
+    if (!name.startsWith(TEMPORARY_PREFIX) && !isQuarantine) continue;
     if (candidates.length + retained.length >= maxEntries) {
       truncated = true;
       continue;
     }
     const path = join(temporaryRoot, name);
+    if (isQuarantine) {
+      const inspected = inspectQuarantine(path, name, cutoff);
+      if (inspected.candidate !== undefined) candidates.push(inspected.candidate);
+      if (inspected.retained !== undefined) retained.push(inspected.retained);
+      continue;
+    }
     try {
       const details = lstatSync(path);
       if (details.isSymbolicLink()) {
@@ -254,6 +250,24 @@ export async function removeTemporaryCandidates(
       const index = cursor++;
       const candidate = candidates[index]!;
       const path = join(temporaryRoot, candidate.path);
+      if (candidate.kind === "quarantine") {
+        const recovered = await removeQuarantineCandidate(
+          temporaryRoot,
+          candidate,
+          cutoff,
+        );
+        results[index] = recovered.removed
+          ? { removed: true, bytes: candidate.bytes ?? 0 }
+          : {
+              removed: false,
+              retained: recovered.retained ?? {
+                path: candidate.path,
+                reason: "inspection_failed",
+              },
+              failed: recovered.retained?.reason === "inspection_failed",
+            };
+        continue;
+      }
       if (!stillEligible(path, cutoff, candidate.identity)) {
         results[index] = {
           removed: false,
@@ -262,16 +276,20 @@ export async function removeTemporaryCandidates(
         };
         continue;
       }
-      const quarantineRoot = mkdtempSync(
-        join(temporaryRoot, `.tc-sdlc-quarantine-${process.pid}-`),
+      const created = createQuarantine(
+        temporaryRoot,
+        path,
+        "temporary",
+        candidate.identity,
       );
-      const quarantine = join(quarantineRoot, "candidate");
+      const quarantineRoot = created.root;
+      const quarantine = created.payload;
       try {
         renameSync(path, quarantine);
         if (!sameIdentity(quarantine, candidate.identity)) {
           if (!existsSync(path)) {
             renameSync(quarantine, path);
-            rmdirSync(quarantineRoot);
+            finishQuarantine(quarantineRoot);
           }
           results[index] = {
             removed: false,
@@ -287,7 +305,7 @@ export async function removeTemporaryCandidates(
         peakWorkers = Math.max(peakWorkers, activeWorkers);
         try {
           await rm(quarantine, { recursive: true, force: false });
-          await rmdir(quarantineRoot);
+          finishQuarantine(quarantineRoot);
         } finally {
           activeWorkers -= 1;
         }
@@ -295,7 +313,7 @@ export async function removeTemporaryCandidates(
       } catch {
         try {
           if (existsSync(quarantine) && !existsSync(path)) renameSync(quarantine, path);
-          if (!existsSync(quarantine)) rmdirSync(quarantineRoot);
+          if (!existsSync(quarantine)) finishQuarantine(quarantineRoot);
         } catch {
           // Both paths remain preserved for explicit operator inspection.
         }

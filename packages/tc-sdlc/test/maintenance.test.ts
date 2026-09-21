@@ -1,5 +1,5 @@
 import * as sdlc from "../dist/index.js";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -279,6 +279,100 @@ describe("tc-sdlc managed lifecycle", () => {
     });
     expect(paths.some(existsSync)).toBe(false);
   });
+
+  test("recovers an owner-bound quarantine left by a killed maintain process", async () => {
+    const parent = temporary("tc-sdlc-maintenance-killed-");
+    const stateRoot = temporary("tc-sdlc-maintenance-state-");
+    const evidence = temporary("tc-sdlc-maintenance-evidence-");
+    ownedState(stateRoot);
+    const candidate = managedTemporary(parent, "tc-sdlc-evaluation-killed", {
+      pid: 2_147_483_647,
+      old: true,
+    });
+    for (let index = 0; index < 20_000; index += 1) {
+      writeFileSync(join(candidate, `entry-${index}.txt`), "owned\n");
+    }
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(candidate, old, old);
+
+    const child = spawn(
+      process.execPath,
+      [
+        CLI,
+        "maintain",
+        "--state-root", stateRoot,
+        "--temporary-root", parent,
+        "--receipt", join(evidence, "killed.json"),
+        "--mode", "apply",
+      ],
+      { stdio: "ignore" },
+    );
+    let quarantine: string | undefined;
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      quarantine = readdirSync(parent)
+        .find((name) => name.startsWith(".tc-sdlc-quarantine-"));
+      if (
+        quarantine !== undefined &&
+        existsSync(join(parent, quarantine, "candidate"))
+      ) break;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    expect(quarantine).toBeDefined();
+    child.kill("SIGKILL");
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    const quarantinePath = join(parent, quarantine!);
+    expect(existsSync(join(quarantinePath, "candidate"))).toBe(true);
+    utimesSync(quarantinePath, old, old);
+
+    const receipt = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "recovered.json"),
+      mode: "apply",
+    });
+
+    expect(receipt.candidates).toContainEqual(
+      expect.objectContaining({ kind: "quarantine", path: quarantine }),
+    );
+    expect(receipt.removedCount).toBe(1);
+    expect(existsSync(quarantinePath)).toBe(false);
+
+    const foreign = join(parent, ".tc-sdlc-quarantine-foreign");
+    mkdirSync(foreign);
+    writeFileSync(join(foreign, "preserve.txt"), "foreign bytes\n");
+    utimesSync(foreign, old, old);
+    const mismatched = join(parent, ".tc-sdlc-quarantine-mismatched");
+    mkdirSync(mismatched);
+    mkdirSync(join(mismatched, "candidate"));
+    writeFileSync(join(mismatched, "candidate", "preserve.txt"), "mismatched bytes\n");
+    writeFileSync(
+      join(mismatched, ".tc-sdlc-quarantine.json"),
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/quarantine-owner/v1",
+        owner: "@three-cubes/tc-sdlc",
+        kind: "temporary",
+        originalName: "tc-sdlc-evaluation-missing",
+        payloadIdentity: {
+          device: "0",
+          inode: "0",
+          birthtimeNanoseconds: "0",
+        },
+      }),
+    );
+    utimesSync(mismatched, old, old);
+    const guarded = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "foreign-quarantine.json"),
+      mode: "apply",
+    });
+    expect(guarded.removedCount).toBe(0);
+    expect(readFileSync(join(foreign, "preserve.txt"), "utf8")).toBe("foreign bytes\n");
+    expect(readFileSync(join(mismatched, "candidate", "preserve.txt"), "utf8")).toBe(
+      "mismatched bytes\n",
+    );
+  }, 30_000);
 
   test("does not delete a foreign replacement installed after candidate inspection", async () => {
     const parent = temporary("tc-sdlc-maintenance-replacement-");
@@ -639,6 +733,23 @@ describe("tc-sdlc managed lifecycle", () => {
         runOptions: { capacity: { cpu: 1, memoryMiB: 64 } },
       });
       expect(result.status).toBe("failed");
+      expect(
+        readdirSync(temporaryRoot).filter((name) => name.startsWith("tc-sdlc-evaluation-")),
+      ).toEqual([]);
+      const rejected = await sdlc.checkAll({
+        root,
+        declaration,
+        catalogue,
+        lock: sdlc.resolveLock(declaration, catalogue),
+        receiptPath: join(evidence, "evaluation-invalid-capacity.json"),
+        environmentClass: `native-${process.platform}`,
+        producer: "lifecycle-test",
+        runOptions: { capacity: { cpu: 0, memoryMiB: 64 } },
+      });
+      expect(rejected).toMatchObject({
+        status: "failed",
+        reason: "host capacity must be positive",
+      });
       expect(
         readdirSync(temporaryRoot).filter((name) => name.startsWith("tc-sdlc-evaluation-")),
       ).toEqual([]);

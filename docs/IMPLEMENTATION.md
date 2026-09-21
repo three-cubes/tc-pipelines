@@ -282,7 +282,9 @@ predecessor and expires only old states made explicitly unreferenced by valid
 producer metadata. The release-image producer uses a named tc-sdlc BuildKit
 builder and state-owned Docker configuration with explicit daemon routing;
 release artefacts remain retained until catalogue/current/predecessor or incident
-references provide deletion authority.
+references provide deletion authority. Task 5 emits that retention declaration
+but deliberately implements no successful-release artefact collector: until a
+canonical reference inventory exists, successful artefacts are retained.
 
 ### Task 6 — Disposable consumers and hosted adapter
 

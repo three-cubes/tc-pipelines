@@ -21,7 +21,7 @@ export type FilesystemIdentity = Readonly<{
 }>;
 
 export type MaintenanceEntry = Readonly<{
-  kind: "temporary" | "bootstrap-state";
+  kind: "temporary" | "bootstrap-state" | "quarantine";
   path: string;
   bytes?: number;
   identity: FilesystemIdentity;

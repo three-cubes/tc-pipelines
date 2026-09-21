@@ -626,7 +626,8 @@ and render a new catalogue entry before distributing this command.
   deterministic test lifecycle.
 
 Earlier Task 5 coordination commits remain in history. All Task 5 commits are
-authored by `three-cubes-agent[bot]`. `docs/IMPLEMENTATION.md` was not edited.
+authored by `three-cubes-agent[bot]`. Lifecycle scope is recorded in the
+existing canonical implementation, cost and architecture documents.
 
 ## Self-review
 
@@ -638,3 +639,62 @@ known implementation blocker remains. The explicit remaining evidence
 limitations are amd64 hosted hardware qualification, which belongs to Task 6,
 and the next-release rebuild/catalogue binding for the lifecycle follow-up;
 the immutable published Task 5 catalogue was deliberately not rewritten.
+
+## Lifecycle destructive-race rereview remediation
+
+The rereview added four source boundaries before another immutable image build:
+
+- Git inspection now runs with an isolated environment, so ambient `GIT_DIR`,
+  `GIT_WORK_TREE` and user/system configuration cannot redirect dirty-worktree
+  authority to an unrelated clean repository.
+- A synchronous quarantine move writes canonical
+  `tc.sdlc/quarantine-owner/v1` metadata binding owner, lifecycle class,
+  original name and payload filesystem identity. Routine 48-hour recovery and
+  explicit maintenance inventory interrupted quarantines, revalidate the root
+  and payload, and preserve foreign or changed quarantine bytes. A built CLI
+  child was killed with real `SIGKILL` only after the test observed the moved
+  payload; the next public maintain call recovered it.
+- Evaluation workspace disposal is now a `finally` invariant. Both a terminal
+  task failure and a thrown invalid-capacity path leave no owner workspace.
+- The release producer rejects symlink components below its owned state before
+  creating Docker/Buildx state. It inspects an existing or newly created named
+  builder through Buildx output and rejects an endpoint different from the
+  requested receipt endpoint.
+
+The release-artifact boundary remains deliberately conservative. Failed staging
+is removed immediately, but there is no automated successful-artifact collector
+in Task 5 because no complete catalogue/current/predecessor/incident reference
+inventory exists yet. The canonical docs now state that exact implemented
+scope; successful artefacts remain retained.
+
+RED evidence from the built public package:
+
+```text
+test/maintenance.test.ts test/catalogue-generation.test.ts
+2 failed | 18 passed
+- killed-process quarantine was absent from maintenance candidates
+- release build followed owned-state cache symlink and reached the dirty-tree guard
+```
+
+GREEN source evidence before independent rereview:
+
+```text
+pnpm --filter @three-cubes/tc-sdlc build
+exit 0
+
+pnpm --filter @three-cubes/tc-sdlc test
+7 files, 125 tests passed
+
+test/maintenance-docker.integration.test.ts
+2 tests passed, including real existing-builder endpoint mismatch
+
+test/bootstrap-darwin.integration.test.ts -t "producer advances A to B to C"
+1 passed; 6 skipped by selection
+```
+
+The A to B to C journey uses three successful public bootstrap calls for one
+real local consumer. Producer metadata names C current and B predecessor;
+after all three state directories are aged, public maintenance deletes only A.
+Per controller direction, no new multiarchitecture image or generated catalogue
+is claimed in this source-remediation commit. Those outputs await a clean
+independent source/sabotage rereview.

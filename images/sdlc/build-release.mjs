@@ -75,8 +75,28 @@ function executable(value) {
   return path;
 }
 
+function ownedDirectory(stateRoot, ...segments) {
+  let cursor = stateRoot;
+  for (const segment of segments) {
+    cursor = join(cursor, segment);
+    if (existsSync(cursor)) {
+      const details = lstatSync(cursor);
+      if (details.isSymbolicLink()) {
+        throw new Error("managed state path may not traverse symbolic links");
+      }
+      if (!details.isDirectory()) throw new Error("managed state path must be a directory");
+    } else {
+      mkdirSync(cursor, { mode: 0o700 });
+    }
+  }
+  return cursor;
+}
+
 function dockerEnvironment(stateRoot) {
-  const environment = { ...process.env, DOCKER_CONFIG: join(stateRoot, "cache", "docker") };
+  const environment = {
+    ...process.env,
+    DOCKER_CONFIG: ownedDirectory(stateRoot, "cache", "docker"),
+  };
   for (const name of [
     "BUILDX_CONFIG",
     "BUILDER_NODE",
@@ -86,8 +106,45 @@ function dockerEnvironment(stateRoot) {
     "DOCKER_CERT_PATH",
     "DOCKER_TLS_VERIFY",
   ]) delete environment[name];
-  mkdirSync(environment.DOCKER_CONFIG, { recursive: true, mode: 0o700 });
   return environment;
+}
+
+function inspectedEndpoints(result) {
+  return result.stdout
+    .split("\n")
+    .map((line) => /^Endpoint:\s+(.+?)\s*$/.exec(line)?.[1])
+    .filter((value) => value !== undefined);
+}
+
+function ensureBuilder(buildx, builder, dockerEndpoint, environment) {
+  let inspected = spawnSync(buildx, ["inspect", "--builder", builder], {
+    encoding: "utf8",
+    env: environment,
+  });
+  if (inspected.error !== undefined) throw inspected.error;
+  if (inspected.status !== 0) {
+    const created = spawnSync(
+      buildx,
+      ["create", "--name", builder, "--driver", "docker-container", dockerEndpoint],
+      { encoding: "utf8", env: environment },
+    );
+    if (created.error !== undefined) throw created.error;
+    if (created.status !== 0) {
+      throw new Error(`managed BuildKit builder creation failed with exit ${created.status}`);
+    }
+    inspected = spawnSync(buildx, ["inspect", "--builder", builder], {
+      encoding: "utf8",
+      env: environment,
+    });
+  }
+  if (inspected.error !== undefined) throw inspected.error;
+  if (inspected.status !== 0) {
+    throw new Error(`managed BuildKit builder inspection failed with exit ${inspected.status}`);
+  }
+  const endpoints = inspectedEndpoints(inspected);
+  if (endpoints.length === 0 || endpoints.some((endpoint) => endpoint !== dockerEndpoint)) {
+    throw new Error("managed BuildKit builder endpoint mismatch");
+  }
 }
 
 function writeAtomic(path, value) {
@@ -105,6 +162,8 @@ if (!/^(unix|ssh):\/\/.+/.test(dockerEndpoint)) {
 }
 const builder = "tc-sdlc-release";
 const environment = dockerEnvironment(stateRoot);
+const builders = ownedDirectory(stateRoot, "builders");
+ensureBuilder(buildx, builder, dockerEndpoint, environment);
 const status = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
   cwd: repository,
   encoding: "utf8",
@@ -115,20 +174,6 @@ const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], {
   encoding: "utf8",
 }).trim();
 if (!/^[0-9a-f]{40}$/.test(sourceCommit)) throw new Error("source commit is not immutable");
-
-const inspected = spawnSync(buildx, ["inspect", "--builder", builder], {
-  encoding: "utf8",
-  env: environment,
-});
-if (inspected.status !== 0) {
-  const created = spawnSync(
-    buildx,
-    ["create", "--name", builder, "--driver", "docker-container", dockerEndpoint],
-    { encoding: "utf8", env: environment },
-  );
-  if (created.error !== undefined) throw created.error;
-  if (created.status !== 0) throw new Error(`managed BuildKit builder creation failed with exit ${created.status}`);
-}
 
 const staging = mkdtempSync(join(artifactsRoot, `.${basename(output)}-`));
 try {
@@ -192,8 +237,6 @@ try {
     { flag: "wx", mode: 0o600 },
   );
   renameSync(staging, output);
-  const builders = join(stateRoot, "builders");
-  mkdirSync(builders, { recursive: true, mode: 0o700 });
   writeAtomic(join(builders, `${builder}.json`), {
     schema: "tc.sdlc/buildkit-owner/v1",
     owner: "@three-cubes/tc-sdlc",

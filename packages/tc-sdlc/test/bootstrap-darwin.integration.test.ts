@@ -13,6 +13,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -79,6 +80,61 @@ function input(
 }
 
 describe("reviewed macOS bootstrap host and dependency boundary", () => {
+  test("producer advances A to B to C and maintenance expires only unreferenced A", async () => {
+    expect(process.platform).toBe("darwin");
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-reference-journey-"));
+    writeFileSync(join(root, "input.txt"), "input\n");
+    const stateRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-reference-state-"));
+    const evidence = mkdtempSync(join(tmpdir(), "tc-sdlc-reference-evidence-"));
+    const states: string[] = [];
+    for (const generation of ["A", "B", "C"]) {
+      const values = input(root, ["input.txt"]);
+      const declaration = sdlc.validateDeclaration({
+        ...values.declaration,
+        targets: {
+          check: {
+            ...values.declaration.targets.check,
+            command: `node -e 'process.stdout.write(\"${generation}\")'`,
+          },
+        },
+      });
+      const receipt = await sdlc.bootstrap({
+        root,
+        declaration,
+        catalogue: values.catalogue,
+        lock: sdlc.resolveLock(declaration, values.catalogue),
+        stateRoot,
+        receiptPath: join(evidence, `${generation}.json`),
+        host: { platform: "darwin", architecture: process.arch, offline: false },
+      });
+      expect(receipt).toMatchObject({ status: "succeeded" });
+      states.push(receipt.stateKey);
+    }
+    expect(new Set(states).size).toBe(3);
+    const referenceFiles = readdirSync(join(stateRoot, "references"));
+    expect(referenceFiles).toHaveLength(1);
+    expect(
+      JSON.parse(readFileSync(join(stateRoot, "references", referenceFiles[0]!), "utf8")),
+    ).toMatchObject({
+      currentStateKey: states[2],
+      predecessorStateKey: states[1],
+    });
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    for (const state of states) utimesSync(join(stateRoot, state), old, old);
+    const maintained = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: mkdtempSync(join(tmpdir(), "tc-sdlc-reference-temp-")),
+      receiptPath: join(evidence, "maintain.json"),
+      mode: "apply",
+    });
+    expect(maintained.candidates).toContainEqual(
+      expect.objectContaining({ kind: "bootstrap-state", path: states[0] }),
+    );
+    expect(existsSync(join(stateRoot, states[0]!))).toBe(false);
+    expect(existsSync(join(stateRoot, states[1]!))).toBe(true);
+    expect(existsSync(join(stateRoot, states[2]!))).toBe(true);
+  }, 180_000);
+
   test("does not trust an arbitrary PATH and emits one executable Linux remediation command", async () => {
     const root = mkdtempSync(join(tmpdir(), "tc-sdlc-untrusted-path-"));
     for (const name of ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"]) {

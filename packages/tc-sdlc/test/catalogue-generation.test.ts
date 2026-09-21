@@ -1,5 +1,5 @@
 import * as sdlc from "../dist/index.js";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -200,6 +200,33 @@ describe("tc-sdlc release catalogue generation", () => {
       "docker endpoint must be an explicit local unix or authenticated ssh endpoint",
     );
     expect(existsSync(output)).toBe(false);
+
+    const linkedState = mkdtempSync(join(tmpdir(), "tc-sdlc-release-linked-state-"));
+    writeFileSync(
+      join(linkedState, ".tc-sdlc-owner.json"),
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/state-owner/v1",
+        owner: "@three-cubes/tc-sdlc",
+      }),
+    );
+    const foreignCache = mkdtempSync(join(tmpdir(), "tc-sdlc-release-foreign-cache-"));
+    writeFileSync(join(foreignCache, "preserve"), "foreign\n");
+    symlinkSync(foreignCache, join(linkedState, "cache"));
+    const linked = spawnSync(
+      process.execPath,
+      [
+        BUILD_RELEASE,
+        "--artifact-output", output,
+        "--state-root", linkedState,
+        "--buildx-executable", process.execPath,
+        "--docker-endpoint", "unix:///not-used.sock",
+      ],
+      { encoding: "utf8", cwd: repository },
+    );
+    expect(linked.status).not.toBe(0);
+    expect(linked.stderr).toContain("managed state path may not traverse symbolic links");
+    expect(readFileSync(join(foreignCache, "preserve"), "utf8")).toBe("foreign\n");
+    expect(existsSync(join(foreignCache, "docker"))).toBe(false);
   });
 
   test("image verification requires explicit scratch and retained evidence locations", () => {

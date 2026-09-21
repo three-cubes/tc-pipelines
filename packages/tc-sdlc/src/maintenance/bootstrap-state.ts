@@ -1,18 +1,24 @@
 import {
   existsSync,
   lstatSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   renameSync,
-  rmdirSync,
 } from "node:fs";
-import { rm, rmdir } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative } from "node:path";
 
 import { canonicalJson, digest } from "../canonical.js";
+import {
+  QUARANTINE_PREFIX,
+  createQuarantine,
+  filesystemIdentity,
+  finishQuarantine,
+  inspectQuarantine,
+  removeQuarantineCandidate,
+  sameIdentity,
+} from "./quarantine.js";
 import type {
-  FilesystemIdentity,
   MaintenanceEntry,
   MaintenanceRetainedEntry,
 } from "./types.js";
@@ -37,23 +43,6 @@ function directoryBytes(path: string): number {
     else total += lstatSync(child).size;
   }
   return total;
-}
-
-function filesystemIdentity(path: string): FilesystemIdentity {
-  const details = lstatSync(path, { bigint: true });
-  return {
-    device: details.dev.toString(),
-    inode: details.ino.toString(),
-    birthtimeNanoseconds: details.birthtimeNs.toString(),
-  };
-}
-
-function sameIdentity(path: string, expected: FilesystemIdentity): boolean {
-  try {
-    return canonicalJson(filesystemIdentity(path)) === canonicalJson(expected);
-  } catch {
-    return false;
-  }
 }
 
 function bootstrapStatePaths(stateRoot: string): readonly string[] {
@@ -92,6 +81,29 @@ function bootstrapStatePaths(stateRoot: string): readonly string[] {
   };
   try {
     visit(releases, 0);
+  } catch {
+    return [];
+  }
+  return paths;
+}
+
+function bootstrapQuarantinePaths(stateRoot: string): readonly string[] {
+  const releases = join(stateRoot, "releases");
+  const paths: string[] = [];
+  const visit = (directory: string): void => {
+    for (const name of readdirSync(directory).sort()) {
+      const child = join(directory, name);
+      const details = lstatSync(child);
+      if (details.isSymbolicLink() || !details.isDirectory()) continue;
+      if (name.startsWith(QUARANTINE_PREFIX)) {
+        paths.push(relative(stateRoot, child).replaceAll("\\", "/"));
+      } else {
+        visit(child);
+      }
+    }
+  };
+  try {
+    if (!lstatSync(releases).isSymbolicLink()) visit(releases);
   } catch {
     return [];
   }
@@ -152,6 +164,11 @@ export function inspectBootstrapStates(
   const candidates: MaintenanceEntry[] = [];
   const retained: MaintenanceRetainedEntry[] = [];
   const references = bootstrapReferences(stateRoot);
+  for (const path of bootstrapQuarantinePaths(stateRoot)) {
+    const inspected = inspectQuarantine(join(stateRoot, path), path, cutoff);
+    if (inspected.candidate !== undefined) candidates.push(inspected.candidate);
+    if (inspected.retained !== undefined) retained.push(inspected.retained);
+  }
   for (const path of bootstrapStatePaths(stateRoot)) {
     const absolute = join(stateRoot, path);
     if (references === undefined) {
@@ -205,6 +222,20 @@ export async function removeBootstrapStates(
       const index = cursor++;
       const candidate = candidates[index]!;
       const path = join(stateRoot, candidate.path);
+      if (candidate.kind === "quarantine") {
+        const recovered = await removeQuarantineCandidate(stateRoot, candidate, cutoff);
+        results[index] = recovered.removed
+          ? { removed: true, bytes: candidate.bytes ?? 0 }
+          : {
+              removed: false,
+              retained: recovered.retained ?? {
+                path: candidate.path,
+                reason: "inspection_failed",
+              },
+              failed: recovered.retained?.reason === "inspection_failed",
+            };
+        continue;
+      }
       const references = bootstrapReferences(stateRoot);
       if (
         references === undefined ||
@@ -219,10 +250,14 @@ export async function removeBootstrapStates(
         };
         continue;
       }
-      const quarantineRoot = mkdtempSync(
-        join(dirname(path), `.tc-sdlc-quarantine-${process.pid}-`),
+      const created = createQuarantine(
+        dirname(path),
+        path,
+        "bootstrap-state",
+        candidate.identity,
       );
-      const quarantine = join(quarantineRoot, "candidate");
+      const quarantineRoot = created.root;
+      const quarantine = created.payload;
       try {
         renameSync(path, quarantine);
         const refreshed = bootstrapReferences(stateRoot);
@@ -233,7 +268,7 @@ export async function removeBootstrapStates(
         ) {
           if (!existsSync(path)) {
             renameSync(quarantine, path);
-            rmdirSync(quarantineRoot);
+            finishQuarantine(quarantineRoot);
           }
           results[index] = {
             removed: false,
@@ -251,7 +286,7 @@ export async function removeBootstrapStates(
         peakWorkers = Math.max(peakWorkers, activeWorkers);
         try {
           await rm(quarantine, { recursive: true, force: false });
-          await rmdir(quarantineRoot);
+          finishQuarantine(quarantineRoot);
         } finally {
           activeWorkers -= 1;
         }
@@ -259,7 +294,7 @@ export async function removeBootstrapStates(
       } catch {
         try {
           if (existsSync(quarantine) && !existsSync(path)) renameSync(quarantine, path);
-          if (!existsSync(quarantine)) rmdirSync(quarantineRoot);
+          if (!existsSync(quarantine)) finishQuarantine(quarantineRoot);
         } catch {
           // Preserve both paths for operator inspection if restoration races.
         }
