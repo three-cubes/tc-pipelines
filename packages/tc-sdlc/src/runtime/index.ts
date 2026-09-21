@@ -373,7 +373,6 @@ function taskEnvironment(
     XDG_STATE_HOME: join(scratch, "state", "xdg"),
     UV_CACHE_DIR: join(scratch, "cache", "uv"),
     PYTHONPYCACHEPREFIX: join(scratch, "cache", "python"),
-    PYTHONDONTWRITEBYTECODE: "1",
     COREPACK_HOME: join(scratch, "cache", "corepack"),
     PNPM_HOME: join(scratch, "pnpm"),
     PNPM_STORE_DIR: join(scratch, "cache", "pnpm-store"),
@@ -405,6 +404,7 @@ function taskEnvironment(
     ...options.environment,
     ...executionEnvironment,
     ...isolated,
+    PYTHONDONTWRITEBYTECODE: "1",
     ...(nodeModules === undefined
       ? {}
       : {
