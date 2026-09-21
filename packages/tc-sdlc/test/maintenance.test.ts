@@ -45,6 +45,7 @@ function taskRunOptions(capacity = { cpu: 1, memoryMiB: 64 }) {
         architecture: process.arch,
         lockDigest: `sha256:${"a".repeat(64)}`,
         stateKey: "releases/test/maintenance",
+        stateGenerationIdentity: `sha256:${"e".repeat(64)}`,
         bootstrapReceiptDigest: `sha256:${"b".repeat(64)}`,
         stateDigest: `sha256:${"c".repeat(64)}`,
         dependencyDigest: `sha256:${"d".repeat(64)}`,
@@ -55,6 +56,7 @@ function taskRunOptions(capacity = { cpu: 1, memoryMiB: 64 }) {
       stateDirectory: tmpdir(),
       environment: { PATH: process.env.PATH ?? "" },
       lease: { assertCurrent: () => undefined, release: () => undefined },
+      assertIdentity: () => undefined,
       verifyIntegrity: () => undefined,
     },
   };

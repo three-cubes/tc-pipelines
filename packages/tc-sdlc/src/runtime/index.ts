@@ -201,7 +201,7 @@ function emit(
     ...event,
   };
   events.push(value);
-  options.onEvent?.(value);
+  if (event.type !== "terminal") options.onEvent?.(value);
 }
 
 function terminateProcessGroup(
@@ -340,7 +340,7 @@ function taskEnvironment(
 ): NodeJS.ProcessEnv {
   const forbidden = Object.keys(options.environment ?? {}).find((name) =>
     ambientToolVariables.test(name) ||
-    /^(?:TC_SDLC_EXECUTION_CONTEXT_DIGEST|TC_SDLC_BOOTSTRAP_STATE_KEY|TC_SDLC_FITNESS_VERSION|TC_SDLC_TASK_EVIDENCE_DIR)$/.test(name),
+    /^(?:TC_SDLC_EXECUTION_CONTEXT_DIGEST|TC_SDLC_BOOTSTRAP_STATE_KEY|TC_SDLC_BOOTSTRAP_STATE_ROOT|TC_SDLC_FITNESS_VERSION|TC_SDLC_TASK_EVIDENCE_DIR)$/.test(name),
   );
   if (forbidden !== undefined) {
     throw new SdlcError(
@@ -365,6 +365,7 @@ function taskEnvironment(
     XDG_STATE_HOME: join(scratch, "state", "xdg"),
     UV_CACHE_DIR: join(scratch, "cache", "uv"),
     PYTHONPYCACHEPREFIX: join(scratch, "cache", "python"),
+    PYTHONDONTWRITEBYTECODE: "1",
     COREPACK_HOME: join(scratch, "cache", "corepack"),
     PNPM_HOME: join(scratch, "pnpm"),
     PNPM_STORE_DIR: join(scratch, "cache", "pnpm-store"),
@@ -504,7 +505,7 @@ async function executeTask(
     missingEvidence: (task.evidence ?? []).map((item) => posix.normalize(item.path)),
   };
   try {
-    options.executionContext.verifyIntegrity();
+    options.executionContext.assertIdentity();
     options.executionContext.lease.assertCurrent();
   } catch {
     const reason = "bootstrap_state_changed";
@@ -690,7 +691,7 @@ async function executeTask(
       let status: TaskReceipt["status"] = forced?.status ?? (code === 0 ? "succeeded" : "failed");
       let reason = forced?.reason ?? (code === 0 ? null : "process_exit_nonzero");
       try {
-        options.executionContext.verifyIntegrity();
+        options.executionContext.assertIdentity();
         options.executionContext.lease.assertCurrent();
       } catch {
         status = "failed";
@@ -861,7 +862,7 @@ export async function runGraph(
       }
     }
   }
-  options.executionContext.verifyIntegrity();
+  options.executionContext.assertIdentity();
   options.executionContext.lease.assertCurrent();
   const scratchRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-run-"));
   const scratchId = basename(scratchRoot);
@@ -888,6 +889,7 @@ export async function runGraph(
   >();
   let taskReceipts: TaskReceipt[] = [];
   let status: RunStatus = "failed";
+  let stateIntegrityFailed = false;
 
   try {
     const capacity = options.capacity ?? detectedCapacity();
@@ -911,7 +913,7 @@ export async function runGraph(
           const receipt = cancelledBeforeStartReceipt(task, options, scratchId);
           receipts.set(task.key, receipt);
           for (const event of receipt.events) {
-            options.onEvent?.(event);
+            if (event.type !== "terminal") options.onEvent?.(event);
           }
           pending.delete(task.key);
           advanced = true;
@@ -927,7 +929,6 @@ export async function runGraph(
         if (failed !== undefined) {
           const receipt = skippedReceipt(task, `dependency_failed:${failed}`, options, scratchId);
           receipts.set(task.key, receipt);
-          options.onEvent?.(receipt.events[0] as RunEvent);
           pending.delete(task.key);
           advanced = true;
           continue;
@@ -935,7 +936,6 @@ export async function runGraph(
         if (impossible(task, capacity)) {
           const receipt = failedAdmissionReceipt(task, options, scratchId);
           receipts.set(task.key, receipt);
-          options.onEvent?.(receipt.events[0] as RunEvent);
           pending.delete(task.key);
           advanced = true;
           continue;
@@ -996,6 +996,7 @@ export async function runGraph(
     options.executionContext.lease.assertCurrent();
     } catch {
       receiptReason ??= "bootstrap_state_changed";
+      stateIntegrityFailed = true;
     }
     try {
     const currentIdentity = lstatSync(scratchRoot, { bigint: true });
@@ -1014,6 +1015,23 @@ export async function runGraph(
       receiptReason ??= "scratch_cleanup_failed";
     }
   }
+  if (stateIntegrityFailed) {
+    taskReceipts = taskReceipts.map((receipt) => {
+      if (receipt.status !== "succeeded") return receipt;
+      return {
+        ...receipt,
+        status: "failed",
+        reason: "bootstrap_state_changed",
+        exitCode: null,
+        events: receipt.events.map((event) =>
+          event.type === "terminal"
+            ? { ...event, status: "failed", reason: "bootstrap_state_changed" }
+            : event,
+        ),
+      };
+    });
+    status = "failed";
+  }
   const terminalStatus = receiptReason !== null
     ? "failed"
     : status;
@@ -1030,5 +1048,10 @@ export async function runGraph(
     tasks: taskReceipts,
   };
   writeRunReceipt(options.receiptPath, receipt);
+  for (const task of taskReceipts) {
+    for (const event of task.events) {
+      if (event.type === "terminal") options.onEvent?.(event);
+    }
+  }
   return receipt;
 }

@@ -9,6 +9,17 @@ import { dirname, join, relative } from "node:path";
 
 import { canonicalJson } from "../canonical.js";
 import {
+  acquireBootstrapKernelBoundary,
+  assertBootstrapKernelBoundary,
+  releaseBootstrapKernelBoundary,
+  type BootstrapKernelBoundary,
+} from "../bootstrap/kernel-boundary.js";
+import {
+  bootstrapStateGenerationInvalidated,
+  retireBootstrapStateTombstone,
+  stableDirectoryIdentity,
+} from "../bootstrap/state-integrity.js";
+import {
   cleanupExpiredDeadPending,
   readBootstrapReferenceAuthorities,
   leaseMatches,
@@ -180,6 +191,11 @@ function restoreReferencedQuarantine(
     if (payload?.kind !== "bootstrap-state") return undefined;
     const parentKey = dirname(candidate.path).replaceAll("\\", "/");
     const stateKey = `${parentKey}/${payload.originalName}`;
+    if (bootstrapStateGenerationInvalidated(stateRoot, stateKey, payload.payload)) {
+      // The caller only attempts restoration after the bounded retention window.
+      // A poisoned generation is never restored, even if old reference evidence names it.
+      return undefined;
+    }
     const references = readBootstrapReferenceAuthorities(stateRoot);
     if (!referenceMatches(references, stateKey, payload.identity)) return undefined;
     const original = join(stateRoot, stateKey);
@@ -292,7 +308,47 @@ export async function removeBootstrapStates(
       const index = cursor++;
       const candidate = candidates[index]!;
       const path = join(stateRoot, candidate.path);
+      const quarantinePayloadForBoundary = candidate.kind === "quarantine"
+        ? inspectQuarantinePayload(path)
+        : undefined;
+      const stateKey = candidate.kind === "bootstrap-state"
+        ? candidate.path
+        : quarantinePayloadForBoundary?.kind === "bootstrap-state"
+          ? `${dirname(candidate.path).replaceAll("\\", "/")}/${quarantinePayloadForBoundary.originalName}`
+          : undefined;
+      let boundary: BootstrapKernelBoundary | undefined;
+      if (stateKey !== undefined) {
+        try {
+          boundary = await acquireBootstrapKernelBoundary(
+            stateRoot,
+            "bootstrap-state-materialization",
+            { stateKey },
+          );
+        } catch {
+          results[index] = {
+            removed: false,
+            retained: { path: candidate.path, reason: "changed_during_apply" },
+            failed: false,
+          };
+          continue;
+        }
+      }
+      try {
+        if (boundary !== undefined) assertBootstrapKernelBoundary(boundary);
       if (candidate.kind === "quarantine") {
+        const quarantinePayload = quarantinePayloadForBoundary;
+        const poisonedStateKey = quarantinePayload?.kind === "bootstrap-state"
+          ? `${dirname(candidate.path).replaceAll("\\", "/")}/${quarantinePayload.originalName}`
+          : undefined;
+        const poisonedIdentity = poisonedStateKey === undefined || quarantinePayload === undefined
+          ? undefined
+          : stableDirectoryIdentity(quarantinePayload.payload);
+        const poisoned = poisonedStateKey !== undefined && quarantinePayload !== undefined &&
+          bootstrapStateGenerationInvalidated(
+            stateRoot,
+            poisonedStateKey,
+            quarantinePayload.payload,
+          );
         const restored = restoreReferencedQuarantine(stateRoot, candidate);
         if (restored !== undefined) {
           results[index] = { removed: false, retained: restored, failed: false };
@@ -310,6 +366,9 @@ export async function removeBootstrapStates(
           );
         } finally {
           activeWorkers -= 1;
+        }
+        if (recovered.removed && poisoned && poisonedStateKey !== undefined && poisonedIdentity !== undefined) {
+          retireBootstrapStateTombstone(stateRoot, poisonedStateKey, poisonedIdentity);
         }
         results[index] = recovered.removed
           ? { removed: true, bytes: candidate.bytes ?? 0 }
@@ -370,6 +429,20 @@ export async function removeBootstrapStates(
           retained: { path: candidate.path, reason: "inspection_failed" },
           failed: true,
         };
+      }
+      } finally {
+        try {
+          if (boundary !== undefined) {
+            assertBootstrapKernelBoundary(boundary);
+            releaseBootstrapKernelBoundary(boundary);
+          }
+        } catch {
+          results[index] = {
+            removed: false,
+            retained: { path: candidate.path, reason: "inspection_failed" },
+            failed: true,
+          };
+        }
       }
     }
   };

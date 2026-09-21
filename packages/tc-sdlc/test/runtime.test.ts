@@ -76,6 +76,7 @@ function testExecutionContext() {
       architecture: process.arch,
       lockDigest: `sha256:${"a".repeat(64)}`,
       stateKey: "releases/2.2.0/test/darwin-arm64",
+      stateGenerationIdentity: `sha256:${"e".repeat(64)}`,
       bootstrapReceiptDigest: `sha256:${"b".repeat(64)}`,
       stateDigest: `sha256:${"c".repeat(64)}`,
       dependencyDigest: `sha256:${"d".repeat(64)}`,
@@ -86,6 +87,7 @@ function testExecutionContext() {
     stateDirectory: "/tmp/test-state/releases/2.2.0/test/darwin-arm64",
     environment: { PATH: process.env.PATH ?? "" },
     lease: { assertCurrent: () => undefined, release: () => undefined },
+    assertIdentity: () => undefined,
     verifyIntegrity: () => undefined,
   };
 }
@@ -134,7 +136,7 @@ describe("tc-sdlc runtime", () => {
     const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-isolation-"));
     writeFileSync(
       join(directory, "environment.mjs"),
-      'console.log(JSON.stringify({home: process.env.HOME, temp: process.env.TMPDIR, cache: process.env.XDG_CACHE_HOME}));\n',
+      'console.log(JSON.stringify({home: process.env.HOME, temp: process.env.TMPDIR, cache: process.env.XDG_CACHE_HOME, noBytecode: process.env.PYTHONDONTWRITEBYTECODE}));\n',
     );
     const graph = graphFor({ check: runtimeTarget("node environment.mjs") });
     const receipt = await runGraphWithContext(
@@ -153,6 +155,7 @@ describe("tc-sdlc runtime", () => {
     expect(observed.home).toMatch(/\/tc-sdlc-run-[^/]+\/[^/]+\/home$/);
     expect(observed.temp).toMatch(/\/tc-sdlc-run-[^/]+\/[^/]+\/tmp$/);
     expect(observed.cache).toMatch(/\/tc-sdlc-run-[^/]+\/[^/]+\/cache\/xdg$/);
+    expect(observed.noBytecode).toBe("1");
     expect(new Set([observed.home, observed.temp, observed.cache]).size).toBe(3);
   });
 
@@ -399,16 +402,19 @@ describe("tc-sdlc runtime", () => {
     ]);
     expect(
       observed
-        .filter((event) => event.type !== "heartbeat")
+        .filter((event) => event.type !== "heartbeat" && event.type !== "terminal")
         .map((event) => [event.taskKey, event.type]),
     ).toEqual([
       ["fixture:prepare", "start"],
       ["fixture:prepare", "output"],
-      ["fixture:prepare", "terminal"],
       ["fixture:check", "start"],
       ["fixture:check", "output"],
-      ["fixture:check", "terminal"],
     ]);
+    expect(observed.filter((event) => event.type === "terminal")).toEqual(
+      receipt.tasks.flatMap((task: Record<string, any>) =>
+        task.events.filter((event: Record<string, unknown>) => event.type === "terminal"),
+      ),
+    );
     expect(readFileSync(receiptPath, "utf8")).toBe(
       (sdlc as Record<string, any>).serialiseRunReceipt(receipt),
     );
@@ -1071,6 +1077,33 @@ console.log(process.argv[3]);
     expect(stableTaskEvidence(concurrent)).toEqual(stableTaskEvidence(serial));
   });
 
+  test("performs one full bootstrap integrity check per graph run, not per task", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-integrity-count-"));
+    let fullChecks = 0;
+    const executionContext = {
+      ...testExecutionContext(),
+      verifyIntegrity: () => { fullChecks += 1; },
+    };
+    const graph = graphFor({
+      first: runtimeTarget("node -e 'process.exit(0)'"),
+      second: runtimeTarget("node -e 'process.exit(0)'"),
+      third: runtimeTarget("node -e 'process.exit(0)'"),
+    });
+    const receipt = await runGraphWithContext(
+      graph,
+      graph.tasks.map((task: { identity: string }) => task.identity),
+      {
+        cwd: directory,
+        receiptPath: join(directory, "run-receipt.json"),
+        capacity: { cpu: 2, memoryMiB: 768 },
+        executionContext,
+      },
+    );
+
+    expect(receipt.status).toBe("succeeded");
+    expect(fullChecks).toBe(1);
+  });
+
   test("rejects concurrent task evidence when one task mutates the leased state", async () => {
     const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-state-integrity-"));
     const statePath = join(directory, "state.json");
@@ -1092,6 +1125,7 @@ console.log(process.argv[3]);
     });
     const executionContext = {
       ...testExecutionContext(),
+      assertIdentity: () => undefined,
       verifyIntegrity: () => {
         if (readFileSync(statePath, "utf8") !== expected) {
           throw new Error("bootstrap state content changed");
@@ -1099,6 +1133,7 @@ console.log(process.argv[3]);
       },
     };
     const receiptPath = join(directory, "run-receipt.json");
+    const observedEvents: Array<Record<string, unknown>> = [];
     const receipt = await runGraphWithContext(
       graph,
       graph.tasks.map((task: { identity: string }) => task.identity),
@@ -1107,6 +1142,7 @@ console.log(process.argv[3]);
         receiptPath,
         capacity: { cpu: 2, memoryMiB: 256 },
         executionContext,
+        onEvent: (event: Record<string, unknown>) => observedEvents.push(event),
       },
     );
 
@@ -1121,6 +1157,11 @@ console.log(process.argv[3]);
       "bootstrap_state_changed",
     ]);
     expect(readFileSync(receiptPath, "utf8")).toContain("bootstrap_state_changed");
+    expect(observedEvents.filter((event) => event.type === "terminal")).toEqual(
+      receipt.tasks.flatMap((task: Record<string, any>) =>
+        task.events.filter((event: Record<string, unknown>) => event.type === "terminal"),
+      ),
+    );
   });
 
   test("fails closed when durable receipt replacement cannot complete", async () => {

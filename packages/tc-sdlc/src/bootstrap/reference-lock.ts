@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { createServer, type Server } from "node:net";
 import {
   closeSync,
   existsSync,
@@ -9,7 +8,6 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  realpathSync,
   readdirSync,
   unlinkSync,
 } from "node:fs";
@@ -19,6 +17,13 @@ import { canonicalJson, digest } from "../canonical.js";
 import { writeCanonicalEvidence } from "../evidence/index.js";
 import type { FilesystemIdentity } from "../maintenance/types.js";
 import { processOwnerState, processStartIdentity } from "./process-identity.js";
+import {
+  acquireBootstrapKernelBoundary,
+  assertBootstrapKernelBoundary,
+  bootstrapKernelBoundaryPort,
+  releaseBootstrapKernelBoundary,
+  type BootstrapKernelBoundary,
+} from "./kernel-boundary.js";
 import type { PendingPublication } from "./references.js";
 
 const OWNER = "@three-cubes/tc-sdlc";
@@ -55,8 +60,7 @@ type BootstrapReferenceRecoveryMarker = Readonly<{
   createdAtMs: number;
 }>;
 
-type BootstrapReferenceRecoveryBoundary = Readonly<{
-  server: Server;
+type BootstrapReferenceRecoveryBoundary = BootstrapKernelBoundary & Readonly<{
   markerPath: string;
   value: BootstrapReferenceRecoveryMarker;
   bytes: string;
@@ -177,13 +181,10 @@ function recoveryPort(
   stateRoot: string,
   value: Pick<BootstrapReferenceCommitLockMarker, "consumer" | "consumerRoot">,
 ): number {
-  const hexadecimal = digest({
-    boundary: "bootstrap-reference-recovery",
-    stateRoot: realpathSync(stateRoot),
+  return bootstrapKernelBoundaryPort(stateRoot, "bootstrap-reference-recovery", {
     consumer: value.consumer,
     consumerRoot: value.consumerRoot,
-  }).slice("sha256:".length, "sha256:".length + 8);
-  return RECOVERY_PORT_BASE + Number.parseInt(hexadecimal, 16) % RECOVERY_PORT_COUNT;
+  });
 }
 
 function exactRegularFile(path: string, identity: FilesystemIdentity, bytes: string): boolean {
@@ -241,53 +242,31 @@ function removeExactFile(path: string, identity: FilesystemIdentity, bytes: stri
   return true;
 }
 
-async function bindRecoveryServer(port: number): Promise<Server> {
-  const server = createServer((socket) => socket.destroy());
-  return await new Promise<Server>((resolve, reject) => {
-    const failed = (error: Error): void => {
-      server.removeListener("listening", listening);
-      reject(error);
-    };
-    const listening = (): void => {
-      server.removeListener("error", failed);
-      resolve(server);
-    };
-    server.once("error", failed);
-    server.once("listening", listening);
-    server.listen({ host: "127.0.0.1", port, exclusive: true });
-  });
-}
-
 async function acquireRecoveryBoundary(
   stateRoot: string,
   locks: string,
   publication: Readonly<{ value: ReferenceConsumer }>,
 ): Promise<BootstrapReferenceRecoveryBoundary> {
-  const port = recoveryPort(stateRoot, publication.value);
-  const deadline = Date.now() + LOCK_WAIT_MILLISECONDS;
-  let server: Server | undefined;
-  while (server === undefined) {
-    try {
-      server = await bindRecoveryServer(port);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") {
-        throw new BootstrapReferenceCommitError(
-          "invalid",
-          "bootstrap reference recovery boundary could not be acquired",
-        );
-      }
-      if (Date.now() >= deadline) {
-        throw new BootstrapReferenceCommitError(
-          "busy",
-          "another live or ambiguous process owns the reference recovery boundary",
-        );
-      }
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MILLISECONDS));
-    }
+  let kernelBoundary: BootstrapKernelBoundary;
+  try {
+    kernelBoundary = await acquireBootstrapKernelBoundary(
+      stateRoot,
+      "bootstrap-reference-recovery",
+      {
+        consumer: publication.value.consumer,
+        consumerRoot: publication.value.consumerRoot,
+      },
+    );
+  } catch (error) {
+    throw new BootstrapReferenceCommitError(
+      error instanceof Error && "kind" in error && error.kind === "busy" ? "busy" : "invalid",
+      error instanceof Error ? error.message : "bootstrap reference recovery boundary could not be acquired",
+    );
   }
+  const { port } = kernelBoundary;
   const startIdentity = processStartIdentity(process.pid);
   if (startIdentity === undefined) {
-    server.close();
+    releaseBootstrapKernelBoundary(kernelBoundary);
     throw new BootstrapReferenceCommitError(
       "invalid",
       "current process start identity could not be established",
@@ -309,21 +288,28 @@ async function acquireRecoveryBoundary(
   try {
     writeCanonicalEvidence(markerPath, value);
     return {
-      server,
+      ...kernelBoundary,
       markerPath,
       value,
       bytes: canonicalJson(value),
       identity: filesystemIdentity(markerPath),
     };
   } catch (error) {
-    server.close();
+    releaseBootstrapKernelBoundary(kernelBoundary);
     throw error;
   }
 }
 
 function assertRecoveryBoundary(boundary: BootstrapReferenceRecoveryBoundary): void {
-  if (!boundary.server.listening ||
-      !exactRegularFile(boundary.markerPath, boundary.identity, boundary.bytes)) {
+  try {
+    assertBootstrapKernelBoundary(boundary);
+  } catch (error) {
+    throw new BootstrapReferenceCommitError(
+      "invalid",
+      error instanceof Error ? error.message : "bootstrap reference recovery boundary changed while held",
+    );
+  }
+  if (!exactRegularFile(boundary.markerPath, boundary.identity, boundary.bytes)) {
     throw new BootstrapReferenceCommitError(
       "invalid",
       "bootstrap reference recovery boundary changed while held",
@@ -346,7 +332,7 @@ function releaseRecoveryBoundary(boundary: BootstrapReferenceRecoveryBoundary): 
     failure = error;
   }
   try {
-    boundary.server.close();
+    releaseBootstrapKernelBoundary(boundary);
   } catch (error) {
     failure ??= error;
   }

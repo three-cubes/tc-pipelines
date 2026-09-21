@@ -13,6 +13,14 @@ import { canonicalJson, digest } from "../canonical.js";
 import { SdlcError } from "../errors.js";
 import type { ReleaseCatalogue, SdlcLock } from "../schema/types.js";
 import { acquireBootstrapExecutionLease, type BootstrapExecutionLease } from "./execution-lease.js";
+import {
+  assertBootstrapStateAdmitted,
+  captureBootstrapStateMetadata,
+  fileMetadataIdentity,
+  invalidateBootstrapState,
+  sameBootstrapStateMetadata,
+  stableDirectoryIdentity,
+} from "./state-integrity.js";
 import type {
   BootstrapAdapterEvidence,
   BootstrapCapabilityName,
@@ -62,13 +70,104 @@ function rejectLinkedPath(root: string, target: string): void {
   }
 }
 
-function isPythonRuntimeCache(path: string): boolean {
-  const segments = path.split("/");
-  const name = segments.at(-1) ?? "";
-  return segments.includes("__pycache__") || name.endsWith(".pyc") || name.endsWith(".pyo");
+function assertDirectoryEntries(
+  directory: string,
+  expectedNames: ReadonlySet<string>,
+  description: string,
+): void {
+  const metadata = lstatSync(directory);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new Error(`${description} is not a real directory`);
+  }
+  const observed = readdirSync(directory).sort();
+  const expected = [...expectedNames].sort();
+  if (canonicalJson(observed) !== canonicalJson(expected)) {
+    throw new Error(`${description} contains undeclared entries`);
+  }
 }
 
-function directoryDigest(root: string, ignorePythonRuntimeCache = false): string {
+function assertBootstrapStateShape(
+  stateDirectory: string,
+  stateKey: string,
+  state: BootstrapState,
+): void {
+  if (
+    state.adapters.length !== adapterNames.length ||
+    canonicalJson(state.adapters.map((adapter) => adapter.name)) !== canonicalJson(adapterNames)
+  ) {
+    throw new Error("bootstrap adapter inventory does not match the release contract");
+  }
+  const expectedTopLevel = new Set(["state.json", "bin"]);
+  const expectedDependencyRoots = new Set<string>();
+  for (const dependency of state.dependencies) {
+    const parts = dependency.environment.split("/");
+    const expectedEnvironment = dependency.manager === "pnpm"
+      ? "dependencies/node"
+      : dependency.manager === "uv"
+        ? "dependencies/python"
+        : "";
+    if (
+      (dependency.manager !== "pnpm" && dependency.manager !== "uv") ||
+      dependency.environment !== expectedEnvironment ||
+      parts.length !== 2 || parts[0] !== "dependencies" ||
+      !/^[a-z0-9-]+$/.test(parts[1]!) || expectedDependencyRoots.has(parts[1]!)
+    ) {
+      throw new Error("bootstrap dependency environment path is invalid");
+    }
+    expectedTopLevel.add("dependencies");
+    expectedDependencyRoots.add(parts[1]!);
+  }
+  if (state.platform === "darwin") {
+    for (const directory of ["home", "corepack", "downloads", "toolchains"]) {
+      expectedTopLevel.add(directory);
+    }
+  } else if (state.dependencies.length > 0) {
+    expectedTopLevel.add("home");
+  }
+
+  assertDirectoryEntries(stateDirectory, expectedTopLevel, "bootstrap release state");
+  const stateFileMetadata = lstatSync(join(stateDirectory, "state.json"));
+  if (!stateFileMetadata.isFile() || stateFileMetadata.isSymbolicLink()) {
+    throw new Error("bootstrap state manifest is not a regular file");
+  }
+  const binDirectory = join(stateDirectory, "bin");
+  const expectedLaunchers = new Set(adapterNames);
+  assertDirectoryEntries(binDirectory, expectedLaunchers, "bootstrap adapter directory");
+  for (const launcher of expectedLaunchers) {
+    const metadata = lstatSync(join(binDirectory, launcher));
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw new Error("bootstrap adapter launcher is not a regular file");
+    }
+  }
+  for (const dependency of state.dependencies) {
+    const dependencyRoot = join(stateDirectory, dependency.environment);
+    const metadata = lstatSync(dependencyRoot);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+      throw new Error("bootstrap dependency environment is not a real directory");
+    }
+  }
+  if (expectedDependencyRoots.size > 0) {
+    assertDirectoryEntries(
+      join(stateDirectory, "dependencies"),
+      expectedDependencyRoots,
+      "bootstrap dependency environment directory",
+    );
+  }
+  for (const directory of expectedTopLevel) {
+    if (directory === "state.json" || directory === "bin" || directory === "dependencies") continue;
+    const path = join(stateDirectory, directory);
+    if (!existsSync(path)) throw new Error(`bootstrap release directory is missing: ${directory}`);
+    const metadata = lstatSync(path);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+      throw new Error(`bootstrap release directory is not a real directory: ${directory}`);
+    }
+  }
+  if (state.adapters.some((adapter) => adapter.launcher !== posix.join(stateKey, "bin", adapter.name))) {
+    throw new Error("bootstrap adapter launcher path is invalid");
+  }
+}
+
+function directoryDigest(root: string): string {
   const rootMetadata = lstatSync(root);
   if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
     throw new Error("dependency environment is not a real directory");
@@ -80,7 +179,6 @@ function directoryDigest(root: string, ignorePythonRuntimeCache = false): string
     for (const name of readdirSync(directory).sort()) {
       const path = join(directory, name);
       const relativePath = prefix === "" ? name : posix.join(prefix, name);
-      if (ignorePythonRuntimeCache && isPythonRuntimeCache(relativePath)) continue;
       const metadata = lstatSync(path);
       if (metadata.isSymbolicLink()) {
         entries.push({ path: relativePath, type: "symlink", target: readlinkSync(path) });
@@ -98,8 +196,8 @@ function directoryDigest(root: string, ignorePythonRuntimeCache = false): string
   return digest(entries);
 }
 
-function installedEnvironmentDigest(manager: "pnpm" | "uv", root: string): string {
-  return directoryDigest(root, manager === "uv");
+function installedEnvironmentDigest(root: string): string {
+  return directoryDigest(root);
 }
 
 function executableDigest(adapter: ResolvedAdapter): string {
@@ -126,7 +224,7 @@ export function loadBootstrapExecutionContext(
     const receiptBytes = readFileSync(receiptPath, "utf8");
     const receipt = JSON.parse(receiptBytes) as BootstrapReceipt;
     if (receiptBytes !== canonicalJson(receipt)) throw new Error("bootstrap receipt is not canonical");
-    if (
+  if (
       receipt.schema !== "tc.sdlc/bootstrap-receipt/v1" ||
       receipt.status !== "succeeded" ||
       receipt.release !== catalogue.release.version ||
@@ -157,8 +255,11 @@ export function loadBootstrapExecutionContext(
     }
     lease = acquireBootstrapExecutionLease(stateRoot, receipt.stateKey);
     lease.assertCurrent();
+    const rootIdentity = fileMetadataIdentity(canonicalRoot);
     const stateDirectory = resolve(canonicalRoot, receipt.stateKey);
     rejectLinkedPath(canonicalRoot, stateDirectory);
+    assertBootstrapStateAdmitted(canonicalRoot, receipt.stateKey, stateDirectory);
+    const stateDirectoryIdentity = fileMetadataIdentity(stateDirectory);
     const statePath = join(stateDirectory, "state.json");
     rejectLinkedPath(canonicalRoot, statePath);
     if (bytesDigest(statePath) !== receipt.stateDigest) {
@@ -178,6 +279,8 @@ export function loadBootstrapExecutionContext(
     ) {
       throw new Error("bootstrap state identity differs from its receipt");
     }
+    assertBootstrapStateShape(stateDirectory, receipt.stateKey, state);
+    const metadataBeforeValidation = captureBootstrapStateMetadata(stateDirectory);
     const expectedPlatform = process.platform === "linux" ? "linux" : "darwin";
     if (
       receipt.platform !== expectedPlatform ||
@@ -200,6 +303,8 @@ export function loadBootstrapExecutionContext(
       launcherPath: string;
       executablePath: string;
       adapter: ResolvedAdapter;
+      launcherIdentity: string;
+      executableIdentity: string;
     }> = [];
     for (const [index, name] of adapterNames.entries()) {
       const adapter = state.adapters[index];
@@ -232,7 +337,13 @@ export function loadBootstrapExecutionContext(
         throw new Error("bootstrap adapter artifact is missing or changed");
       }
       adapterDirectories.push(dirname(launcherPath));
-      validatedAdapters.push({ launcherPath, executablePath: adapter.executable, adapter });
+      validatedAdapters.push({
+        launcherPath,
+        executablePath: adapter.executable,
+        adapter,
+        launcherIdentity: fileMetadataIdentity(launcherPath),
+        executableIdentity: fileMetadataIdentity(adapter.executable),
+      });
     }
 
     const bindings = state.dependencies.map(({ installedDigest: _installedDigest, ...binding }) => binding);
@@ -240,11 +351,6 @@ export function loadBootstrapExecutionContext(
       throw new Error("bootstrap dependency bindings do not match state identity");
     }
     const dependencyPaths = new Map<string, string>();
-    const validatedDependencies: Array<{
-      manager: "pnpm" | "uv";
-      path: string;
-      digest: string;
-    }> = [];
     for (const dependency of state.dependencies) {
       if (
         (dependency.manager !== "pnpm" && dependency.manager !== "uv") ||
@@ -256,16 +362,16 @@ export function loadBootstrapExecutionContext(
       rejectLinkedPath(canonicalRoot, environmentPath);
       if (
         !/^sha256:[0-9a-f]{64}$/.test(dependency.installedDigest ?? "") ||
-        installedEnvironmentDigest(dependency.manager, environmentPath) !== dependency.installedDigest
+        installedEnvironmentDigest(environmentPath) !== dependency.installedDigest
       ) {
         throw new Error("bootstrap dependency environment is missing or changed");
       }
       dependencyPaths.set(dependency.manager, environmentPath);
-      validatedDependencies.push({
-        manager: dependency.manager,
-        path: environmentPath,
-        digest: dependency.installedDigest!,
-      });
+    }
+    const validatedStateMetadata = captureBootstrapStateMetadata(stateDirectory);
+    assertBootstrapStateShape(stateDirectory, receipt.stateKey, state);
+    if (!sameBootstrapStateMetadata(metadataBeforeValidation, validatedStateMetadata)) {
+      throw new Error("bootstrap release state changed during content validation");
     }
 
     const uvEnvironment = dependencyPaths.get("uv");
@@ -285,6 +391,7 @@ export function loadBootstrapExecutionContext(
       architecture: receipt.architecture,
       lockDigest: receipt.lockDigest,
       stateKey: receipt.stateKey,
+      stateGenerationIdentity: stateDirectoryIdentity,
       bootstrapReceiptDigest: bytesDigest(receiptPath),
       stateDigest: receipt.stateDigest,
       dependencyDigest: state.dependencyDigest,
@@ -305,32 +412,75 @@ export function loadBootstrapExecutionContext(
       environment.VIRTUAL_ENV = uvEnvironment;
       environment.UV_PROJECT_ENVIRONMENT = uvEnvironment;
     }
-    const verifyIntegrity = (): void => {
+    const assertIdentity = (): void => {
       lease!.assertCurrent();
-      if (bytesDigest(statePath) !== receipt.stateDigest) {
-        throw new SdlcError("BOOTSTRAP_STATE_CHANGED", "bootstrap state metadata changed during task execution");
+      if (
+        realpathSync(stateRoot) !== canonicalRoot ||
+        fileMetadataIdentity(canonicalRoot) !== rootIdentity ||
+        fileMetadataIdentity(stateDirectory) !== stateDirectoryIdentity ||
+        bytesDigest(statePath) !== receipt.stateDigest
+      ) {
+        throw new SdlcError("BOOTSTRAP_STATE_CHANGED", "bootstrap state identity changed during task execution");
       }
       for (const entry of validatedAdapters) {
         rejectLinkedPath(canonicalRoot, entry.launcherPath);
-        if (bytesDigest(entry.launcherPath) !== entry.adapter.launcherDigest ||
-            executableDigest(entry.adapter) !== entry.adapter.executableDigest) {
-          throw new SdlcError("BOOTSTRAP_STATE_CHANGED", "bootstrap adapter changed during task execution");
-        }
-      }
-      for (const dependency of validatedDependencies) {
-        if (installedEnvironmentDigest(dependency.manager, dependency.path) !== dependency.digest) {
-          throw new SdlcError("BOOTSTRAP_STATE_CHANGED", "bootstrap dependency environment changed during task execution");
+        if (
+          fileMetadataIdentity(entry.launcherPath) !== entry.launcherIdentity ||
+          fileMetadataIdentity(entry.executablePath) !== entry.executableIdentity
+        ) {
+          throw new SdlcError("BOOTSTRAP_STATE_CHANGED", "bootstrap adapter identity changed during task execution");
         }
       }
       lease!.assertCurrent();
     };
-    verifyIntegrity();
+    const verifyIntegrity = (): void => {
+      try {
+        assertIdentity();
+        const observed = captureBootstrapStateMetadata(stateDirectory);
+        if (!sameBootstrapStateMetadata(validatedStateMetadata, observed)) {
+          throw new Error(`bootstrap release state metadata changed (${observed.inventoryDigest})`);
+        }
+        assertIdentity();
+      } catch (error) {
+        let observedIdentity = error instanceof Error ? error.message : String(error);
+        let observedGenerationIdentity: string | undefined;
+        try {
+          const observed = captureBootstrapStateMetadata(stateDirectory);
+          observedIdentity = observed.inventoryDigest;
+          observedGenerationIdentity = observed.directoryIdentity;
+        } catch {
+          try {
+            observedGenerationIdentity = stableDirectoryIdentity(stateDirectory);
+          } catch {
+            // Keep the admitted identity as the tombstone when the path is absent.
+          }
+        }
+        try {
+          invalidateBootstrapState(
+            canonicalRoot,
+            receipt.stateKey,
+            validatedStateMetadata.directoryIdentity,
+            validatedStateMetadata.inventoryDigest,
+            observedIdentity,
+            observedGenerationIdentity,
+          );
+        } catch {
+          // Admission still fails; a later attempt will independently validate the state.
+        }
+        throw new SdlcError(
+          "BOOTSTRAP_STATE_CHANGED",
+          `bootstrap release state changed or could not be verified: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    };
+    assertIdentity();
     return {
       binding,
       stateRoot: canonicalRoot,
       stateDirectory,
       environment,
       lease,
+      assertIdentity,
       verifyIntegrity,
     };
   } catch (error) {

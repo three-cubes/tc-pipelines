@@ -27,11 +27,23 @@ import { bindGraphLock, buildGraph } from "../graph/index.js";
 import { resolveInputInventory } from "../inputs/index.js";
 import { assertCurrentLock } from "../lock/index.js";
 import {
+  createQuarantine,
+  finishQuarantine,
+  sameMoveIdentity,
+} from "../maintenance/quarantine.js";
+import {
   recoverInterruptedTemporaryState,
   type AutomaticRecoveryReceipt,
 } from "../maintenance/index.js";
 import type { ReleaseCatalogue, SdlcDeclaration, SdlcLock } from "../schema/types.js";
 import type { BootstrapExecutionLease } from "./execution-lease.js";
+import {
+  acquireBootstrapKernelBoundary,
+  assertBootstrapKernelBoundary,
+  BootstrapKernelBoundaryError,
+  releaseBootstrapKernelBoundary,
+  type BootstrapKernelBoundary,
+} from "./kernel-boundary.js";
 import {
   acquireBootstrapReferenceCommitLock,
   BootstrapReferenceCommitError,
@@ -39,9 +51,13 @@ import {
 } from "./reference-lock.js";
 import {
   commitBootstrapReference,
+  leaseMatches,
   removePendingBootstrapReference,
+  readBootstrapReferenceAuthorities,
+  referenceMatches,
   writePendingBootstrapReference,
 } from "./references.js";
+import { bootstrapStateGenerationInvalidated, assertBootstrapStateAdmitted } from "./state-integrity.js";
 
 export type BootstrapPlatform = "darwin" | "linux";
 export type BootstrapCapabilityName = "node" | "pnpm" | "python" | "uv";
@@ -113,6 +129,7 @@ export type BootstrapContextBinding = Readonly<{
   architecture: string;
   lockDigest: string;
   stateKey: string;
+  stateGenerationIdentity: string;
   bootstrapReceiptDigest: string;
   stateDigest: string;
   dependencyDigest: string;
@@ -130,6 +147,7 @@ export type BootstrapExecutionContext = Readonly<{
   stateDirectory: string;
   environment: Readonly<Record<string, string>>;
   lease: BootstrapExecutionLease;
+  assertIdentity: () => void;
   verifyIntegrity: () => void;
 }>;
 
@@ -236,6 +254,105 @@ class BootstrapFailure extends Error {
   }
 }
 
+function quarantineInvalidatedState(
+  stateRoot: string,
+  stateKey: string,
+  stateDirectory: string,
+): void {
+  const identity = filesystemIdentity(stateDirectory);
+  const authorities = readBootstrapReferenceAuthorities(stateRoot);
+  if (authorities === undefined) {
+    throw new BootstrapFailure("reference_metadata_invalid", [{
+      code: "BOOTSTRAP_REFERENCE_METADATA_INVALID",
+      message: "cannot safely rebuild an invalidated release state without valid reference authority",
+      action: "repair reference metadata before retrying bootstrap",
+    }]);
+  }
+  if (leaseMatches(authorities, stateKey, identity)) {
+    throw new BootstrapFailure("reference_commit_busy", [{
+      code: "BOOTSTRAP_REFERENCE_COMMIT_BUSY",
+      message: "an execution still holds the invalidated release-state generation",
+      action: "wait for the active consumer to terminate, then retry bootstrap",
+    }]);
+  }
+  const quarantine = createQuarantine(
+    dirname(stateDirectory),
+    stateDirectory,
+    "bootstrap-state",
+    identity,
+  );
+  try {
+    renameSync(stateDirectory, quarantine.payload);
+    if (!sameMoveIdentity(quarantine.payload, identity)) {
+      throw new Error("invalidated state identity changed during quarantine");
+    }
+  } catch (error) {
+    try {
+      if (
+        !existsSync(stateDirectory) &&
+        existsSync(quarantine.payload) &&
+        sameMoveIdentity(quarantine.payload, identity)
+      ) {
+        renameSync(quarantine.payload, stateDirectory);
+      }
+      if (!existsSync(quarantine.payload)) finishQuarantine(quarantine.root);
+    } catch {
+      // Preserve uncertain filesystem state for owner-checked maintenance recovery.
+    }
+    throw new BootstrapFailure("state_corrupt", [{
+      code: "BOOTSTRAP_INVALIDATED_STATE_QUARANTINE_FAILED",
+      message: `invalidated state could not be isolated safely: ${error instanceof Error ? error.message : String(error)}`,
+      action: "inspect the retained owner-marked quarantine before retrying bootstrap",
+    }]);
+  }
+}
+
+function quarantineIncompleteState(
+  stateRoot: string,
+  stateKey: string,
+  stateDirectory: string,
+): void {
+  const identity = filesystemIdentity(stateDirectory);
+  const authorities = readBootstrapReferenceAuthorities(stateRoot);
+  const referencesRoot = join(stateRoot, "references");
+  if ((existsSync(referencesRoot) && authorities === undefined) ||
+      referenceMatches(authorities, stateKey, identity) ||
+      leaseMatches(authorities, stateKey, identity)) {
+    throw new BootstrapFailure("state_corrupt", [{
+      code: "BOOTSTRAP_STATE_PARTIAL",
+      message: "an incomplete bootstrap state is still named by reference or execution authority",
+      action: "preserve the state and reference evidence for operator inspection",
+    }]);
+  }
+  const quarantine = createQuarantine(
+    dirname(stateDirectory),
+    stateDirectory,
+    "bootstrap-state",
+    identity,
+  );
+  try {
+    renameSync(stateDirectory, quarantine.payload);
+    if (!sameMoveIdentity(quarantine.payload, identity)) {
+      throw new Error("incomplete state identity changed during quarantine");
+    }
+  } catch (error) {
+    try {
+      if (!existsSync(stateDirectory) && existsSync(quarantine.payload) &&
+          sameMoveIdentity(quarantine.payload, identity)) {
+        renameSync(quarantine.payload, stateDirectory);
+      }
+      if (!existsSync(quarantine.payload)) finishQuarantine(quarantine.root);
+    } catch {
+      // Preserve uncertain filesystem state for owner-checked maintenance recovery.
+    }
+    throw new BootstrapFailure("state_corrupt", [{
+      code: "BOOTSTRAP_STATE_PARTIAL",
+      message: `incomplete state could not be isolated safely: ${error instanceof Error ? error.message : String(error)}`,
+      action: "inspect the retained owner-marked quarantine before retrying bootstrap",
+    }]);
+  }
+}
+
 function fileDigest(path: string): string {
   return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
 }
@@ -257,13 +374,7 @@ function sameFilesystemIdentity(path: string, expected: FilesystemIdentity): boo
   }
 }
 
-function isPythonRuntimeCache(path: string): boolean {
-  const segments = path.split("/");
-  const name = segments.at(-1) ?? "";
-  return segments.includes("__pycache__") || name.endsWith(".pyc") || name.endsWith(".pyo");
-}
-
-function directoryDigest(root: string, ignorePythonRuntimeCache = false): string {
+function directoryDigest(root: string): string {
   if (!existsSync(root) || lstatSync(root).isSymbolicLink() || !lstatSync(root).isDirectory()) {
     throw new Error("dependency environment is not a real directory");
   }
@@ -275,7 +386,6 @@ function directoryDigest(root: string, ignorePythonRuntimeCache = false): string
     for (const name of readdirSync(directory).sort()) {
       const path = join(directory, name);
       const relativePath = prefix === "" ? name : posix.join(prefix, name);
-      if (ignorePythonRuntimeCache && isPythonRuntimeCache(relativePath)) continue;
       const metadata = lstatSync(path);
       if (metadata.isSymbolicLink()) {
         entries.push({ path: relativePath, type: "symlink", target: readlinkSync(path) });
@@ -302,8 +412,8 @@ function directoryDigest(root: string, ignorePythonRuntimeCache = false): string
   return digest(entries);
 }
 
-function installedEnvironmentDigest(manager: "pnpm" | "uv", root: string): string {
-  return directoryDigest(root, manager === "uv");
+function installedEnvironmentDigest(root: string): string {
+  return directoryDigest(root);
 }
 
 function remediation(host: BootstrapHost, catalogue: ReleaseCatalogue): string {
@@ -1241,7 +1351,7 @@ function materializeDependencies(
       );
       evidence.push({
         ...dependencyBinding(dependency),
-        installedDigest: installedEnvironmentDigest("uv", destination),
+        installedDigest: installedEnvironmentDigest(destination),
       });
     }
   }
@@ -1459,7 +1569,7 @@ function validateWarmState(
       }
       if (
         !/^sha256:[0-9a-f]{64}$/.test(dependency.installedDigest ?? "") ||
-        installedEnvironmentDigest(dependency.manager, environment) !==
+        installedEnvironmentDigest(environment) !==
           dependency.installedDigest
       ) {
         throw new Error("installed dependency environment changed");
@@ -1483,6 +1593,20 @@ function failureReason(error: unknown): Readonly<{
   diagnostics: readonly BootstrapDiagnostic[];
 }> {
   if (error instanceof BootstrapFailure) return error;
+  if (error instanceof BootstrapKernelBoundaryError) {
+    return {
+      reason: error.kind === "busy" ? "state_materialization_busy" : "reference_commit_invalid",
+      diagnostics: [{
+        code: error.kind === "busy"
+          ? "BOOTSTRAP_STATE_MATERIALIZATION_BUSY"
+          : "BOOTSTRAP_STATE_MATERIALIZATION_INVALID",
+        message: error.message,
+        action: error.kind === "busy"
+          ? "wait for the active release-state materialisation and retry"
+          : "inspect the release-state materialisation boundary before retrying bootstrap",
+      }],
+    };
+  }
   if (error instanceof BootstrapReferenceCommitError) {
     return {
       reason: error.kind === "busy" ? "reference_commit_busy" : "reference_commit_invalid",
@@ -1578,6 +1702,12 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
   let taskIdentities: readonly string[] = [];
   let adapters: readonly BootstrapAdapterEvidence[] = [];
   let dependencyEvidence: readonly BootstrapDependencyEvidence[] = [];
+  let stateBoundary: BootstrapKernelBoundary | undefined;
+  const releaseStateBoundary = (): void => {
+    const boundary = stateBoundary;
+    stateBoundary = undefined;
+    if (boundary !== undefined) releaseBootstrapKernelBoundary(boundary);
+  };
   try {
     host = normalHost(options.host);
     assertCurrentLock(options.lock, options.declaration, options.catalogue);
@@ -1594,9 +1724,15 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       `${host.platform}-${host.architecture}`,
     );
     const stateRoot = validateStateRoot(options.root, options.stateRoot);
-    const ownership = inspectOwnership(stateRoot);
     mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
     chmodSync(stateRoot, 0o700);
+    stateBoundary = await acquireBootstrapKernelBoundary(
+      stateRoot,
+      "bootstrap-state-materialization",
+      { stateKey },
+    );
+    assertBootstrapKernelBoundary(stateBoundary);
+    const ownership = inspectOwnership(stateRoot);
     if (ownership === "absent") {
       writeCanonicalEvidence(join(stateRoot, ".tc-sdlc-owner.json"), OWNER);
     }
@@ -1606,21 +1742,38 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       options.catalogue,
       stateRoot,
     );
+    const expectedStateDirectory = resolve(stateRoot, stateKey);
+    let invalidatedGeneration = false;
     if (ownership === "owned") {
-      const warm = validateWarmState(
-        options,
-        host,
-        stateRoot,
-        stateKey,
-        lockDigest,
-        dependencyDigest,
-        dependencies,
-        prerequisites,
-      );
-      if (warm !== null) {
-        reused = true;
-        adapters = warm.adapters.map(adapterEvidence);
-        dependencyEvidence = warm.dependencies;
+      rejectSymlinkComponents(stateRoot, expectedStateDirectory);
+      if (existsSync(expectedStateDirectory)) {
+        invalidatedGeneration = bootstrapStateGenerationInvalidated(
+          stateRoot,
+          stateKey,
+          expectedStateDirectory,
+        );
+        if (invalidatedGeneration) {
+          quarantineInvalidatedState(stateRoot, stateKey, expectedStateDirectory);
+        } else if (!existsSync(join(expectedStateDirectory, "state.json"))) {
+          quarantineIncompleteState(stateRoot, stateKey, expectedStateDirectory);
+        }
+      }
+      if (!invalidatedGeneration) {
+        const warm = validateWarmState(
+          options,
+          host,
+          stateRoot,
+          stateKey,
+          lockDigest,
+          dependencyDigest,
+          dependencies,
+          prerequisites,
+        );
+        if (warm !== null) {
+          reused = true;
+          adapters = warm.adapters.map(adapterEvidence);
+          dependencyEvidence = warm.dependencies;
+        }
       }
     }
     if (!reused) {
@@ -1647,6 +1800,11 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       dependencyEvidence = state.dependencies;
     }
     const finalStatePath = resolve(stateRoot, stateKey);
+    // A poisoned generation remains rejected until a distinct directory identity
+    // has been materialised at the same content-addressed key.
+    if (existsSync(finalStatePath)) {
+      assertBootstrapStateAdmitted(stateRoot, stateKey, finalStatePath);
+    }
     const verified = validateWarmState(
       options,
       host,
@@ -1667,6 +1825,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       ]);
     }
     const verifiedIdentity = filesystemIdentity(finalStatePath);
+    assertBootstrapKernelBoundary(stateBoundary);
     const publication = writePendingBootstrapReference(
       stateRoot,
       options.declaration.project,
@@ -1732,9 +1891,23 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       diagnosticsCount: 0,
       diagnosticsTruncated: false,
     };
+    releaseStateBoundary();
     writeCanonicalEvidence(options.receiptPath, receipt);
     return receipt;
   } catch (error) {
+    let failure = failureReason(error);
+    try {
+      releaseStateBoundary();
+    } catch (releaseError) {
+      failure = {
+        reason: failure.reason,
+        diagnostics: [...failure.diagnostics, {
+          code: "BOOTSTRAP_STATE_MATERIALIZATION_RELEASE_FAILED",
+          message: releaseError instanceof Error ? releaseError.message : String(releaseError),
+          action: "inspect whether another bootstrap still owns the materialisation boundary",
+        }],
+      };
+    }
     const receipt = failedReceipt(
       options,
       host,
@@ -1743,11 +1916,13 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       taskIdentities,
       adapters,
       dependencyEvidence,
-      failureReason(error),
+      failure,
       maximumDiagnostics,
       recovery,
     );
     writeCanonicalEvidence(options.receiptPath, receipt);
     return receipt;
+  } finally {
+    releaseStateBoundary();
   }
 }

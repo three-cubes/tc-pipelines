@@ -55,7 +55,7 @@ async function evaluate(
   const workspace = materializeTree(options.root);
   try {
     try {
-      options.runOptions.executionContext.verifyIntegrity();
+      options.runOptions.executionContext.assertIdentity();
       const full = plan({ ...options, root: workspace.root });
       const graph = phaseGraph(full, "evaluate");
       const selected = all

@@ -116,7 +116,7 @@ describe("bootstrap execution lease retention", () => {
     expect(inspection.retained).toContainEqual({ path: leasedKey, reason: "leased" });
   });
 
-  test("a SIGKILL after lease publication leaves complete recoverable evidence", () => {
+  test("a SIGKILL after lease publication leaves complete recoverable evidence", async () => {
     const root = mkdtempSync(join(tmpdir(), "tc-sdlc-killed-lease-"));
     roots.push(root);
     writeFileSync(join(root, ".tc-sdlc-owner.json"), canonicalJson({
@@ -149,7 +149,7 @@ describe("bootstrap execution lease retention", () => {
     const old = Date.now() - 49 * 60 * 60 * 1_000;
     writeFileSync(markerPath, canonicalJson({ ...marker, createdAtMs: old }));
     utimesSync(markerPath, new Date(old), new Date(old));
-    expect(cleanupExpiredDeadPending(root, Date.now() - 48 * 60 * 60 * 1_000)).toBe(1);
+    expect(await cleanupExpiredDeadPending(root, Date.now() - 48 * 60 * 60 * 1_000)).toBe(1);
     expect(readdirSync(leases)).toEqual([]);
   });
 });
