@@ -54,7 +54,6 @@ import {
   leaseMatches,
   removePendingBootstrapReference,
   readBootstrapReferenceAuthorities,
-  referenceMatches,
   writePendingBootstrapReference,
 } from "./references.js";
 import {
@@ -289,15 +288,23 @@ function quarantineInvalidatedState(
       action: "retry bootstrap after inspecting the changed state generation",
     }]);
   }
+  const referencesRoot = join(stateRoot, "references");
+  let referencesRootPresent = false;
+  try {
+    lstatSync(referencesRoot);
+    referencesRootPresent = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   const authorities = readBootstrapReferenceAuthorities(stateRoot);
-  if (authorities === undefined) {
+  if (authorities === undefined && referencesRootPresent) {
     throw new BootstrapFailure("reference_metadata_invalid", [{
       code: "BOOTSTRAP_REFERENCE_METADATA_INVALID",
       message: "cannot safely rebuild an invalidated release state without valid reference authority",
       action: "repair reference metadata before retrying bootstrap",
     }]);
   }
-  if (leaseMatches(authorities, stateKey, identity)) {
+  if (authorities !== undefined && leaseMatches(authorities, stateKey, identity)) {
     throw new BootstrapFailure("reference_commit_busy", [{
       code: "BOOTSTRAP_REFERENCE_COMMIT_BUSY",
       message: "an execution still holds the invalidated release-state generation",
@@ -351,50 +358,40 @@ function quarantineInvalidatedState(
   }
 }
 
-function quarantineIncompleteState(
+function quarantineCorruptWarmState(
+  options: BootstrapOptions,
+  host: BootstrapHost,
   stateRoot: string,
   stateKey: string,
   stateDirectory: string,
+  lockDigest: string,
+  dependencyDigest: string,
+  failureCode: string,
 ): void {
-  const identity = filesystemIdentity(stateDirectory);
-  const authorities = readBootstrapReferenceAuthorities(stateRoot);
-  const referencesRoot = join(stateRoot, "references");
-  if ((existsSync(referencesRoot) && authorities === undefined) ||
-      referenceMatches(authorities, stateKey, identity) ||
-      leaseMatches(authorities, stateKey, identity)) {
-    throw new BootstrapFailure("state_corrupt", [{
-      code: "BOOTSTRAP_STATE_PARTIAL",
-      message: "an incomplete bootstrap state is still named by reference or execution authority",
-      action: "preserve the state and reference evidence for operator inspection",
-    }]);
-  }
-  const quarantine = createQuarantine(
-    dirname(stateDirectory),
+  const generationIdentity = stableDirectoryIdentity(stateDirectory);
+  const expectedMetadata = digest({
+    stateKey,
+    release: options.catalogue.release.version,
+    lockDigest,
+    dependencyDigest,
+    platform: host.platform,
+    architecture: host.architecture,
+  });
+  const observedMetadata = digest({ generationIdentity, failureCode });
+  quarantineInvalidatedState(
+    stateRoot,
+    stateKey,
     stateDirectory,
-    "bootstrap-state",
-    identity,
+    generationIdentity,
+    (observedGenerationIdentity) => invalidateBootstrapState(
+      stateRoot,
+      stateKey,
+      observedGenerationIdentity,
+      expectedMetadata,
+      observedMetadata,
+      observedGenerationIdentity,
+    ),
   );
-  try {
-    renameSync(stateDirectory, quarantine.payload);
-    if (!sameMoveIdentity(quarantine.payload, identity)) {
-      throw new Error("incomplete state identity changed during quarantine");
-    }
-  } catch (error) {
-    try {
-      if (!existsSync(stateDirectory) && existsSync(quarantine.payload) &&
-          sameMoveIdentity(quarantine.payload, identity)) {
-        renameSync(quarantine.payload, stateDirectory);
-      }
-      if (!existsSync(quarantine.payload)) finishQuarantine(quarantine.root);
-    } catch {
-      // Preserve uncertain filesystem state for owner-checked maintenance recovery.
-    }
-    throw new BootstrapFailure("state_corrupt", [{
-      code: "BOOTSTRAP_STATE_PARTIAL",
-      message: `incomplete state could not be isolated safely: ${error instanceof Error ? error.message : String(error)}`,
-      action: "inspect the retained owner-marked quarantine before retrying bootstrap",
-    }]);
-  }
 }
 
 function fileDigest(path: string): string {
@@ -1800,7 +1797,23 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
         if (invalidatedGeneration) {
           quarantineInvalidatedState(stateRoot, stateKey, expectedStateDirectory);
         } else if (!existsSync(join(expectedStateDirectory, "state.json"))) {
-          quarantineIncompleteState(stateRoot, stateKey, expectedStateDirectory);
+          const partial = new BootstrapFailure("state_corrupt", [{
+            code: "BOOTSTRAP_STATE_PARTIAL",
+            message: "release state exists without a valid completion manifest",
+            action: "quarantine the incomplete generation and bootstrap online again",
+          }]);
+          if (host.offline) throw partial;
+          quarantineCorruptWarmState(
+            options,
+            host,
+            stateRoot,
+            stateKey,
+            expectedStateDirectory,
+            lockDigest,
+            dependencyDigest,
+            "BOOTSTRAP_STATE_PARTIAL",
+          );
+          invalidatedGeneration = true;
         }
       }
       if (!invalidatedGeneration) {
@@ -1823,32 +1836,15 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
           if (host.offline) {
             throw error;
           }
-          const generationIdentity = stableDirectoryIdentity(expectedStateDirectory);
-          const expectedMetadata = digest({
-            stateKey,
-            release: options.catalogue.release.version,
-            lockDigest,
-            dependencyDigest,
-            platform: host.platform,
-            architecture: host.architecture,
-          });
-          const observedMetadata = digest({
-            generationIdentity,
-            failureCode: error.diagnostics[0]?.code ?? "BOOTSTRAP_STATE_CORRUPT",
-          });
-          quarantineInvalidatedState(
+          quarantineCorruptWarmState(
+            options,
+            host,
             stateRoot,
             stateKey,
             expectedStateDirectory,
-            generationIdentity,
-            (observedGenerationIdentity) => invalidateBootstrapState(
-              stateRoot,
-              stateKey,
-              observedGenerationIdentity,
-              expectedMetadata,
-              observedMetadata,
-              observedGenerationIdentity,
-            ),
+            lockDigest,
+            dependencyDigest,
+            error.diagnostics[0]?.code ?? "BOOTSTRAP_STATE_CORRUPT",
           );
           warm = null;
         }

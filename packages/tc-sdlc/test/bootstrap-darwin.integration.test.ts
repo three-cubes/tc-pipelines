@@ -689,6 +689,193 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     });
   }, 180_000);
 
+  test("online CLI bootstrap rebuilds an exactly incomplete referenced generation", () => {
+    expect(process.platform).toBe("darwin");
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-incomplete-state-consumer-"));
+    const stateRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-incomplete-state-root-"));
+    const evidence = mkdtempSync(join(tmpdir(), "tc-sdlc-incomplete-state-evidence-"));
+    for (const name of ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"]) {
+      writeFileSync(join(root, name), readFileSync(join(consumer, name)));
+    }
+    writeFileSync(join(root, "input.txt"), "input\n");
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Fixture"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "fixture@example.invalid"], { cwd: root });
+    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync("git", ["commit", "-qm", "consumer fixture"], { cwd: root });
+
+    const { declaration, catalogue, lock } = input(root, ["input.txt"]);
+    const declarationPath = join(evidence, "declaration.json");
+    const cataloguePath = join(evidence, "catalogue.json");
+    const lockPath = join(evidence, "lock.json");
+    writeFileSync(declarationPath, sdlc.canonicalJson(declaration));
+    writeFileSync(cataloguePath, sdlc.canonicalJson(catalogue));
+    writeFileSync(lockPath, sdlc.canonicalJson(lock));
+    const publicArgs = [
+      "--declaration", declarationPath,
+      "--catalogue", cataloguePath,
+      "--lock", lockPath,
+      "--root", root,
+      "--state-root", stateRoot,
+    ];
+    const invoke = (receiptPath: string, offline = false) => spawnSync(
+      process.execPath,
+      [CLI, "bootstrap", ...publicArgs, ...(offline ? ["--offline", "true"] : []), "--receipt", receiptPath],
+      { encoding: "utf8" },
+    );
+    const initialReceiptPath = join(evidence, "initial.json");
+    const initialResult = invoke(initialReceiptPath);
+    expect(initialResult.status, initialResult.stderr).toBe(0);
+    const initial = JSON.parse(readFileSync(initialReceiptPath, "utf8"));
+    expect(initial.status).toBe("succeeded");
+    const stateDirectory = join(stateRoot, initial.stateKey);
+    const stateManifest = join(stateDirectory, "state.json");
+    const originalIdentity = filesystemIdentity(stateDirectory);
+    const referencePath = join(
+      stateRoot,
+      "references",
+      `${bootstrapReferenceStem(declaration.project, root)}.json`,
+    );
+    expect(JSON.parse(readFileSync(referencePath, "utf8")).currentStateIdentity).toMatchObject({
+      device: originalIdentity.device,
+      inode: originalIdentity.inode,
+    });
+
+    rmSync(stateManifest);
+    expect(existsSync(stateDirectory)).toBe(true);
+    expect(existsSync(stateManifest)).toBe(false);
+    const offlineReceiptPath = join(evidence, "offline.json");
+    const offlineResult = invoke(offlineReceiptPath, true);
+    expect(offlineResult.status).not.toBe(0);
+    expect(JSON.parse(readFileSync(offlineReceiptPath, "utf8"))).toMatchObject({
+      status: "failed",
+      reason: "state_corrupt",
+    });
+    expect(filesystemIdentity(stateDirectory)).toEqual(originalIdentity);
+    expect(existsSync(stateManifest)).toBe(false);
+    expect(existsSync(join(stateRoot, "invalidated"))).toBe(false);
+    expect(JSON.parse(readFileSync(referencePath, "utf8")).currentStateIdentity).toMatchObject({
+      device: originalIdentity.device,
+      inode: originalIdentity.inode,
+    });
+
+    const rebuiltReceiptPath = join(evidence, "rebuilt.json");
+    const rebuiltResult = invoke(rebuiltReceiptPath);
+    expect(rebuiltResult.status, rebuiltResult.stderr).toBe(0);
+    const rebuilt = JSON.parse(readFileSync(rebuiltReceiptPath, "utf8"));
+    expect(rebuilt).toMatchObject({
+      status: "succeeded",
+      reused: false,
+      stateKey: initial.stateKey,
+    });
+    const rebuiltIdentity = filesystemIdentity(stateDirectory);
+    expect(rebuiltIdentity.device).toBe(originalIdentity.device);
+    expect(rebuiltIdentity.inode).not.toBe(originalIdentity.inode);
+    expect(existsSync(stateManifest)).toBe(true);
+
+    const quarantine = readdirSync(dirname(stateDirectory))
+      .filter((name) => name.startsWith(".tc-sdlc-quarantine-"))
+      .map((name) => join(dirname(stateDirectory), name))
+      .find((path) => existsSync(join(path, "candidate", "bin")));
+    expect(quarantine).toBeDefined();
+    const marker = JSON.parse(readFileSync(join(quarantine!, ".tc-sdlc-quarantine.json"), "utf8"));
+    expect(marker.payloadIdentity).toMatchObject({
+      device: originalIdentity.device,
+      inode: originalIdentity.inode,
+    });
+    expect(existsSync(join(quarantine!, "candidate", "state.json"))).toBe(false);
+    const generationIdentity = sdlc.digest({
+      type: "directory",
+      device: originalIdentity.device,
+      inode: originalIdentity.inode,
+    });
+    const tombstone = readdirSync(join(stateRoot, "invalidated"))
+      .map((name) => join(stateRoot, "invalidated", name))
+      .find((path) => JSON.parse(readFileSync(path, "utf8")).poisonedDirectoryIdentity === generationIdentity);
+    expect(tombstone).toBeDefined();
+    const reference = JSON.parse(readFileSync(referencePath, "utf8"));
+    expect(reference).toMatchObject({
+      currentStateKey: initial.stateKey,
+      currentStateIdentity: {
+        device: rebuiltIdentity.device,
+        inode: rebuiltIdentity.inode,
+      },
+    });
+  }, 180_000);
+
+  test("offline leaves a pre-reference interrupted cold generation intact for online recovery", () => {
+    expect(process.platform).toBe("darwin");
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-cold-partial-consumer-"));
+    const stateRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-cold-partial-state-"));
+    const evidence = mkdtempSync(join(tmpdir(), "tc-sdlc-cold-partial-evidence-"));
+    for (const name of ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"]) {
+      writeFileSync(join(root, name), readFileSync(join(consumer, name)));
+    }
+    writeFileSync(join(root, "input.txt"), "input\n");
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Fixture"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "fixture@example.invalid"], { cwd: root });
+    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync("git", ["commit", "-qm", "consumer fixture"], { cwd: root });
+
+    const { declaration, catalogue, lock } = input(root, ["input.txt"]);
+    const declarationPath = join(evidence, "declaration.json");
+    const cataloguePath = join(evidence, "catalogue.json");
+    const lockPath = join(evidence, "lock.json");
+    writeFileSync(declarationPath, sdlc.canonicalJson(declaration));
+    writeFileSync(cataloguePath, sdlc.canonicalJson(catalogue));
+    writeFileSync(lockPath, sdlc.canonicalJson(lock));
+    const publicArgs = [
+      "--declaration", declarationPath,
+      "--catalogue", cataloguePath,
+      "--lock", lockPath,
+      "--root", root,
+      "--state-root", stateRoot,
+    ];
+    const invoke = (receiptPath: string, offline = false) => spawnSync(
+      process.execPath,
+      [CLI, "bootstrap", ...publicArgs, ...(offline ? ["--offline", "true"] : []), "--receipt", receiptPath],
+      { encoding: "utf8" },
+    );
+    const initialReceiptPath = join(evidence, "initial.json");
+    const initialResult = invoke(initialReceiptPath);
+    expect(initialResult.status, initialResult.stderr).toBe(0);
+    const initial = JSON.parse(readFileSync(initialReceiptPath, "utf8"));
+    expect(initial.status).toBe("succeeded");
+    const stateKey = initial.stateKey as string;
+    const stateDirectory = join(stateRoot, stateKey);
+    const stateManifest = join(stateDirectory, "state.json");
+    const partialIdentity = filesystemIdentity(stateDirectory);
+    rmSync(join(stateRoot, "references"), { recursive: true });
+    rmSync(stateManifest);
+
+    const offlineReceiptPath = join(evidence, "offline.json");
+    const offlineResult = invoke(offlineReceiptPath, true);
+    expect(offlineResult.status).not.toBe(0);
+    expect(JSON.parse(readFileSync(offlineReceiptPath, "utf8"))).toMatchObject({
+      status: "failed",
+      reason: "state_corrupt",
+    });
+    expect(filesystemIdentity(stateDirectory)).toEqual(partialIdentity);
+    expect(existsSync(stateManifest)).toBe(false);
+    expect(existsSync(join(stateRoot, "invalidated"))).toBe(false);
+    expect(existsSync(join(stateRoot, "references"))).toBe(false);
+
+    const onlineReceiptPath = join(evidence, "online.json");
+    const onlineResult = invoke(onlineReceiptPath);
+    expect(onlineResult.status, onlineResult.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(onlineReceiptPath, "utf8"))).toMatchObject({
+      status: "succeeded",
+      reused: false,
+      stateKey,
+    });
+    const rebuiltIdentity = filesystemIdentity(stateDirectory);
+    expect(rebuiltIdentity.device).toBe(partialIdentity.device);
+    expect(rebuiltIdentity.inode).not.toBe(partialIdentity.inode);
+    expect(existsSync(join(stateDirectory, "state.json"))).toBe(true);
+    expect(existsSync(join(stateRoot, "references"))).toBe(true);
+  }, 180_000);
+
   test("a killed cold bootstrap releases the kernel boundary and the next bootstrap recovers", async () => {
     expect(process.platform).toBe("darwin");
     const fixture = referenceFixture("bootstrap-state-killed-owner");
