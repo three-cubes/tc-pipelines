@@ -220,6 +220,12 @@ export function validatePreparationReceipt(value: unknown): PreparationReceipt {
     const pass = record(receipt[passName], "PREPARATION", `${passName} preparation pass`);
     exact(pass, ["mutations", "mutationCount", "mutationsTruncated"], ["scheduler"], "PREPARATION", `${passName} preparation pass`);
     if (!Array.isArray(pass.mutations) || !Number.isSafeInteger(pass.mutationCount) || (pass.mutationCount as number) < 0 || typeof pass.mutationsTruncated !== "boolean") invalid("PREPARATION", `${passName} preparation pass is invalid`);
+    if (
+      (pass.mutationCount as number) < pass.mutations.length ||
+      pass.mutationsTruncated !== ((pass.mutationCount as number) > pass.mutations.length)
+    ) {
+      invalid("PREPARATION", `${passName} mutation inventory is inconsistent`);
+    }
     for (const item of pass.mutations) mutation(item, "PREPARATION");
     if (pass.scheduler !== undefined) runReceipt(pass.scheduler, "PREPARATION");
   }
@@ -265,6 +271,9 @@ function assertBindings(receipt: ReceiptBindings, expected: ReceiptBindings, kin
 export function assertSucceededPreparationReceipt(receipt: PreparationReceipt, expected: ReceiptBindings): void {
   assertBindings(receipt, expected, "PREPARATION");
   if (receipt.status !== "succeeded") invalid("PREPARATION", "preparation receipt is not succeeded");
+  if (receipt.firstPass.scheduler?.status !== "succeeded" || receipt.secondPass.scheduler?.status !== "succeeded") {
+    invalid("PREPARATION", "succeeded preparation receipt requires two succeeded scheduler passes");
+  }
 }
 
 export function assertSucceededEvaluationReceipt(receipt: EvaluationReceipt, expected: ReceiptBindings): void {

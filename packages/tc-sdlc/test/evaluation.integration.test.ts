@@ -9,22 +9,53 @@ import { beforeAll, describe, expect, test } from "vitest";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const fixtureRoot = fileURLToPath(new URL("../../../assurance/fixtures/sdlc/python", import.meta.url));
 const candidateCatalogue = fileURLToPath(new URL("../../../release/catalogue.json", import.meta.url));
+const PACKAGE_COMMAND_TIMEOUT_MS = 120_000;
+const PUBLIC_COMMAND_TIMEOUT_MS = 120_000;
+const GIT_COMMAND_TIMEOUT_MS = 30_000;
+
+function sanitisedEnvironment(): NodeJS.ProcessEnv {
+  return {
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith("GIT_")),
+    ),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_COUNT: "2",
+    GIT_CONFIG_KEY_0: "commit.gpgsign",
+    GIT_CONFIG_VALUE_0: "false",
+    GIT_CONFIG_KEY_1: "core.hooksPath",
+    GIT_CONFIG_VALUE_1: "/dev/null",
+    GIT_TERMINAL_PROMPT: "0",
+  };
+}
 
 function installPackedCli(): string {
   const packages = mkdtempSync(join(tmpdir(), "tc-sdlc-evaluation-package-"));
-  execFileSync("pnpm", ["pack", "--pack-destination", packages], { cwd: packageRoot, encoding: "utf8" });
+  execFileSync("pnpm", ["pack", "--pack-destination", packages], {
+    cwd: packageRoot,
+    encoding: "utf8",
+    env: sanitisedEnvironment(),
+    timeout: PACKAGE_COMMAND_TIMEOUT_MS,
+  });
   const archive = readdirSync(packages).find((name) => name.endsWith(".tgz"));
   if (archive === undefined) throw new Error("pnpm pack did not produce an archive");
   const installation = mkdtempSync(join(tmpdir(), "tc-sdlc-evaluation-installation-"));
   execFileSync("pnpm", ["add", "--ignore-scripts", "--lockfile=false", join(packages, archive)], {
     cwd: installation,
     encoding: "utf8",
+    env: sanitisedEnvironment(),
+    timeout: PACKAGE_COMMAND_TIMEOUT_MS,
   });
   return join(installation, "node_modules", ".bin", "tc-sdlc");
 }
 
 function run(cli: string, command: string, args: readonly string[]) {
-  const result = spawnSync(cli, [command, ...args], { encoding: "utf8" });
+  const result = spawnSync(cli, [command, ...args], {
+    encoding: "utf8",
+    env: sanitisedEnvironment(),
+    timeout: PUBLIC_COMMAND_TIMEOUT_MS,
+    killSignal: "SIGKILL",
+  });
   if (result.error !== undefined) throw result.error;
   return result;
 }
@@ -51,7 +82,16 @@ describe("packed preparation and evaluation components", () => {
       ["add", "."],
       ["commit", "-qm", "fixture"],
     ]) {
-      execFileSync("git", args, { cwd: checkout, encoding: "utf8" });
+      execFileSync("git", [
+        "-c", "commit.gpgsign=false",
+        "-c", "core.hooksPath=/dev/null",
+        ...args,
+      ], {
+        cwd: checkout,
+        encoding: "utf8",
+        env: sanitisedEnvironment(),
+        timeout: GIT_COMMAND_TIMEOUT_MS,
+      });
     }
 
     const declaration = join(checkout, "sdlc.yaml");
@@ -122,32 +162,48 @@ describe("packed preparation and evaluation components", () => {
       "python-service:check",
     ]);
 
-    const malformedValue = receipt(preparation);
-    malformedValue.firstPass.scheduler.selection = ["not-a-digest"];
-    malformedValue.firstPass.unexpected = true;
-    const malformed = join(root, "malformed-preparation.json");
-    const rejected = join(root, "rejected.json");
-    writeFileSync(malformed, JSON.stringify(malformedValue));
-    const rejection = run(cli, "check", [
-      ...bound,
-      "--preparation-receipt", malformed,
-      "--changed", "src/input.txt",
-      "--environment", "native-test",
-      "--producer", "evaluation-component-test",
-      "--receipt", rejected,
-    ]);
-    expect(rejection.status).toBe(1);
-    expect(JSON.parse(rejection.stderr)).toMatchObject({
-      schema: "tc.sdlc/command-error/v1",
-      command: "check",
-      status: "error",
-      error: { code: "TASK_FAILED" },
-    });
-    expect(receipt(rejected)).toMatchObject({
-      schema: "tc.sdlc/evaluation-receipt/v1",
-      status: "failed",
-      reason: "preparation_evidence_invalid",
-      tasks: [],
-    });
+    const sabotages = [
+      ["missing-schedulers", (value: Record<string, any>) => {
+        delete value.firstPass.scheduler;
+        delete value.secondPass.scheduler;
+      }],
+      ["failed-scheduler", (value: Record<string, any>) => {
+        value.firstPass.scheduler.status = "failed";
+      }],
+      ["inconsistent-mutations", (value: Record<string, any>) => {
+        value.firstPass.mutationCount += 1;
+        value.firstPass.mutationsTruncated = false;
+      }],
+    ] as const;
+    for (const [sabotage, corrupt] of sabotages) {
+      const malformedValue = receipt(preparation);
+      corrupt(malformedValue);
+      const malformed = join(root, `${sabotage}-preparation.json`);
+      writeFileSync(malformed, JSON.stringify(malformedValue));
+      for (const command of ["check", "check-all"] as const) {
+        const rejected = join(root, `${command}-${sabotage}-rejected.json`);
+        const rejection = run(cli, command, [
+          ...bound,
+          "--preparation-receipt", malformed,
+          ...(command === "check" ? ["--changed", "src/input.txt"] : []),
+          "--environment", "native-test",
+          "--producer", "evaluation-component-test",
+          "--receipt", rejected,
+        ]);
+        expect(rejection.status).toBe(1);
+        expect(JSON.parse(rejection.stderr)).toMatchObject({
+          schema: "tc.sdlc/command-error/v1",
+          command,
+          status: "error",
+          error: { code: "TASK_FAILED" },
+        });
+        expect(receipt(rejected)).toMatchObject({
+          schema: "tc.sdlc/evaluation-receipt/v1",
+          status: "failed",
+          reason: "preparation_evidence_invalid",
+          tasks: [],
+        });
+      }
+    }
   }, 180_000);
 });

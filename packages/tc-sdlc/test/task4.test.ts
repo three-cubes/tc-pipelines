@@ -763,6 +763,26 @@ describe("tc-sdlc Task 4", () => {
       status: "failed",
       reason: "preparation_evidence_invalid",
     });
+    const missingSchedulers = structuredClone(preparation) as Record<string, any>;
+    delete missingSchedulers.firstPass.scheduler;
+    delete missingSchedulers.secondPass.scheduler;
+    await expect(evaluation(missingSchedulers, "missing-schedulers")).resolves.toMatchObject({
+      status: "failed",
+      reason: "preparation_evidence_invalid",
+    });
+    const failedScheduler = structuredClone(preparation) as Record<string, any>;
+    failedScheduler.firstPass.scheduler.status = "failed";
+    await expect(evaluation(failedScheduler, "failed-scheduler")).resolves.toMatchObject({
+      status: "failed",
+      reason: "preparation_evidence_invalid",
+    });
+    const inconsistentInventory = structuredClone(preparation) as Record<string, any>;
+    inconsistentInventory.firstPass.mutationCount += 1;
+    inconsistentInventory.firstPass.mutationsTruncated = false;
+    await expect(evaluation(inconsistentInventory, "inconsistent-mutations")).resolves.toMatchObject({
+      status: "failed",
+      reason: "preparation_evidence_invalid",
+    });
     expect(observed).toEqual([]);
     await expect(
       evaluation(preparation, "valid-prepared-tree"),

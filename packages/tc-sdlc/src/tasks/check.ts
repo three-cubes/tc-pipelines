@@ -7,6 +7,7 @@ import type {
   TreeMutation,
 } from "../evidence/task4.js";
 import {
+  assertSucceededPreparationReceipt,
   parsePreparationReceipt,
   validatePreparationReceipt,
 } from "../evidence/task4.js";
@@ -101,14 +102,20 @@ async function evaluate(
           : typeof suppliedPreparation === "string"
             ? parsePreparationReceipt(suppliedPreparation)
             : validatePreparationReceipt(suppliedPreparation);
+        if (preparation === undefined) {
+          throw new SdlcError(
+            "PREPARATION_EVIDENCE_INVALID",
+            "evaluation requires preparation evidence",
+          );
+        }
+        assertSucceededPreparationReceipt(preparation, {
+          declarationDigest: digest(options.declaration),
+          catalogueDigest: digest(options.catalogue),
+          lockDigest: digest(options.lock),
+        });
         if (
-          preparation === undefined ||
-          preparation.status !== "succeeded" ||
           preparation.secondPass.mutationCount !== 0 ||
           preparation.finalTreeDigest !== source.treeDigest ||
-          preparation.declarationDigest !== digest(options.declaration) ||
-          preparation.catalogueDigest !== digest(options.catalogue) ||
-          preparation.lockDigest !== digest(options.lock) ||
           canonicalJson(preparation.bootstrapContext) !==
             canonicalJson(options.runOptions.executionContext.binding)
         ) {
