@@ -1,0 +1,5 @@
+[project]
+name = "tc-sdlc-python-consumer"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = ["idna==3.10"]

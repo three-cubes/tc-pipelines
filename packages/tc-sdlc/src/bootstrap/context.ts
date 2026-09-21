@@ -315,6 +315,9 @@ export function loadBootstrapExecutionContext(
       TC_SDLC_BOOTSTRAP_STATE_KEY: receipt.stateKey,
       TC_SDLC_FITNESS_VERSION: lock.fitness.version,
     };
+    if (pnpmEnvironment !== undefined) {
+      environment.TC_SDLC_NODE_MODULES = join(pnpmEnvironment, "node_modules");
+    }
     if (uvEnvironment !== undefined) {
       environment.VIRTUAL_ENV = uvEnvironment;
       environment.UV_PROJECT_ENVIRONMENT = uvEnvironment;

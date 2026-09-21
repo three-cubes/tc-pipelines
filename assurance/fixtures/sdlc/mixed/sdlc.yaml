@@ -1,0 +1,48 @@
+schema: tc.sdlc/v1
+project: tc-sdlc-mixed-consumer
+toolchains:
+  python: "3.13"
+  node: "24"
+  packageManager: pnpm@11.22.0
+  uv: "0.12.5"
+fitness:
+  package: three-cubes-fitness
+  version: "0.17.0"
+projects:
+  - name: python-service
+    root: python
+  - name: node-service
+    root: node
+    dependsOn: [python-service]
+targets:
+  prepare:
+    command: sh scripts/prepare.sh
+    mode: prepare
+    trustBoundary: portable
+    inputs:
+      - scripts/**
+      - src/**
+    sharedInputs:
+      - pyproject.toml
+      - uv.lock
+      - package.json
+      - pnpm-lock.yaml
+      - sdlc.yaml
+    outputs:
+      - generated/**
+  check:
+    command: sh scripts/check.sh
+    mode: evaluate
+    trustBoundary: portable
+    dependsOn: [prepare]
+    inputs:
+      - scripts/**
+      - src/**
+      - generated/**
+      - tests/**
+    sharedInputs:
+      - pyproject.toml
+      - uv.lock
+      - package.json
+      - pnpm-lock.yaml
+      - sdlc.yaml

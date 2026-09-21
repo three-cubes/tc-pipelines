@@ -1,0 +1,12 @@
+{
+  "name": "tc-sdlc-pnpm-consumer",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.22.0",
+  "dependencies": {
+    "kleur": "4.1.5"
+  },
+  "scripts": {
+    "check": "node tests/verify.mjs"
+  }
+}

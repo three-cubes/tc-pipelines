@@ -11,7 +11,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { availableParallelism, tmpdir, totalmem } from "node:os";
-import { basename, join, posix, relative, resolve } from "node:path";
+import { basename, dirname, join, posix, relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   type RunEvent,
@@ -332,7 +333,7 @@ function safeBoundary(
   return boundary;
 }
 
-const ambientToolVariables = /^(?:PATH|HOME|TMPDIR|TMP|TEMP|VIRTUAL_ENV|PYTHONPATH|PYTHONHOME|PYTHONPYCACHEPREFIX|NODE_PATH|NODE_OPTIONS|PNPM_HOME|PNPM_STORE_DIR|NPM_CONFIG_[A-Z0-9_]*|XDG_[A-Z0-9_]*|UV_[A-Z0-9_]*|COREPACK_[A-Z0-9_]*|CONDA_[A-Z0-9_]*|NVM_DIR)$/;
+const ambientToolVariables = /^(?:PATH|HOME|TMPDIR|TMP|TEMP|VIRTUAL_ENV|PYTHONPATH|PYTHONHOME|PYTHONPYCACHEPREFIX|NODE_PATH|NODE_OPTIONS|TC_SDLC_NODE_MODULES|PNPM_HOME|PNPM_STORE_DIR|NPM_CONFIG_[A-Z0-9_]*|XDG_[A-Z0-9_]*|UV_[A-Z0-9_]*|COREPACK_[A-Z0-9_]*|CONDA_[A-Z0-9_]*|NVM_DIR)$/;
 
 function taskEnvironment(
   options: RunOptions,
@@ -375,11 +376,20 @@ function taskEnvironment(
   for (const path of Object.values(isolated)) {
     mkdirSync(path, { recursive: true, mode: 0o700 });
   }
+  const executionEnvironment = options.executionContext.environment;
+  const nodeModules = executionEnvironment.TC_SDLC_NODE_MODULES;
+  const nodeLoader = join(dirname(fileURLToPath(import.meta.url)), "node-loader.js");
+  if (nodeModules !== undefined && !existsSync(nodeLoader)) {
+    throw new SdlcError("TASK_ENVIRONMENT_INVALID", "state-owned Node module resolver is unavailable");
+  }
   return {
     ...inherited,
     ...options.environment,
-    ...options.executionContext.environment,
+    ...executionEnvironment,
     ...isolated,
+    ...(nodeModules === undefined
+      ? {}
+      : { NODE_OPTIONS: `--import=${pathToFileURL(nodeLoader).href}` }),
   };
 }
 
