@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://three-cubes.github.io/tc-pipelines/schemas/consumer-qualification-v1.schema.json",
+  "title": "Three Cubes SDLC consumer qualification receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "reason", "manifestDigest", "package", "executableDigest", "environment", "fixtures"],
+  "properties": {
+    "schema": { "const": "tc.sdlc/consumer-qualification/v1" },
+    "status": { "enum": ["succeeded", "failed"] },
+    "reason": { "type": ["string", "null"] },
+    "manifestDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": { "name": { "const": "@three-cubes/tc-sdlc" }, "version": { "type": "string", "minLength": 1 } }
+    },
+    "executableDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "platform", "architecture"],
+      "properties": {
+        "class": { "type": "string", "minLength": 1 },
+        "platform": { "type": "string", "minLength": 1 },
+        "architecture": { "type": "string", "minLength": 1 }
+      }
+    },
+    "fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "fixtureDigest", "expectedChangedPath", "status", "reason", "bootstrap", "preparation", "complete", "affected", "identityStable"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "fixtureDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+          "expectedChangedPath": { "type": ["string", "null"] },
+          "status": { "enum": ["succeeded", "failed"] },
+          "reason": { "type": ["string", "null"] },
+          "identityStable": { "type": ["boolean", "null"] },
+          "bootstrap": { "$ref": "#/$defs/receiptReference" },
+          "preparation": { "$ref": "#/$defs/receiptReference" },
+          "complete": { "$ref": "#/$defs/receiptReference" },
+          "affected": { "$ref": "#/$defs/receiptReference" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "receiptReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest", "status", "taskIdentities"],
+      "properties": {
+        "path": { "type": ["string", "null"], "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).*$" },
+        "digest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+        "status": { "type": ["string", "null"] },
+        "taskIdentities": { "type": "array", "items": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } }
+      }
+    }
+  }
+}

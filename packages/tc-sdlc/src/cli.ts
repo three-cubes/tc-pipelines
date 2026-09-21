@@ -20,6 +20,8 @@ import type { PreparationReceipt } from "./evidence/task4.js";
 import { assertCurrentLock, loadLock, resolveLock, writeLock } from "./lock/index.js";
 import { maintain } from "./maintenance/index.js";
 import { loadDeclaration } from "./schema/declaration.js";
+import { qualifyConsumers } from "./qualification/index.js";
+import { detectedHostCapacity } from "./runtime/index.js";
 import { check, checkAll } from "./tasks/check.js";
 import { prepare } from "./tasks/prepare.js";
 import { fitness } from "./tasks/fitness.js";
@@ -33,7 +35,8 @@ type Command =
   | "prepare"
   | "check"
   | "check-all"
-  | "fitness";
+  | "fitness"
+  | "qualify-consumers";
 
 function parseOptions(
   args: readonly string[],
@@ -78,6 +81,21 @@ function requestedReceipt(args: readonly string[]): string | undefined {
 }
 
 async function run(command: Command, args: readonly string[]): Promise<void> {
+  if (command === "qualify-consumers") {
+    const options = parseOptions(args, ["manifest", "output", "receipt"]);
+    const receipt = await qualifyConsumers({
+      manifestPath: options.manifest!,
+      outputDirectory: options.output!,
+      receiptPath: options.receipt!,
+      executablePath: process.argv[1]!,
+    });
+    if (receipt.status !== "succeeded") {
+      throw new SdlcError("CONSUMER_QUALIFICATION_FAILED", receipt.reason ?? "consumer qualification failed");
+    }
+    success(command, { receipt: options.receipt, receiptSchema: receipt.schema });
+    return;
+  }
+
   if (command === "maintain") {
     const options = parseOptions(
       args,
@@ -317,7 +335,19 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
   } else if (command === "check-all") {
     required.push("environment", "producer", "preparation-receipt");
   }
-  const options = parseOptions(args, required);
+  const options = parseOptions(
+    args,
+    required,
+    command === "check" || command === "check-all" ? ["capacity"] : [],
+  );
+  let capacity;
+  if (options.capacity !== undefined) {
+    const workers = Number(options.capacity);
+    if (!Number.isSafeInteger(workers) || workers < 1) {
+      throw new SdlcError("USAGE", "--capacity must be a positive integer");
+    }
+    capacity = { ...detectedHostCapacity(), cpu: workers };
+  }
   const declaration = loadDeclaration(options.declaration!);
   const catalogue = loadCatalogue(options.catalogue!);
   const loaded = loadLock(options.lock!);
@@ -356,7 +386,7 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
               environmentClass: options.environment!,
               producer: options.producer!,
               preparationReceipt,
-              runOptions: { executionContext },
+              runOptions: { executionContext, ...(capacity === undefined ? {} : { capacity }) },
             })
           : await checkAll({
               root: options.root!,
@@ -367,7 +397,7 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
               environmentClass: options.environment!,
               producer: options.producer!,
               preparationReceipt,
-              runOptions: { executionContext },
+              runOptions: { executionContext, ...(capacity === undefined ? {} : { capacity }) },
             });
     } finally {
       executionContext.lease.release();
@@ -390,6 +420,7 @@ const commands: readonly Command[] = [
   "check",
   "check-all",
   "fitness",
+  "qualify-consumers",
 ];
 const envelopeCommand = commands.includes(rawCommand as Command) ? rawCommand : "unknown";
 
@@ -397,7 +428,7 @@ try {
   if (!commands.includes(rawCommand as Command)) {
     throw new SdlcError(
       "USAGE",
-      "command must be catalogue, lock, validate, bootstrap, maintain, prepare, check, check-all or fitness",
+      "command must be catalogue, lock, validate, bootstrap, maintain, prepare, check, check-all, fitness or qualify-consumers",
     );
   }
   await run(rawCommand as Command, process.argv.slice(3));

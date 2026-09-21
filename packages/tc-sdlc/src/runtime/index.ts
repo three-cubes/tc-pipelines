@@ -131,7 +131,7 @@ export function resolveHostCapacity(input: HostCapacityInputs): HostCapacity {
   };
 }
 
-function detectedCapacity(): HostCapacity {
+export function detectedHostCapacity(): HostCapacity {
   return resolveHostCapacity({
     logicalCpu: availableParallelism(),
     totalMemoryBytes: totalmem(),
@@ -1021,7 +1021,7 @@ export async function runGraph(
   let stateIntegrityFailed = false;
 
   try {
-    const capacity = options.capacity ?? detectedCapacity();
+    const capacity = options.capacity ?? detectedHostCapacity();
     if (!(capacity.cpu > 0) || !(capacity.memoryMiB > 0)) {
       throw new SdlcError("RUN_CAPACITY_INVALID", "host capacity must be positive");
     }

@@ -23,6 +23,11 @@ export type {
 export { bytesDigest, canonicalJson, digest } from "./canonical.js";
 export { restoreEvaluationCache, storeEvaluationCache } from "./cache/index.js";
 export { SdlcError } from "./errors.js";
+export { qualifyConsumers } from "./qualification/index.js";
+export type {
+  ConsumerQualificationReceipt,
+  QualifyConsumersOptions,
+} from "./qualification/index.js";
 export type { ExecutorContract } from "./executors/index.js";
 export { serialiseRunReceipt, writeCanonicalEvidence, writeRunReceipt } from "./evidence/index.js";
 export type {

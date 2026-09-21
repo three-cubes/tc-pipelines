@@ -1371,6 +1371,7 @@ function materializeDependencies(
           project,
           "install",
           "--frozen-lockfile",
+          "--ignore-workspace",
           "--store-dir",
           join(stateRoot, "cache", "pnpm"),
         ],
