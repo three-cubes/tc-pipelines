@@ -29,7 +29,7 @@
       "package": "three-cubes-fitness",
       "version": "0.17.0"
     },
-    "imageDigest": "sha256:edd6cff09e62212679c4afb2186a77fed7aca026b182c363d72b8c8d34eac122",
+    "imageDigest": "sha256:734ca688cb22b078b2e684b1ec72aec5eafcf872ea5d1a4b2c4deda2c0e7f0a9",
     "lockSchema": "tc.sdlc/lock/v1",
     "package": {
       "name": "@three-cubes/tc-sdlc",
@@ -42,7 +42,7 @@
       "uv": "0.12.5"
     },
     "version": "3.0.0",
-    "workflowCommit": "0ae8c5ec01ca33f4db497b60c5d3159263a36828"
+    "workflowCommit": "190eb9d32eac11154370ea97c18adfd1f66f5f91"
   },
   "schema": "tc.sdlc/release-catalogue/v1"
 }

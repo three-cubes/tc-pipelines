@@ -1,9 +1,9 @@
 {
   "containerEnv": {
-    "TC_SDLC_IMAGE_DIGEST": "sha256:edd6cff09e62212679c4afb2186a77fed7aca026b182c363d72b8c8d34eac122",
+    "TC_SDLC_IMAGE_DIGEST": "sha256:734ca688cb22b078b2e684b1ec72aec5eafcf872ea5d1a4b2c4deda2c0e7f0a9",
     "TC_SDLC_RELEASE": "3.0.0"
   },
-  "image": "ghcr.io/three-cubes/tc-sdlc@sha256:edd6cff09e62212679c4afb2186a77fed7aca026b182c363d72b8c8d34eac122",
+  "image": "ghcr.io/three-cubes/tc-sdlc@sha256:734ca688cb22b078b2e684b1ec72aec5eafcf872ea5d1a4b2c4deda2c0e7f0a9",
   "mounts": [
     "source=tc-sdlc-state,target=/state,type=volume"
   ],
