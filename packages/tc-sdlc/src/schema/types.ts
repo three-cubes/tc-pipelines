@@ -18,6 +18,7 @@ export type TargetDeclaration = Readonly<{
   inputs?: readonly string[];
   sharedInputs?: readonly string[];
   outputs?: readonly string[];
+  evidence?: readonly TaskEvidenceDeclaration[];
   resources?: TaskResources;
   budget?: TaskBudget;
 }>;
@@ -33,6 +34,11 @@ export type TaskBudget = Readonly<{
   phaseMs: number;
   noProgressMs: number;
   heartbeatMs: number;
+}>;
+
+export type TaskEvidenceDeclaration = Readonly<{
+  path: string;
+  mediaType: "application/json" | "text/plain";
 }>;
 
 export type SdlcToolchains = Readonly<{
@@ -131,6 +137,7 @@ export type TaskDeclaration = Readonly<{
   inputs: readonly string[];
   sharedInputs?: readonly string[];
   outputs: readonly string[];
+  evidence?: readonly TaskEvidenceDeclaration[];
   resources?: TaskResources;
   budget?: TaskBudget;
 }>;

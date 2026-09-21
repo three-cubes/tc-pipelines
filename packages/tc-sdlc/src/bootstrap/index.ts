@@ -31,6 +31,7 @@ import {
   type AutomaticRecoveryReceipt,
 } from "../maintenance/index.js";
 import type { ReleaseCatalogue, SdlcDeclaration, SdlcLock } from "../schema/types.js";
+import type { BootstrapExecutionLease } from "./execution-lease.js";
 import {
   acquireBootstrapReferenceCommitLock,
   BootstrapReferenceCommitError,
@@ -94,6 +95,7 @@ export type BootstrapReceipt = Readonly<{
   platform: BootstrapPlatform;
   architecture: string;
   stateKey: string;
+  stateDigest: string | null;
   reused: boolean;
   taskIdentities: readonly string[];
   adapters: readonly BootstrapAdapterEvidence[];
@@ -102,6 +104,33 @@ export type BootstrapReceipt = Readonly<{
   diagnostics: readonly BootstrapDiagnostic[];
   diagnosticsCount: number;
   diagnosticsTruncated: boolean;
+}>;
+
+export type BootstrapContextBinding = Readonly<{
+  schema: "tc.sdlc/execution-context/v1";
+  release: string;
+  platform: BootstrapPlatform;
+  architecture: string;
+  lockDigest: string;
+  stateKey: string;
+  bootstrapReceiptDigest: string;
+  stateDigest: string;
+  dependencyDigest: string;
+  fitness: Readonly<{ package: string; version: string }>;
+  adapters: readonly Readonly<{
+    name: BootstrapCapabilityName;
+    version: string;
+    adapterDigest: string;
+  }>[];
+}>;
+
+export type BootstrapExecutionContext = Readonly<{
+  binding: BootstrapContextBinding;
+  stateRoot: string;
+  stateDirectory: string;
+  environment: Readonly<Record<string, string>>;
+  lease: BootstrapExecutionLease;
+  verifyIntegrity: () => void;
 }>;
 
 export type BootstrapOptions = Readonly<{
@@ -1134,7 +1163,7 @@ function resolvedAdapter(
   const launcherPath = resolve(stateRoot, launcher);
   const node = capabilities.find((capability) => capability.name === "node");
   const bytes = value.name === "pnpm"
-    ? `#!/bin/sh\nset -eu\nSCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexport HOME="$SCRIPT_DIR/../home"\nexport XDG_CONFIG_HOME="$SCRIPT_DIR/../home/config"\nexport COREPACK_HOME="$SCRIPT_DIR/../corepack"\nexec ${shellQuote(node!.executable)} ${shellQuote(value.executable)} "$@"\n`
+    ? `#!/bin/sh\nset -eu\nSCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexport HOME="\${HOME:-$SCRIPT_DIR/../home}"\nexport XDG_CONFIG_HOME="\${XDG_CONFIG_HOME:-$SCRIPT_DIR/../home/config}"\nexport COREPACK_HOME="\${COREPACK_HOME:-$SCRIPT_DIR/../corepack}"\nexec ${shellQuote(node!.executable)} ${shellQuote(value.executable)} "$@"\n`
     : `#!/bin/sh\nset -eu\nexec ${shellQuote(value.executable)} "$@"\n`;
   writeAtomicExecutable(launcherPath, bytes);
   const launcherDigest = bytesDigest(bytes);
@@ -1519,6 +1548,7 @@ function failedReceipt(
     platform: host.platform,
     architecture: host.architecture,
     stateKey,
+    stateDigest: null,
     reused,
     taskIdentities,
     adapters,
@@ -1680,6 +1710,9 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
     }
     adapters = finalState.adapters.map(adapterEvidence);
     dependencyEvidence = finalState.dependencies;
+    const statePath = resolve(finalStatePath, "state.json");
+    rejectSymlinkComponents(stateRoot, statePath);
+    const stateDigest = fileDigest(statePath);
     const receipt: BootstrapReceipt = {
       schema: "tc.sdlc/bootstrap-receipt/v1",
       status: "succeeded",
@@ -1689,6 +1722,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       platform: host.platform,
       architecture: host.architecture,
       stateKey,
+      stateDigest,
       reused,
       taskIdentities,
       adapters,

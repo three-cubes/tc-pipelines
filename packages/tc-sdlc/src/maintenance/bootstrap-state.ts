@@ -11,6 +11,7 @@ import { canonicalJson } from "../canonical.js";
 import {
   cleanupExpiredDeadPending,
   readBootstrapReferenceAuthorities,
+  leaseMatches,
   referenceMatches,
   type BootstrapReferenceAuthorities,
 } from "../bootstrap/references.js";
@@ -125,6 +126,8 @@ export function inspectBootstrapStates(
     const identity = filesystemIdentity(absolute);
     if (references === undefined) {
       retained.push({ path, reason: "reference_metadata_absent" });
+    } else if (leaseMatches(references, path, identity)) {
+      retained.push({ path, reason: "leased" });
     } else if (referenceMatches(references, path, identity)) {
       retained.push({ path, reason: "referenced" });
     } else if (lstatSync(absolute).mtimeMs > cutoff) {
@@ -155,9 +158,11 @@ function retainedReason(
   path: string,
   identity: FilesystemIdentity,
 ): MaintenanceRetainedEntry["reason"] {
-  return referenceMatches(references, path, identity)
-    ? "referenced"
-    : "changed_during_apply";
+  return leaseMatches(references, path, identity)
+    ? "leased"
+    : referenceMatches(references, path, identity)
+      ? "referenced"
+      : "changed_during_apply";
 }
 
 type BootstrapDeletionPreparation =

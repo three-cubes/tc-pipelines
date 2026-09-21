@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 
 import { bootstrap } from "./bootstrap/index.js";
+import { loadBootstrapExecutionContext } from "./bootstrap/context.js";
 import { bytesDigest, canonicalJson } from "./canonical.js";
 import {
   generateReleaseCatalogue,
@@ -221,6 +222,7 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
   }
 
   const required = ["declaration", "catalogue", "lock", "root", "receipt"];
+  required.push("bootstrap-receipt", "state-root");
   if (command === "check") {
     required.push("changed", "environment", "producer", "preparation-receipt");
   } else if (command === "check-all") {
@@ -231,43 +233,57 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
   const catalogue = loadCatalogue(options.catalogue!);
   const loaded = loadLock(options.lock!);
   assertCurrentLock(loaded.lock, declaration, catalogue);
+  const executionContext = loadBootstrapExecutionContext(
+    options["bootstrap-receipt"]!,
+    options["state-root"]!,
+    loaded.lock,
+    catalogue,
+  );
   const preparationReceipt =
     command === "prepare"
       ? undefined
       : (JSON.parse(
           readFileSync(options["preparation-receipt"]!, "utf8"),
         ) as PreparationReceipt);
-  const receipt =
-    command === "prepare"
-      ? await prepare({
-          root: options.root!,
-          declaration,
-          catalogue,
-          lock: loaded.lock,
-          receiptPath: options.receipt!,
-        })
-      : command === "check"
-        ? await check({
+  const receipt = await (async () => {
+    try {
+      return command === "prepare"
+        ? await prepare({
             root: options.root!,
             declaration,
             catalogue,
             lock: loaded.lock,
             receiptPath: options.receipt!,
-            changedPaths: options.changed!.split(",").filter(Boolean),
-            environmentClass: options.environment!,
-            producer: options.producer!,
-            preparationReceipt,
+            runOptions: { executionContext },
           })
-        : await checkAll({
-            root: options.root!,
-            declaration,
-            catalogue,
-            lock: loaded.lock,
-            receiptPath: options.receipt!,
-            environmentClass: options.environment!,
-            producer: options.producer!,
-            preparationReceipt,
-          });
+        : command === "check"
+          ? await check({
+              root: options.root!,
+              declaration,
+              catalogue,
+              lock: loaded.lock,
+              receiptPath: options.receipt!,
+              changedPaths: options.changed!.split(",").filter(Boolean),
+              environmentClass: options.environment!,
+              producer: options.producer!,
+              preparationReceipt,
+              runOptions: { executionContext },
+            })
+          : await checkAll({
+              root: options.root!,
+              declaration,
+              catalogue,
+              lock: loaded.lock,
+              receiptPath: options.receipt!,
+              environmentClass: options.environment!,
+              producer: options.producer!,
+              preparationReceipt,
+              runOptions: { executionContext },
+            });
+    } finally {
+      executionContext.lease.release();
+    }
+  })();
   if (receipt.status !== "succeeded") {
     throw new SdlcError("TASK_FAILED", `${command} failed: ${receipt.reason}`);
   }

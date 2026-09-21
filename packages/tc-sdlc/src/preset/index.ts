@@ -66,6 +66,9 @@ export function buildPresetTasks(
         inputs: sorted(target.inputs ?? []),
         sharedInputs: sorted(target.sharedInputs ?? []),
         outputs: sorted(target.outputs ?? []),
+        evidence: [...(target.evidence ?? [])].sort((left, right) =>
+          left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+        ),
         resources,
         budget,
       };

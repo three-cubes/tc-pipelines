@@ -3,6 +3,7 @@ import type { KeyObject } from "node:crypto";
 import type { RunReceipt } from "./index.js";
 import type { AutomaticRecoveryReceipt } from "../maintenance/index.js";
 import type { InputDigest, TrustBoundary } from "../schema/types.js";
+import type { BootstrapContextBinding } from "../bootstrap/index.js";
 
 export type TreeMutation = Readonly<{
   path: string;
@@ -18,6 +19,7 @@ export type PreparationReceipt = Readonly<{
   declarationDigest: string;
   catalogueDigest: string;
   lockDigest: string;
+  bootstrapContext: BootstrapContextBinding;
   recovery: AutomaticRecoveryReceipt;
   finalTreeDigest: string;
   firstPass: Readonly<{
@@ -51,6 +53,7 @@ export type EvaluationReceipt = Readonly<{
   declarationDigest: string;
   catalogueDigest: string;
   lockDigest: string;
+  bootstrapContext: BootstrapContextBinding;
   environmentClass: string;
   producer: string;
   recovery: AutomaticRecoveryReceipt;
