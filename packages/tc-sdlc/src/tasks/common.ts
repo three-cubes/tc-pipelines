@@ -12,6 +12,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { digest } from "../canonical.js";
 import { SdlcError } from "../errors.js";
+import { writeCanonicalEvidence } from "../evidence/index.js";
 import { bindGraphLock, buildGraph } from "../graph/index.js";
 import { resolveProjectPath, selectorPattern } from "../graph/selector.js";
 import { resolveInputInventory, snapshotFiles } from "../inputs/index.js";
@@ -132,6 +133,12 @@ export function materializeTree(root: string): Readonly<{
   const container = mkdtempSync(join(tmpdir(), "tc-sdlc-evaluation-"));
   const workspace = resolve(container, "workspace");
   try {
+    writeCanonicalEvidence(join(container, ".tc-sdlc-temporary.json"), {
+      schema: "tc.sdlc/temporary-owner/v1",
+      owner: "@three-cubes/tc-sdlc",
+      kind: "evaluation-workspace",
+      pid: process.pid,
+    });
     execFileSync(
       "git",
       ["clone", "--quiet", "--shared", "--no-checkout", "--", root, workspace],

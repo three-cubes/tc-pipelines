@@ -52,6 +52,15 @@ export type {
 } from "./evidence/task4.js";
 export { bindGraphLock, buildGraph, selectAffected, serialiseGraph, taskIdentity } from "./graph/index.js";
 export { assertCurrentLock, loadLock, resolveLock, validateLock, writeLock } from "./lock/index.js";
+export { maintain, serialiseMaintenanceReceipt } from "./maintenance/index.js";
+export type {
+  MaintenanceEntry,
+  MaintenanceMode,
+  MaintenanceOptions,
+  MaintenanceReceipt,
+  MaintenanceRetainedEntry,
+  MaintenanceToolReceipt,
+} from "./maintenance/index.js";
 export { resolveInputInventory, snapshotFiles } from "./inputs/index.js";
 export { resolveHostCapacity, runGraph } from "./runtime/index.js";
 export type {

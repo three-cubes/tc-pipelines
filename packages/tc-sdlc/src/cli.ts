@@ -12,6 +12,7 @@ import {
 import { SdlcError } from "./errors.js";
 import type { PreparationReceipt } from "./evidence/task4.js";
 import { assertCurrentLock, loadLock, resolveLock, writeLock } from "./lock/index.js";
+import { maintain } from "./maintenance/index.js";
 import { loadDeclaration } from "./schema/declaration.js";
 import { check, checkAll } from "./tasks/check.js";
 import { prepare } from "./tasks/prepare.js";
@@ -21,6 +22,7 @@ type Command =
   | "lock"
   | "validate"
   | "bootstrap"
+  | "maintain"
   | "prepare"
   | "check"
   | "check-all";
@@ -63,6 +65,60 @@ function success(command: Command, payload: Record<string, unknown>): void {
 }
 
 async function run(command: Command, args: readonly string[]): Promise<void> {
+  if (command === "maintain") {
+    const options = parseOptions(
+      args,
+      ["state-root", "receipt", "mode"],
+      [
+        "temporary-root",
+        "retention-hours",
+        "cleanup-workers",
+        "uv",
+        "buildx",
+        "docker-builder",
+      ],
+    );
+    if (options.mode !== "dry-run" && options.mode !== "apply") {
+      throw new SdlcError("USAGE", "--mode must be dry-run or apply");
+    }
+    const retentionHours =
+      options["retention-hours"] === undefined
+        ? undefined
+        : Number(options["retention-hours"]);
+    const cleanupWorkers =
+      options["cleanup-workers"] === undefined
+        ? undefined
+        : Number(options["cleanup-workers"]);
+    const receipt = await maintain({
+      stateRoot: options["state-root"]!,
+      receiptPath: options.receipt!,
+      mode: options.mode,
+      ...(options["temporary-root"] === undefined
+        ? {}
+        : { temporaryRoot: options["temporary-root"] }),
+      ...(retentionHours === undefined ? {} : { retentionHours }),
+      ...(cleanupWorkers === undefined ? {} : { cleanupWorkers }),
+      ...(options.uv === undefined ? {} : { uvExecutable: options.uv }),
+      ...(options.buildx === undefined ? {} : { buildxExecutable: options.buildx }),
+      ...(options["docker-builder"] === undefined
+        ? {}
+        : { dockerBuilder: options["docker-builder"] }),
+    });
+    if (receipt.status !== "succeeded") {
+      throw new SdlcError("MAINTENANCE_FAILED", `maintenance failed: ${receipt.reason}`);
+    }
+    success(command, {
+      receipt: options.receipt,
+      receiptSchema: receipt.schema,
+      candidateCount: receipt.candidateCount,
+      removedCount: receipt.removedCount,
+      reclaimedBytes: receipt.reclaimedBytes,
+      cleanupWorkers: receipt.cleanupWorkers,
+      cleanupFailures: receipt.cleanupFailures,
+    });
+    return;
+  }
+
   if (command === "catalogue") {
     const options = parseOptions(args, [
       "version",
@@ -215,6 +271,7 @@ const commands: readonly Command[] = [
   "lock",
   "validate",
   "bootstrap",
+  "maintain",
   "prepare",
   "check",
   "check-all",
@@ -225,7 +282,7 @@ try {
   if (!commands.includes(rawCommand as Command)) {
     throw new SdlcError(
       "USAGE",
-      "command must be catalogue, lock, validate, bootstrap, prepare, check or check-all",
+      "command must be catalogue, lock, validate, bootstrap, maintain, prepare, check or check-all",
     );
   }
   await run(rawCommand as Command, process.argv.slice(3));

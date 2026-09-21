@@ -63,6 +63,7 @@ RUN pnpm install --frozen-lockfile \
     && npm install --global /tmp/package/three-cubes-tc-sdlc-3.0.0.tgz
 
 FROM builder AS package-tests
+COPY --from=uv /uv /uvx /usr/local/bin/
 RUN pnpm --filter @three-cubes/tc-sdlc test
 
 FROM toolchain
