@@ -371,7 +371,7 @@ export async function removeBootstrapStates(
   await Promise.all(
     Array.from({ length: Math.min(workers, candidates.length) }, () => worker()),
   );
-  const referenceMetadataRemovedCount = cleanupExpiredDeadPending(stateRoot, cutoff);
+  const referenceMetadataRemovedCount = await cleanupExpiredDeadPending(stateRoot, cutoff);
   let removedCount = 0;
   let reclaimedBytes = 0;
   let failures = 0;

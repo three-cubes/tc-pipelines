@@ -315,6 +315,7 @@ export function commitBootstrapReference(
     ...(predecessorStateKey === undefined || predecessorStateIdentity === undefined
       ? {} : { predecessorStateKey, predecessorStateIdentity }),
   };
+  assertBootstrapReferenceCommitLock(lock);
   writeCanonicalEvidence(path, value);
   return value;
 }
@@ -324,14 +325,17 @@ export function removePendingBootstrapReference(publication: PendingPublication)
   rmSync(publication.path);
 }
 
-export function cleanupExpiredDeadPending(stateRoot: string, cutoff: number): number {
+export async function cleanupExpiredDeadPending(
+  stateRoot: string,
+  cutoff: number,
+): Promise<number> {
   const pending = join(stateRoot, "references", "pending");
   let removed = 0;
   try {
     safeOwnedPath(stateRoot, pending);
     const details = lstatSync(pending);
     if (!details.isDirectory() || details.isSymbolicLink()) {
-      return cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
+      return await cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
     }
     for (const name of readdirSync(pending).sort()) {
       const path = join(pending, name);
@@ -347,7 +351,7 @@ export function cleanupExpiredDeadPending(stateRoot: string, cutoff: number): nu
       removed += 1;
     }
   } catch {
-    return removed + cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
+    return removed + await cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
   }
-  return removed + cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
+  return removed + await cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
 }

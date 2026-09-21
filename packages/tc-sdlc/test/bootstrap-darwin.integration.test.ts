@@ -17,6 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -101,6 +102,62 @@ async function waitForPath(path: string, child: ReturnType<typeof spawn>): Promi
   expect(existsSync(path)).toBe(true);
 }
 
+async function waitForRecoveryMarker(
+  locksRoot: string,
+  pid: number,
+  child: ReturnType<typeof spawn>,
+): Promise<string> {
+  const deadline = Date.now() + 60_000;
+  while (child.exitCode === null && Date.now() < deadline) {
+    for (const name of readdirSync(locksRoot)) {
+      if (!name.endsWith(".recovery")) continue;
+      const path = join(locksRoot, name);
+      try {
+        if (JSON.parse(readFileSync(path, "utf8")).pid === pid) return path;
+      } catch {
+        // The owner is atomically publishing or removing the marker.
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  throw new Error(`recovery marker for process ${pid} was not observed`);
+}
+
+async function waitForPendingReference(
+  stateRoot: string,
+  pid: number,
+  child: ReturnType<typeof spawn>,
+): Promise<string> {
+  const pendingRoot = join(stateRoot, "references", "pending");
+  const deadline = Date.now() + 60_000;
+  while (child.exitCode === null && Date.now() < deadline) {
+    for (const name of readdirSync(pendingRoot)) {
+      const path = join(pendingRoot, name);
+      try {
+        if (JSON.parse(readFileSync(path, "utf8")).pid === pid) return path;
+      } catch {
+        // The pending reference is being atomically published or removed.
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  throw new Error(`pending reference for process ${pid} was not observed`);
+}
+
+function childOutcome(child: ReturnType<typeof spawn>) {
+  return new Promise<Readonly<{ status: number | null; stdout: string; stderr: string }>>(
+    (resolve) => {
+      let stdout = "";
+      let stderr = "";
+      child.stdout?.setEncoding("utf8");
+      child.stderr?.setEncoding("utf8");
+      child.stdout?.on("data", (value) => { stdout += value; });
+      child.stderr?.on("data", (value) => { stderr += value; });
+      child.once("exit", (status) => resolve({ status, stdout, stderr }));
+    },
+  );
+}
+
 function referenceFixture(prefix: string) {
   const root = mkdtempSync(join(tmpdir(), `${prefix}-consumer-`));
   const stateRoot = mkdtempSync(join(tmpdir(), `${prefix}-state-`));
@@ -142,24 +199,32 @@ function referenceFixture(prefix: string) {
     runner,
     `import {readFileSync} from "node:fs"; import * as sdlc from ${JSON.stringify(PUBLIC_PACKAGE)}; const receipt=await sdlc.bootstrap(JSON.parse(readFileSync(process.argv[2], "utf8"))); process.stdout.write(JSON.stringify(receipt));\n`,
   );
+  const maintenanceRunner = join(evidence, "maintenance-child.mjs");
+  writeFileSync(
+    maintenanceRunner,
+    `import {readFileSync,writeFileSync} from "node:fs"; import * as sdlc from ${JSON.stringify(PUBLIC_PACKAGE)}; writeFileSync(process.argv[3], "started"); const receipt=await sdlc.maintain(JSON.parse(readFileSync(process.argv[2], "utf8"))); process.stdout.write(JSON.stringify(receipt));\n`,
+  );
   const spawnBootstrap = (generation: string) => {
     const optionsPath = join(evidence, `${generation}-options.json`);
     writeFileSync(optionsPath, JSON.stringify(optionsFor(generation)));
     const child = spawn(process.execPath, [runner, optionsPath], {
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const outcome = new Promise<Readonly<{ status: number | null; stdout: string; stderr: string }>>(
-      (resolve) => {
-        let stdout = "";
-        let stderr = "";
-        child.stdout?.setEncoding("utf8");
-        child.stderr?.setEncoding("utf8");
-        child.stdout?.on("data", (value) => { stdout += value; });
-        child.stderr?.on("data", (value) => { stderr += value; });
-        child.once("exit", (status) => resolve({ status, stdout, stderr }));
-      },
-    );
-    return { child, outcome };
+    return { child, outcome: childOutcome(child) };
+  };
+  const spawnMaintenance = (name: string) => {
+    const optionsPath = join(evidence, `${name}-maintenance-options.json`);
+    const startedPath = join(evidence, `${name}-maintenance-started`);
+    writeFileSync(optionsPath, JSON.stringify({
+      stateRoot,
+      temporaryRoot: mkdtempSync(join(tmpdir(), `${prefix}-maintenance-temp-`)),
+      receiptPath: join(evidence, `${name}-maintenance.json`),
+      mode: "apply",
+    }));
+    const child = spawn(process.execPath, [maintenanceRunner, optionsPath, startedPath], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return { child, outcome: childOutcome(child), startedPath };
   };
   return {
     root,
@@ -168,6 +233,7 @@ function referenceFixture(prefix: string) {
     project,
     optionsFor,
     spawnBootstrap,
+    spawnMaintenance,
     referencePath: join(stateRoot, "references", `${stem}.json`),
     lockPath: join(stateRoot, "references", "locks", `${stem}.lock`),
   };
@@ -205,6 +271,84 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       new Set([receiptB.stateKey, receiptC.stateKey]),
     );
   }, 180_000);
+
+  test("serialises two stale-lock recoverers with a crash-released OS boundary", async () => {
+    expect(process.platform).toBe("darwin");
+    const fixture = referenceFixture("bootstrap-reference-recovery-race");
+    expect(await sdlc.bootstrap(fixture.optionsFor("A"))).toMatchObject({ status: "succeeded" });
+    const staleOwner = fixture.spawnBootstrap("B");
+    await waitForPath(fixture.lockPath, staleOwner.child);
+    expect(staleOwner.child.kill("SIGKILL")).toBe(true);
+    await staleOwner.outcome;
+
+    const first = fixture.spawnBootstrap("C");
+    const recoveryMarker = await waitForRecoveryMarker(
+      dirname(fixture.lockPath),
+      first.child.pid!,
+      first.child,
+    );
+    expect(first.child.kill("SIGSTOP")).toBe(true);
+    expect(existsSync(recoveryMarker)).toBe(true);
+    const second = fixture.spawnBootstrap("D");
+    await waitForPendingReference(fixture.stateRoot, second.child.pid!, second.child);
+    expect(second.child.exitCode).toBeNull();
+    expect(existsSync(recoveryMarker)).toBe(true);
+    expect(first.child.kill("SIGCONT")).toBe(true);
+    const [firstResult, secondResult] = await Promise.all([first.outcome, second.outcome]);
+    expect(firstResult.status, firstResult.stderr).toBe(0);
+    expect(secondResult.status, secondResult.stderr).toBe(0);
+    const firstReceipt = JSON.parse(firstResult.stdout);
+    const secondReceipt = JSON.parse(secondResult.stdout);
+    expect(firstReceipt).toMatchObject({ status: "succeeded" });
+    expect(secondReceipt).toMatchObject({ status: "succeeded" });
+    const reference = JSON.parse(readFileSync(fixture.referencePath, "utf8"));
+    expect(new Set([reference.currentStateKey, reference.predecessorStateKey])).toEqual(
+      new Set([firstReceipt.stateKey, secondReceipt.stateKey]),
+    );
+  }, 60_000);
+
+  test("serialises stale-lock recovery against maintenance cleanup", async () => {
+    expect(process.platform).toBe("darwin");
+    const fixture = referenceFixture("bootstrap-reference-maintenance-race");
+    expect(await sdlc.bootstrap(fixture.optionsFor("A"))).toMatchObject({ status: "succeeded" });
+    const staleOwner = fixture.spawnBootstrap("B");
+    await waitForPath(fixture.lockPath, staleOwner.child);
+    expect(staleOwner.child.kill("SIGKILL")).toBe(true);
+    await staleOwner.outcome;
+    const locksRoot = dirname(fixture.lockPath);
+    const staleMarker = join(
+      locksRoot,
+      readdirSync(locksRoot).find((name) => name.endsWith(".marker"))!,
+    );
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(fixture.lockPath, old, old);
+    utimesSync(staleMarker, old, old);
+
+    const recovery = fixture.spawnBootstrap("C");
+    const recoveryMarker = await waitForRecoveryMarker(
+      locksRoot,
+      recovery.child.pid!,
+      recovery.child,
+    );
+    expect(recovery.child.kill("SIGSTOP")).toBe(true);
+    expect(existsSync(recoveryMarker)).toBe(true);
+    const maintenance = fixture.spawnMaintenance("contended");
+    await waitForPath(maintenance.startedPath, maintenance.child);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(maintenance.child.exitCode).toBeNull();
+    expect(existsSync(recoveryMarker)).toBe(true);
+    expect(recovery.child.kill("SIGCONT")).toBe(true);
+    const [recoveryResult, maintenanceResult] = await Promise.all([
+      recovery.outcome,
+      maintenance.outcome,
+    ]);
+    expect(recoveryResult.status, recoveryResult.stderr).toBe(0);
+    expect(JSON.parse(recoveryResult.stdout)).toMatchObject({ status: "succeeded" });
+    expect(maintenanceResult.status, maintenanceResult.stderr).toBe(0);
+    expect(JSON.parse(maintenanceResult.stdout)).toMatchObject({ status: "succeeded" });
+    const reference = JSON.parse(readFileSync(fixture.referencePath, "utf8"));
+    expect(existsSync(join(fixture.stateRoot, reference.currentStateKey, "state.json"))).toBe(true);
+  }, 60_000);
 
   test("recovers an exact commit lock whose owner was killed", async () => {
     expect(process.platform).toBe("darwin");
@@ -303,6 +447,39 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     const completed = await outcome;
     expect(completed.status, completed.stderr).toBe(0);
     expect(JSON.parse(completed.stdout)).toMatchObject({ status: "succeeded" });
+  }, 60_000);
+
+  test("fails safely when an unrelated listener occupies the deterministic recovery port", async () => {
+    expect(process.platform).toBe("darwin");
+    const fixture = referenceFixture("bootstrap-reference-port-collision");
+    const initial = await sdlc.bootstrap(fixture.optionsFor("A"));
+    expect(initial).toMatchObject({ status: "succeeded" });
+    const hexadecimal = sdlc.digest({
+      boundary: "bootstrap-reference-recovery",
+      stateRoot: fixture.stateRoot,
+      consumer: fixture.project,
+      consumerRoot: realpathSync(fixture.root),
+    }).slice("sha256:".length, "sha256:".length + 8);
+    const port = 10_000 + Number.parseInt(hexadecimal, 16) % 20_000;
+    const listener = createServer();
+    await new Promise<void>((resolve, reject) => {
+      listener.once("error", reject);
+      listener.listen({ host: "127.0.0.1", port, exclusive: true }, () => resolve());
+    });
+    try {
+      const collision = await sdlc.bootstrap(fixture.optionsFor("B"));
+      expect(collision).toMatchObject({
+        status: "failed",
+        reason: "reference_commit_busy",
+        diagnostics: [{ code: "BOOTSTRAP_REFERENCE_COMMIT_BUSY" }],
+      });
+      const reference = JSON.parse(readFileSync(fixture.referencePath, "utf8"));
+      expect(reference.currentStateKey).toBe(initial.stateKey);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        listener.close((error) => error === undefined ? resolve() : reject(error));
+      });
+    }
   }, 60_000);
 
   test("fails closed on symlinked or replaced commit lock markers", async () => {

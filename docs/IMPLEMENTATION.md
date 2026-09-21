@@ -291,23 +291,27 @@ every current state and immediate predecessor and expires only old states made
 explicitly unreferenced by valid producer metadata. The first released
 `tc.sdlc/bootstrap-reference/v2` contract separates committed consumer
 references from identity-bound pending transactions. Bootstrap publishes a
-pending transaction, acquires a crash-durable per-consumer commit lock by
-hard-linking a fully fsynced owner marker, revalidates the exact state inside
-that boundary, atomically commits v2, then releases only unchanged lock and
-pending evidence. The lock binds PID and operating-system process-start
+pending transaction, acquires a kernel-held per-consumer recovery boundary,
+then creates the commit lock by hard-linking a fully fsynced owner marker. The
+recovery boundary is a deterministic localhost listener in the non-ephemeral
+10000-29999 range; bootstrap and maintenance never scan an alternative port,
+and an unrelated collision terminates safely as busy. The operating system
+releases the listener on process death. The owner revalidates the exact state
+inside that boundary, atomically commits v2, then releases only unchanged lock
+and pending evidence. The lock binds PID and operating-system process-start
 identity: a live or ambiguous owner is never displaced, while a proven-dead
 owner is recovered with exact identity and byte checks. Maintenance moves an
 identity-matched candidate into quarantine, refreshes both pending and
-committed authorities,
-and restores the candidate when either matching authority appeared during the
-move or before interrupted-quarantine recovery. Dead pending transactions are
+committed authorities, and restores the candidate when either matching
+authority appeared during the move or before interrupted-quarantine recovery.
+Dead pending transactions are
 retained as authority for that run and expire only after their owner is proven
 absent and the 48-hour window has elapsed. Proven-dead linked lock/marker pairs
 and orphan pre-link markers follow the same 48-hour policy, with removals
 recorded separately as reference metadata in the maintenance receipt. Device
 and inode provide stable move authority; birthtime remains richer evidence but
-cannot veto a proven same-file
-rename on filesystems where it changes with ctime. A changed stable identity
+cannot veto a proven same-file rename on filesystems where it changes with
+ctime. A changed stable identity
 never grants deletion authority.
 Cleanup setup failures retain the candidate and terminate in a canonical failed
 maintenance receipt. The release-image producer uses a named tc-sdlc BuildKit

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:net";
 import {
   closeSync,
   existsSync,
@@ -23,6 +24,9 @@ const OWNER = "@three-cubes/tc-sdlc";
 const LOCK_SCHEMA = "tc.sdlc/bootstrap-reference-commit-lock/v1";
 const LOCK_WAIT_MILLISECONDS = 5_000;
 const LOCK_RETRY_MILLISECONDS = 25;
+const RECOVERY_SCHEMA = "tc.sdlc/bootstrap-reference-recovery-boundary/v1";
+const RECOVERY_PORT_BASE = 10_000;
+const RECOVERY_PORT_COUNT = 20_000;
 
 type BootstrapReferenceCommitLockMarker = Readonly<{
   schema: typeof LOCK_SCHEMA;
@@ -37,12 +41,36 @@ type BootstrapReferenceCommitLockMarker = Readonly<{
   createdAtMs: number;
 }>;
 
+type BootstrapReferenceRecoveryMarker = Readonly<{
+  schema: typeof RECOVERY_SCHEMA;
+  owner: typeof OWNER;
+  phase: "held";
+  token: string;
+  consumer: string;
+  consumerRoot: string;
+  pid: number;
+  processStartIdentity: string;
+  port: number;
+  createdAtMs: number;
+}>;
+
+type BootstrapReferenceRecoveryBoundary = Readonly<{
+  server: Server;
+  markerPath: string;
+  value: BootstrapReferenceRecoveryMarker;
+  bytes: string;
+  identity: FilesystemIdentity;
+}>;
+
+type ReferenceConsumer = Readonly<{ consumer: string; consumerRoot: string }>;
+
 export type BootstrapReferenceCommitLock = Readonly<{
   path: string;
   markerPath: string;
   value: BootstrapReferenceCommitLockMarker;
   bytes: string;
   identity: FilesystemIdentity;
+  recovery: BootstrapReferenceRecoveryBoundary;
 }>;
 
 export class BootstrapReferenceCommitError extends Error {
@@ -118,12 +146,43 @@ function validLockMarker(value: unknown): value is BootstrapReferenceCommitLockM
     Number.isSafeInteger(record.createdAtMs);
 }
 
+function validRecoveryMarker(value: unknown): value is BootstrapReferenceRecoveryMarker {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return record.schema === RECOVERY_SCHEMA && record.owner === OWNER &&
+    record.phase === "held" && validUuid(record.token) &&
+    typeof record.consumer === "string" && record.consumer.length > 0 &&
+    typeof record.consumerRoot === "string" && isAbsolute(record.consumerRoot) &&
+    Number.isSafeInteger(record.pid) && Number(record.pid) > 0 &&
+    typeof record.processStartIdentity === "string" && record.processStartIdentity.length > 0 &&
+    Number.isSafeInteger(record.port) && Number(record.port) >= RECOVERY_PORT_BASE &&
+    Number(record.port) < RECOVERY_PORT_BASE + RECOVERY_PORT_COUNT &&
+    Number.isSafeInteger(record.createdAtMs);
+}
+
 function lockStem(value: Pick<BootstrapReferenceCommitLockMarker, "consumer" | "consumerRoot">): string {
   return digest({ consumer: value.consumer, consumerRoot: value.consumerRoot }).slice("sha256:".length);
 }
 
 function markerName(value: BootstrapReferenceCommitLockMarker): string {
   return `${lockStem(value)}.${value.token}.marker`;
+}
+
+function recoveryMarkerName(value: BootstrapReferenceRecoveryMarker): string {
+  return `${lockStem(value)}.${value.token}.recovery`;
+}
+
+function recoveryPort(
+  stateRoot: string,
+  value: Pick<BootstrapReferenceCommitLockMarker, "consumer" | "consumerRoot">,
+): number {
+  const hexadecimal = digest({
+    boundary: "bootstrap-reference-recovery",
+    stateRoot,
+    consumer: value.consumer,
+    consumerRoot: value.consumerRoot,
+  }).slice("sha256:".length, "sha256:".length + 8);
+  return RECOVERY_PORT_BASE + Number.parseInt(hexadecimal, 16) % RECOVERY_PORT_COUNT;
 }
 
 function exactRegularFile(path: string, identity: FilesystemIdentity, bytes: string): boolean {
@@ -181,6 +240,118 @@ function removeExactFile(path: string, identity: FilesystemIdentity, bytes: stri
   return true;
 }
 
+async function bindRecoveryServer(port: number): Promise<Server> {
+  const server = createServer();
+  return await new Promise<Server>((resolve, reject) => {
+    const failed = (error: Error): void => {
+      server.removeListener("listening", listening);
+      reject(error);
+    };
+    const listening = (): void => {
+      server.removeListener("error", failed);
+      resolve(server);
+    };
+    server.once("error", failed);
+    server.once("listening", listening);
+    server.listen({ host: "127.0.0.1", port, exclusive: true });
+  });
+}
+
+async function acquireRecoveryBoundary(
+  stateRoot: string,
+  locks: string,
+  publication: Readonly<{ value: ReferenceConsumer }>,
+): Promise<BootstrapReferenceRecoveryBoundary> {
+  const port = recoveryPort(stateRoot, publication.value);
+  const deadline = Date.now() + LOCK_WAIT_MILLISECONDS;
+  let server: Server | undefined;
+  while (server === undefined) {
+    try {
+      server = await bindRecoveryServer(port);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") {
+        throw new BootstrapReferenceCommitError(
+          "invalid",
+          "bootstrap reference recovery boundary could not be acquired",
+        );
+      }
+      if (Date.now() >= deadline) {
+        throw new BootstrapReferenceCommitError(
+          "busy",
+          "another live or ambiguous process owns the reference recovery boundary",
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MILLISECONDS));
+    }
+  }
+  const startIdentity = processStartIdentity(process.pid);
+  if (startIdentity === undefined) {
+    server.close();
+    throw new BootstrapReferenceCommitError(
+      "invalid",
+      "current process start identity could not be established",
+    );
+  }
+  const value: BootstrapReferenceRecoveryMarker = {
+    schema: RECOVERY_SCHEMA,
+    owner: OWNER,
+    phase: "held",
+    token: randomUUID(),
+    consumer: publication.value.consumer,
+    consumerRoot: publication.value.consumerRoot,
+    pid: process.pid,
+    processStartIdentity: startIdentity,
+    port,
+    createdAtMs: Date.now(),
+  };
+  const markerPath = join(locks, recoveryMarkerName(value));
+  try {
+    writeCanonicalEvidence(markerPath, value);
+    return {
+      server,
+      markerPath,
+      value,
+      bytes: canonicalJson(value),
+      identity: filesystemIdentity(markerPath),
+    };
+  } catch (error) {
+    server.close();
+    throw error;
+  }
+}
+
+function assertRecoveryBoundary(boundary: BootstrapReferenceRecoveryBoundary): void {
+  if (!boundary.server.listening ||
+      !exactRegularFile(boundary.markerPath, boundary.identity, boundary.bytes)) {
+    throw new BootstrapReferenceCommitError(
+      "invalid",
+      "bootstrap reference recovery boundary changed while held",
+    );
+  }
+}
+
+function releaseRecoveryBoundary(boundary: BootstrapReferenceRecoveryBoundary): void {
+  let failure: unknown;
+  try {
+    if (!exactRegularFile(boundary.markerPath, boundary.identity, boundary.bytes)) {
+      throw new BootstrapReferenceCommitError(
+        "invalid",
+        "bootstrap reference recovery marker changed during release",
+      );
+    }
+    unlinkSync(boundary.markerPath);
+    fsyncDirectory(dirname(boundary.markerPath));
+  } catch (error) {
+    failure = error;
+  }
+  try {
+    boundary.server.close();
+  } catch (error) {
+    failure ??= error;
+  }
+  if (failure !== undefined) throw failure;
+}
+
 function recoverDeadLock(
   path: string,
   locks: string,
@@ -216,9 +387,10 @@ export async function acquireBootstrapReferenceCommitLock(
   const { locks } = lockDirectories(stateRoot);
   const stem = lockStem(publication.value);
   const path = join(locks, `${stem}.lock`);
-  const token = randomUUID();
+  const recovery = await acquireRecoveryBoundary(stateRoot, locks, publication);
   const startIdentity = processStartIdentity(process.pid);
   if (startIdentity === undefined) {
+    releaseRecoveryBoundary(recovery);
     throw new BootstrapReferenceCommitError(
       "invalid",
       "current process start identity could not be established",
@@ -228,7 +400,7 @@ export async function acquireBootstrapReferenceCommitLock(
     schema: LOCK_SCHEMA,
     owner: OWNER,
     phase: "held",
-    token,
+    token: randomUUID(),
     transaction: publication.value.transaction,
     consumer: publication.value.consumer,
     consumerRoot: publication.value.consumerRoot,
@@ -237,63 +409,58 @@ export async function acquireBootstrapReferenceCommitLock(
     createdAtMs: Date.now(),
   };
   const markerPath = join(locks, markerName(value));
-  writeCanonicalEvidence(markerPath, value);
-  const lock: BootstrapReferenceCommitLock = {
-    path,
-    markerPath,
-    value,
-    bytes: canonicalJson(value),
-    identity: filesystemIdentity(markerPath),
-  };
-  const deadline = Date.now() + LOCK_WAIT_MILLISECONDS;
-  while (true) {
-    try {
-      linkSync(markerPath, path);
-      fsyncDirectory(locks);
-      if (!exactRegularFile(path, lock.identity, lock.bytes)) {
-        throw new BootstrapReferenceCommitError(
-          "invalid",
-          "bootstrap reference commit lock changed during acquisition",
-        );
-      }
-      return lock;
-    } catch (error) {
-      if (error instanceof BootstrapReferenceCommitError) {
-        discardOwnMarker(lock);
-        throw error;
-      }
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-        discardOwnMarker(lock);
-        throw new BootstrapReferenceCommitError(
-          "invalid",
-          "bootstrap reference commit lock could not be acquired",
-        );
-      }
-      let existing: ReturnType<typeof inspectExistingLock>;
+  let lock: BootstrapReferenceCommitLock | undefined;
+  let acquired = false;
+  try {
+    writeCanonicalEvidence(markerPath, value);
+    lock = {
+      path,
+      markerPath,
+      value,
+      bytes: canonicalJson(value),
+      identity: filesystemIdentity(markerPath),
+      recovery,
+    };
+    const deadline = Date.now() + LOCK_WAIT_MILLISECONDS;
+    while (true) {
       try {
-        existing = inspectExistingLock(path, locks, publication);
-      } catch (inspectionError) {
-        discardOwnMarker(lock);
-        throw inspectionError;
-      }
-      const ownerState = processOwnerState(
-        existing.value.pid,
-        existing.value.processStartIdentity,
-      );
-      if (ownerState === "dead") {
-        recoverDeadLock(path, locks, existing);
-        continue;
-      }
-      if (Date.now() >= deadline) {
-        discardOwnMarker(lock);
-        throw new BootstrapReferenceCommitError(
-          "busy",
-          ownerState === "live"
-            ? "another live bootstrap owns the consumer reference commit lock"
-            : "the consumer reference commit lock owner could not be proven dead",
+        linkSync(markerPath, path);
+        fsyncDirectory(locks);
+        assertBootstrapReferenceCommitLock(lock);
+        acquired = true;
+        return lock;
+      } catch (error) {
+        if (error instanceof BootstrapReferenceCommitError) throw error;
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+          throw new BootstrapReferenceCommitError(
+            "invalid",
+            "bootstrap reference commit lock could not be acquired",
+          );
+        }
+        const existing = inspectExistingLock(path, locks, publication);
+        const ownerState = processOwnerState(
+          existing.value.pid,
+          existing.value.processStartIdentity,
         );
+        if (ownerState === "dead") {
+          recoverDeadLock(path, locks, existing);
+          continue;
+        }
+        if (Date.now() >= deadline) {
+          throw new BootstrapReferenceCommitError(
+            "busy",
+            ownerState === "live"
+              ? "another live bootstrap owns the consumer reference commit lock"
+              : "the consumer reference commit lock owner could not be proven dead",
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MILLISECONDS));
       }
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MILLISECONDS));
+    }
+  } finally {
+    if (!acquired) {
+      if (lock !== undefined) discardOwnMarker(lock);
+      releaseRecoveryBoundary(recovery);
     }
   }
 }
@@ -301,6 +468,7 @@ export async function acquireBootstrapReferenceCommitLock(
 export function assertBootstrapReferenceCommitLock(
   lock: BootstrapReferenceCommitLock,
 ): void {
+  assertRecoveryBoundary(lock.recovery);
   if (!exactRegularFile(lock.markerPath, lock.identity, lock.bytes) ||
       !exactRegularFile(lock.path, lock.identity, lock.bytes)) {
     throw new BootstrapReferenceCommitError(
@@ -313,22 +481,102 @@ export function assertBootstrapReferenceCommitLock(
 export function releaseBootstrapReferenceCommitLock(
   lock: BootstrapReferenceCommitLock,
 ): void {
-  assertBootstrapReferenceCommitLock(lock);
-  unlinkSync(lock.path);
-  fsyncDirectory(dirname(lock.path));
-  if (!removeExactFile(lock.markerPath, lock.identity, lock.bytes)) {
-    throw new BootstrapReferenceCommitError(
-      "invalid",
-      "bootstrap reference commit marker changed during release",
-    );
+  let failure: unknown;
+  try {
+    assertBootstrapReferenceCommitLock(lock);
+    unlinkSync(lock.path);
+    fsyncDirectory(dirname(lock.path));
+    if (!removeExactFile(lock.markerPath, lock.identity, lock.bytes)) {
+      throw new BootstrapReferenceCommitError(
+        "invalid",
+        "bootstrap reference commit marker changed during release",
+      );
+    }
+    fsyncDirectory(dirname(lock.path));
+  } catch (error) {
+    failure = error;
   }
-  fsyncDirectory(dirname(lock.path));
+  try {
+    releaseRecoveryBoundary(lock.recovery);
+  } catch (error) {
+    failure ??= error;
+  }
+  if (failure !== undefined) throw failure;
 }
 
-export function cleanupExpiredDeadReferenceLockMarkers(
+type ExpiredMarker = Readonly<{
+  bytes: string;
+  identity: FilesystemIdentity;
+  links: number;
+}>;
+
+function expiredMarker(path: string, cutoff: number): ExpiredMarker | undefined {
+  const details = lstatSync(path);
+  if (!details.isFile() || details.isSymbolicLink() || details.mtimeMs > cutoff) return undefined;
+  return {
+    bytes: readFileSync(path, "utf8"),
+    identity: filesystemIdentity(path),
+    links: details.nlink,
+  };
+}
+
+async function cleanupRecoveryMarker(
+  stateRoot: string,
+  locks: string,
+  name: string,
+  cutoff: number,
+): Promise<boolean> {
+  const path = join(locks, name);
+  const marker = expiredMarker(path, cutoff);
+  if (marker === undefined) return false;
+  const value = JSON.parse(marker.bytes) as unknown;
+  if (marker.bytes !== canonicalJson(value) || !validRecoveryMarker(value) ||
+      name !== recoveryMarkerName(value) ||
+      processOwnerState(value.pid, value.processStartIdentity) !== "dead") return false;
+  const boundary = await acquireRecoveryBoundary(stateRoot, locks, { value });
+  try {
+    return removeExactFile(path, marker.identity, marker.bytes);
+  } finally {
+    releaseRecoveryBoundary(boundary);
+  }
+}
+
+async function cleanupCommitMarker(
+  stateRoot: string,
+  locks: string,
+  name: string,
+  cutoff: number,
+): Promise<boolean> {
+  const path = join(locks, name);
+  const marker = expiredMarker(path, cutoff);
+  if (marker === undefined || marker.links > 2) return false;
+  const value = JSON.parse(marker.bytes) as unknown;
+  if (marker.bytes !== canonicalJson(value) || !validLockMarker(value) ||
+      name !== markerName(value) ||
+      processOwnerState(value.pid, value.processStartIdentity) !== "dead") return false;
+  const boundary = await acquireRecoveryBoundary(stateRoot, locks, { value });
+  try {
+    const refreshed = expiredMarker(path, cutoff);
+    if (refreshed === undefined || refreshed.links > 2 ||
+        !exactIdentity(refreshed.identity, marker.identity) ||
+        refreshed.bytes !== marker.bytes ||
+        processOwnerState(value.pid, value.processStartIdentity) !== "dead") return false;
+    if (refreshed.links === 2) {
+      const lockPath = join(locks, `${lockStem(value)}.lock`);
+      if (!exactRegularFile(lockPath, marker.identity, marker.bytes)) return false;
+      unlinkSync(lockPath);
+      fsyncDirectory(locks);
+    }
+    return removeExactFile(path, marker.identity, marker.bytes);
+  } finally {
+    releaseRecoveryBoundary(boundary);
+  }
+}
+
+export async function cleanupExpiredDeadReferenceLockMarkers(
   stateRoot: string,
   cutoff: number,
-): number {
+): Promise<number> {
   const locks = join(stateRoot, "references", "locks");
   let removed = 0;
   try {
@@ -336,28 +584,15 @@ export function cleanupExpiredDeadReferenceLockMarkers(
     const root = lstatSync(locks);
     if (!root.isDirectory() || root.isSymbolicLink()) return 0;
     for (const name of readdirSync(locks).sort()) {
-      if (!name.endsWith(".marker")) continue;
-      const path = join(locks, name);
       try {
-        const details = lstatSync(path);
-        if (!details.isFile() || details.isSymbolicLink() || details.nlink > 2 ||
-            details.mtimeMs > cutoff) continue;
-        const bytes = readFileSync(path, "utf8");
-        const value = JSON.parse(bytes) as unknown;
-        if (bytes !== canonicalJson(value) || !validLockMarker(value) ||
-            name !== markerName(value) ||
-            processOwnerState(value.pid, value.processStartIdentity) !== "dead") continue;
-        const identity = filesystemIdentity(path);
-        if (details.nlink === 2) {
-          const lockPath = join(locks, `${lockStem(value)}.lock`);
-          if (!exactRegularFile(lockPath, identity, bytes) ||
-              !exactRegularFile(path, identity, bytes)) continue;
-          unlinkSync(lockPath);
-          fsyncDirectory(locks);
-        }
-        if (removeExactFile(path, identity, bytes)) removed += 1;
+        const didRemove = name.endsWith(".recovery")
+          ? await cleanupRecoveryMarker(stateRoot, locks, name, cutoff)
+          : name.endsWith(".marker")
+            ? await cleanupCommitMarker(stateRoot, locks, name, cutoff)
+            : false;
+        if (didRemove) removed += 1;
       } catch {
-        // A concurrent bootstrap or maintenance pass won. Reinspect next time.
+        // Live, ambiguous, changed or contended evidence is retained.
       }
     }
     if (removed > 0) fsyncDirectory(locks);
