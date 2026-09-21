@@ -69,11 +69,11 @@ States:
 | F5 | Native macOS/Linux bootstrap owns exact Node, pnpm, Python and uv execution state without ambient user configuration. | VERIFIED | Bootstrap and lifecycle implementation through `896bd4c`; package suite 131/131, Darwin integration 19/19 and Docker lifecycle probes 2/2 passed. Independent review reproduced both final recovery regressions against the parent and passed the fixes. | None for the native bootstrap boundary. |
 | F6 | Concurrent bootstrap, state invalidation and maintenance preserve one valid current/predecessor state across crash, alias and replacement races. | VERIFIED | Bootstrap lifecycle implementation through `8e0bc391`; build, package suite 151/151, focused public recovery 3/3, Darwin integration 25/25 and Docker lifecycle 2/2 passed. Independent review reproduced referenced and pre-reference corruption, invalid authority and live-lease cases through the public CLI and found no material issue. | None. |
 | F7 | Python-only, pnpm-only and mixed consumers use real locked dependencies through the packed public CLI. | VERIFIED | Disposable-consumer implementation through `4eaa0234`; build, package suite 151/151 and packed public journeys 5/5 passed. Independent review verified exact Python and Node dependencies, mixed downstream closure, local dependency-shadow resistance, hostile launcher-environment isolation, executable packaging from paths containing spaces and zero-download offline frozen replay from an isolated seeded store. | None. |
-| F8 | `tc-fitness` `0.17.0` runs as a first-class graph task and a version mismatch is rejected. | IN PROGRESS | The coordinated version is declared in the implementation contract. | Add the real fixture target, retained receipt and version-sabotage journey. |
+| F8 | `tc-fitness` `0.17.1` runs once as an independently executable, repository-scoped graph task and a version mismatch is rejected. | IN PROGRESS | The current immutable release is `v0.17.1`; the graph and evidence machinery required by the task is verified through F7. The existing generic target fan-out and unavailable custom executor do not satisfy this boundary. | Add the public fitness executor and receipt; run the managed distribution through the packed CLI; retain engine, profile, config and gate identities; sabotage executable origin and installed-versus-lock version. |
 | F9 | Native, canonical-image and hosted runs bind the same source, lock, input and task identities. | IN PROGRESS | The exact multi-platform image producer completed one local-registry qualification; that image-only proof is retained but is not release admission. | Run every disposable consumer on native and exact-image boundaries; add hosted identity evidence; parse terminal receipts and compare recomputed identities. |
 | F10 | Warm affected feedback is under 60 seconds and concurrency honours detected CPU and declared resources. | IN PROGRESS | Scheduler resource semantics are verified by Task 3. | Measure the retained consumer result rather than a self-reported value; prove one-core/multi-core determinism, maximum safe workers, observed peak concurrency and the hard warm-loop budget. |
 | F11 | The immutable amd64/arm64 image is published by digest with provenance, SBOM and installed-tool verification. | IN PROGRESS | The image-only producer published and re-used an exact local-registry index with both platform probes passing. | Integrate the reviewed producer; rerun the exact image proof after Task 6 and release-transport changes; retain cleanup results. |
-| F12 | The public `tc-sdlc qualify` command runs functional qualification and derives every claim from tracked fixtures and retained terminal evidence. | IN PROGRESS | Qualification requirements and receipt fields are defined below. | Implement the package-owned command and schema; recompute the fixture inventory; parse success, environment, producer and identity fields; bind named evidence files and derive timings; sabotage every boundary. |
+| F12 | Public component commands qualify consumers and the immutable image independently; release admission derives every claim from their retained terminal evidence. | IN PROGRESS | Component interfaces, dependency order and receipt ownership are defined below. | Implement each package-owned command and schema in dependency order; independently sabotage each receipt boundary; then prove their composition through release admission. |
 | F13 | Only a successful image plus functional qualification may generate the catalogue and Dev Container files. | IN PROGRESS | Unqualified tracked catalogue and Dev Container authority was removed at `318656a`; generation now requires both receipt inputs on the release branch. | Complete validator integration and prove failed, stale or altered inputs cannot create either output. |
 | F14 | A trusted bot writes exactly the two generated outputs to the unchanged PR head with an exact Git lease. | IN PROGRESS | Event selection, output allowlist, bot identity and lease-safe transport have focused tests on the release branch. | Integrate the workflow; verify immutable credential code, normal Git hooks, post-hook byte checks, early-failure evidence and real hosted writeback. |
 | F15 | All commands clean owned scratch and containers while retaining required release and failure evidence. | IN PROGRESS | Native lifecycle cleanup and recovery are verified through Task 5; image producer cleanup passed its local-registry run. | Assert registry, builder, container, image and state cleanup in the final exact-image journey and preserve referenced release artefacts. |
@@ -146,7 +146,7 @@ each task remains independently executable before the next consumes it.
   `7.0.2`, Vitest `5.0.1`, `yaml` `2.9.1`, Ajv `8.20.0` and `@types/node`
   `24.13.6` are exact pins.
 - Python is `3.13`, uv is `0.12.5`, and the coordinated fitness engine is
-  `three-cubes-fitness` `0.17.0`.
+  `three-cubes-fitness` `0.17.1`.
 - Runtime package dependencies use exact versions. Internal workspace
   dependencies use `workspace:*` and resolve through the root
   `pnpm-lock.yaml`.
@@ -378,14 +378,14 @@ references provide deletion authority. Task 5 emits that retention declaration
 but deliberately implements no successful-release artefact collector: until a
 canonical reference inventory exists, successful artefacts are retained.
 
-### Task 6 — Disposable consumers and hosted adapter
+### Task 6 — Independently executable qualification components
 
 **Status:** in progress
 
 **Files**
 
-- `packages/tc-sdlc/src/qualification/` owns the versioned qualification
-  command, receipt schema and validation.
+- `packages/tc-sdlc/src/qualification/` owns the versioned component commands,
+  receipt schemas and validation.
 - `assurance/fixtures/sdlc/` contains Python-only, pnpm-only and mixed-language
   consumers used to exercise the public command.
 - `assurance/run.py` independently verifies the released command and retained
@@ -393,25 +393,13 @@ canonical reference inventory exists, successful artefacts are retained.
 - `.github/workflows/hosted-assurance.yml` provides runner allocation and hosted
   identity while executing the same CLI contract.
 
-The components remain independently executable:
-
-1. `tc-sdlc qualify` accepts a fixture manifest, exact image receipt and output
-   directory, executes the real disposable consumers, and emits
-   `tc.sdlc/functional-qualification/v1`.
-2. The image producer emits `tc.sdlc/image-release/v1` without requiring a
-   functional receipt.
-3. Release admission accepts the two versioned receipts and recomputes their
-   bindings. It does not call either producer.
-4. Release generation emits the catalogue and Dev Container files only after
-   admission.
-5. Writeback accepts the generation receipt and uses real Git transport. It has
-   no dependency on fixture execution or image construction.
-6. The hosted workflow composes these public interfaces and adds one complete
-   integration journey.
-
-Component tests use real disposable inputs and retained receipts produced by
-the owning component. Hand-written passing receipts, mocked producers and
-repository-private script calls cannot satisfy acceptance.
+The canonical component interfaces, receipt ownership and dependency graph are
+defined in
+[`ai-sdlc-product-architecture.md`](../governance/standards/ai-sdlc-product-architecture.md#component-model).
+Task 6 implements those interfaces in dependency order. Component tests invoke
+the packed public command with real disposable inputs and validate the receipt
+owned by that command. The complete hosted journey runs after every component
+has its own acceptance evidence.
 
 Each fixture proves clean bootstrap, preparation fixed point, affected closure,
 full graph execution, stable identity across worker counts, and retained failure
