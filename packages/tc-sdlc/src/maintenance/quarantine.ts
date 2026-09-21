@@ -14,6 +14,7 @@ import { canonicalJson } from "../canonical.js";
 import type { FilesystemIdentity, MaintenanceEntry, MaintenanceRetainedEntry } from "./types.js";
 
 export const QUARANTINE_PREFIX = ".tc-sdlc-quarantine-";
+export const DEFAULT_CLEANUP_WORKER_MS = 120_000;
 const MARKER = ".tc-sdlc-quarantine.json";
 const OWNER = "@three-cubes/tc-sdlc";
 
@@ -77,7 +78,6 @@ function payloadPhase(
   marker: QuarantineMarker | undefined,
 ): "empty" | "candidate" | "deleting" | undefined {
   const entries = readdirSync(root).sort();
-  if (entries.length === 0 && marker === undefined) return "empty";
   if (marker === undefined || entries[0] !== MARKER) return undefined;
   if (entries.length === 1) return "empty";
   if (
@@ -91,21 +91,41 @@ function payloadPhase(
 export function deleteQuarantineRoot(
   root: string,
   identity: FilesystemIdentity,
+  timeoutMs: number,
 ): Promise<boolean> {
   return new Promise((resolve) => {
-    const worker = new Worker(new URL("./deletion-worker.js", import.meta.url), {
-      workerData: { root, identity },
-    });
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("./deletion-worker.js", import.meta.url), {
+        workerData: { root, identity },
+      });
+    } catch {
+      resolve(false);
+      return;
+    }
     let completed = false;
-    worker.once("message", (message: Readonly<{ status?: string }>) => {
+    const finish = (removed: boolean): void => {
+      if (completed) return;
       completed = true;
-      resolve(message.status === "removed");
+      clearTimeout(timer);
+      resolve(removed);
+    };
+    const timer = setTimeout(() => {
+      if (completed) return;
+      completed = true;
+      void worker.terminate().then(
+        () => resolve(false),
+        () => resolve(false),
+      );
+    }, timeoutMs);
+    worker.once("message", (message: Readonly<{ status?: string }>) => {
+      finish(message.status === "removed");
     });
     worker.once("error", () => {
-      if (!completed) resolve(false);
+      finish(false);
     });
     worker.once("exit", () => {
-      if (!completed) resolve(false);
+      finish(false);
     });
   });
 }
@@ -170,6 +190,7 @@ export async function removeQuarantineCandidate(
   base: string,
   candidate: MaintenanceEntry,
   cutoff: number,
+  timeoutMs: number,
 ): Promise<Readonly<{ removed: boolean; retained?: MaintenanceRetainedEntry }>> {
   const root = join(base, candidate.path);
   const marker = readMarker(root);
@@ -181,7 +202,7 @@ export async function removeQuarantineCandidate(
   ) {
     return { removed: false, retained: { path: candidate.path, reason: "changed_during_apply" } };
   }
-  const removed = await deleteQuarantineRoot(root, candidate.identity);
+  const removed = await deleteQuarantineRoot(root, candidate.identity, timeoutMs);
   return removed
     ? { removed: true }
     : { removed: false, retained: { path: candidate.path, reason: "inspection_failed" } };

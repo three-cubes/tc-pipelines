@@ -13,6 +13,7 @@ import {
   removeTemporaryCandidates,
 } from "./scratch.js";
 import { pruneManagedTools } from "./tools.js";
+import { DEFAULT_CLEANUP_WORKER_MS } from "./quarantine.js";
 import type { MaintenanceOptions, MaintenanceReceipt } from "./types.js";
 
 export { recoverInterruptedTemporaryState } from "./scratch.js";
@@ -48,6 +49,7 @@ function receipt(
     reclaimedBytes: 0,
     entriesTruncated: false,
     cleanupWorkers: options.cleanupWorkers ?? DEFAULT_CLEANUP_WORKERS,
+    cleanupWorkerMs: options.cleanupWorkerMs ?? DEFAULT_CLEANUP_WORKER_MS,
     peakCleanupWorkers: 0,
     cleanupFailures: 0,
     candidates: [],
@@ -88,6 +90,7 @@ function optionsAreValid(
   retentionHours: number,
   maxEntries: number,
   cleanupWorkers: number,
+  cleanupWorkerMs: number,
 ): boolean {
   return (
     isAbsolute(options.stateRoot) &&
@@ -99,6 +102,9 @@ function optionsAreValid(
     Number.isSafeInteger(cleanupWorkers) &&
     cleanupWorkers > 0 &&
     cleanupWorkers <= MAX_CLEANUP_WORKERS &&
+    Number.isSafeInteger(cleanupWorkerMs) &&
+    cleanupWorkerMs > 0 &&
+    cleanupWorkerMs <= 600_000 &&
     (options.mode === "dry-run" || options.mode === "apply")
   );
 }
@@ -107,9 +113,16 @@ export async function maintain(options: MaintenanceOptions): Promise<Maintenance
   const retentionHours = options.retentionHours ?? DEFAULT_RETENTION_HOURS;
   const maxEntries = options.maxEntries ?? MAX_ENTRIES;
   const cleanupWorkers = options.cleanupWorkers ?? DEFAULT_CLEANUP_WORKERS;
+  const cleanupWorkerMs = options.cleanupWorkerMs ?? DEFAULT_CLEANUP_WORKER_MS;
   const temporaryRoot = resolve(options.temporaryRoot ?? tmpdir());
   const stateRoot = resolve(options.stateRoot);
-  if (!optionsAreValid(options, retentionHours, maxEntries, cleanupWorkers)) {
+  if (!optionsAreValid(
+    options,
+    retentionHours,
+    maxEntries,
+    cleanupWorkers,
+    cleanupWorkerMs,
+  )) {
     return writeReceipt(
       options.receiptPath,
       receipt(options, { status: "failed", reason: "invalid_options" }),
@@ -156,6 +169,7 @@ export async function maintain(options: MaintenanceOptions): Promise<Maintenance
       inspected.candidates,
       cutoff,
       cleanupWorkers,
+      cleanupWorkerMs,
     );
     removedCount = removal.removedCount;
     reclaimedBytes = removal.reclaimedBytes;
@@ -167,6 +181,7 @@ export async function maintain(options: MaintenanceOptions): Promise<Maintenance
       stateCandidates,
       cutoff,
       cleanupWorkers,
+      cleanupWorkerMs,
     );
     removedCount += stateRemoval.removedCount;
     reclaimedBytes += stateRemoval.reclaimedBytes;
@@ -189,6 +204,7 @@ export async function maintain(options: MaintenanceOptions): Promise<Maintenance
       reclaimedBytes,
       entriesTruncated: inspected.truncated || stateTruncated,
       cleanupWorkers,
+      cleanupWorkerMs,
       peakCleanupWorkers,
       cleanupFailures,
       candidates: [...inspected.candidates, ...stateCandidates],

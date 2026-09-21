@@ -209,6 +209,7 @@ export async function removeBootstrapStates(
   candidates: readonly MaintenanceEntry[],
   cutoff: number,
   workers: number,
+  cleanupWorkerMs: number,
 ): Promise<RemovalResult> {
   const results: Array<
     | Readonly<{ removed: true; bytes: number }>
@@ -223,7 +224,19 @@ export async function removeBootstrapStates(
       const candidate = candidates[index]!;
       const path = join(stateRoot, candidate.path);
       if (candidate.kind === "quarantine") {
-        const recovered = await removeQuarantineCandidate(stateRoot, candidate, cutoff);
+        activeWorkers += 1;
+        peakWorkers = Math.max(peakWorkers, activeWorkers);
+        let recovered: Awaited<ReturnType<typeof removeQuarantineCandidate>>;
+        try {
+          recovered = await removeQuarantineCandidate(
+            stateRoot,
+            candidate,
+            cutoff,
+            cleanupWorkerMs,
+          );
+        } finally {
+          activeWorkers -= 1;
+        }
         results[index] = recovered.removed
           ? { removed: true, bytes: candidate.bytes ?? 0 }
           : {
@@ -288,6 +301,7 @@ export async function removeBootstrapStates(
           const removed = await deleteQuarantineRoot(
             quarantineRoot,
             filesystemIdentity(quarantineRoot),
+            cleanupWorkerMs,
           );
           if (!removed) throw new Error("quarantine deletion failed");
         } finally {

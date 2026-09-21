@@ -371,6 +371,7 @@ describe("tc-sdlc managed lifecycle", () => {
       expect.objectContaining({ kind: "quarantine", path: quarantine }),
     );
     expect(receipt.removedCount).toBe(1);
+    expect(receipt.peakCleanupWorkers).toBe(1);
     expect(existsSync(recoveryPath)).toBe(false);
 
     const foreign = join(parent, ".tc-sdlc-quarantine-foreign");
@@ -444,11 +445,53 @@ describe("tc-sdlc managed lifecycle", () => {
       receiptPath: join(evidence, "empty-quarantine.json"),
       mode: "apply",
     });
-    expect(emptyRecovery.candidates).toContainEqual(
-      expect.objectContaining({ kind: "quarantine", path: ".tc-sdlc-quarantine-empty" }),
-    );
-    expect(existsSync(emptyInterrupted)).toBe(false);
+    expect(emptyRecovery.retained).toContainEqual({
+      path: ".tc-sdlc-quarantine-empty",
+      reason: "foreign",
+    });
+    expect(existsSync(emptyInterrupted)).toBe(true);
   }, 30_000);
+
+  test("bounds deletion-worker lifecycle and records a terminal cleanup failure", async () => {
+    const parent = temporary("tc-sdlc-maintenance-worker-budget-");
+    const stateRoot = temporary("tc-sdlc-maintenance-state-");
+    const evidence = temporary("tc-sdlc-maintenance-evidence-");
+    ownedState(stateRoot);
+    const candidate = managedTemporary(parent, "tc-sdlc-evaluation-worker-budget", {
+      pid: 2_147_483_647,
+      old: true,
+    });
+    for (let index = 0; index < 2_000; index += 1) {
+      writeFileSync(join(candidate, `entry-${index}.txt`), "owned\n");
+    }
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(candidate, old, old);
+    const foreign = join(parent, "tc-sdlc-foreign-worker-budget");
+    mkdirSync(foreign);
+    writeFileSync(join(foreign, "keep.txt"), "foreign bytes\n");
+
+    const receipt = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "worker-budget.json"),
+      mode: "apply",
+      cleanupWorkerMs: 1,
+    });
+
+    expect(receipt).toMatchObject({
+      status: "failed",
+      reason: "temporary_cleanup_failed",
+      cleanupWorkerMs: 1,
+      peakCleanupWorkers: 1,
+      cleanupFailures: 1,
+      removedCount: 0,
+    });
+    expect(readFileSync(join(foreign, "keep.txt"), "utf8")).toBe("foreign bytes\n");
+    expect(
+      existsSync(candidate) ||
+      readdirSync(parent).some((name) => name.startsWith(".tc-sdlc-quarantine-")),
+    ).toBe(true);
+  });
 
   test("does not delete a foreign replacement installed after candidate inspection", async () => {
     const parent = temporary("tc-sdlc-maintenance-replacement-");
@@ -804,6 +847,7 @@ describe("tc-sdlc managed lifecycle", () => {
         path: `releases/expired/dependencies/${quarantine}`,
       }),
     );
+    expect(recovered.peakCleanupWorkers).toBe(1);
     expect(existsSync(recoveryPath)).toBe(false);
     expect(existsSync(join(stateRoot, currentKey))).toBe(true);
   }, 30_000);
@@ -1054,9 +1098,11 @@ describe("tc-sdlc managed lifecycle", () => {
       receiptSchema: "tc.sdlc/maintenance-receipt/v1",
       removedCount: 1,
       cleanupWorkers: 4,
+      cleanupWorkerMs: 120_000,
       cleanupFailures: 0,
     });
     const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+    expect(receipt.cleanupWorkerMs).toBe(120_000);
     expect(readFileSync(receiptPath, "utf8")).toBe(sdlc.canonicalJson(receipt));
   });
 });

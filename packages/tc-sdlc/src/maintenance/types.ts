@@ -12,6 +12,7 @@ export type MaintenanceOptions = Readonly<{
   dockerBuilder?: string;
   maxEntries?: number;
   cleanupWorkers?: number;
+  cleanupWorkerMs?: number;
 }>;
 
 export type FilesystemIdentity = Readonly<{
@@ -61,6 +62,7 @@ export type MaintenanceReceipt = Readonly<{
   reclaimedBytes: number;
   entriesTruncated: boolean;
   cleanupWorkers: number;
+  cleanupWorkerMs: number;
   peakCleanupWorkers: number;
   cleanupFailures: number;
   candidates: readonly MaintenanceEntry[];

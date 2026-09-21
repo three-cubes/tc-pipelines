@@ -11,6 +11,7 @@ import { join, resolve } from "node:path";
 
 import {
   QUARANTINE_PREFIX,
+  DEFAULT_CLEANUP_WORKER_MS,
   createQuarantine,
   deleteQuarantineRoot,
   filesystemIdentity,
@@ -237,6 +238,7 @@ export async function removeTemporaryCandidates(
   candidates: readonly MaintenanceEntry[],
   cutoff: number,
   workers: number,
+  cleanupWorkerMs: number,
 ): Promise<RemovalResult> {
   const results: Array<
     | Readonly<{ removed: true; bytes: number }>
@@ -251,11 +253,19 @@ export async function removeTemporaryCandidates(
       const candidate = candidates[index]!;
       const path = join(temporaryRoot, candidate.path);
       if (candidate.kind === "quarantine") {
-        const recovered = await removeQuarantineCandidate(
-          temporaryRoot,
-          candidate,
-          cutoff,
-        );
+        activeWorkers += 1;
+        peakWorkers = Math.max(peakWorkers, activeWorkers);
+        let recovered: Awaited<ReturnType<typeof removeQuarantineCandidate>>;
+        try {
+          recovered = await removeQuarantineCandidate(
+            temporaryRoot,
+            candidate,
+            cutoff,
+            cleanupWorkerMs,
+          );
+        } finally {
+          activeWorkers -= 1;
+        }
         results[index] = recovered.removed
           ? { removed: true, bytes: candidate.bytes ?? 0 }
           : {
@@ -307,6 +317,7 @@ export async function removeTemporaryCandidates(
           const removed = await deleteQuarantineRoot(
             quarantineRoot,
             filesystemIdentity(quarantineRoot),
+            cleanupWorkerMs,
           );
           if (!removed) throw new Error("quarantine deletion failed");
         } finally {
@@ -358,6 +369,7 @@ export async function recoverInterruptedTemporaryState(
     inspected.candidates,
     cutoff,
     DEFAULT_CLEANUP_WORKERS,
+    DEFAULT_CLEANUP_WORKER_MS,
   );
   return {
     schema: "tc.sdlc/automatic-recovery/v1",

@@ -148,7 +148,9 @@ the 48-hour recovery sweep inventories them without treating a name alone as
 deletion authority. Bounded deletion workers revalidate and synchronously
 delete only after atomically moving the complete quarantine under a fresh
 owner-bound root, closing asynchronous ancestor-replacement races without
-serialising independent cleanup. Successful release artefact expiry is not
+serialising independent cleanup. Worker concurrency and a bounded terminal
+budget are receipt evidence; markerless roots are retained regardless of name.
+Successful release artefact expiry is not
 implemented until the producer exposes a complete canonical reference inventory.
 
 ## Task and preparation model

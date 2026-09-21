@@ -147,11 +147,14 @@ prevents path replacement races from deleting foreign bytes. Restoring parent
 directory ownership is sufficient; cleanup does not recursively chmod content.
 Each quarantine has canonical owner and payload-identity metadata. A later
 routine recovery or explicit maintenance run inventories expired interrupted
-quarantines in the `candidate`, `deleting`, marker-only or empty terminal phase.
+quarantines in the identity-bound `candidate`, `deleting` or marker-only phase.
 Before recursive deletion, a bounded worker thread revalidates and atomically
 envelopes the entire quarantine under a new owner-bound root, then deletes
 synchronously without yielding. Foreign, mixed or changed layouts remain
-preserved.
+preserved. A markerless empty directory is also retained: its name and emptiness
+alone are not ownership authority. Each worker has a receipt-bound terminal
+budget so a crash or non-response becomes a cleanup failure instead of hanging
+the command.
 
 The persistent bootstrap inventory consists of referenced release states
 (including their dependency environments and toolchain launchers), managed

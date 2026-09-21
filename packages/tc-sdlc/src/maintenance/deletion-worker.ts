@@ -76,9 +76,8 @@ function marker(root: string): Marker | undefined {
   }
 }
 
-function validateLayout(root: string): Marker | "empty" | undefined {
+function validateLayout(root: string): Marker | undefined {
   const entries = readdirSync(root).sort();
-  if (entries.length === 0) return "empty";
   const value = marker(root);
   if (value === undefined) return undefined;
   if (entries.length === 1 && entries[0] === MARKER) return value;
@@ -95,13 +94,8 @@ function envelopeAndDelete(input: Input): void {
   if (!same(input.root, input.identity)) throw new Error("quarantine identity changed");
   const value = validateLayout(input.root);
   if (value === undefined) throw new Error("quarantine layout changed");
-  if (value === "empty") {
-    rmdirSync(input.root);
-    return;
-  }
-
   const envelope = mkdtempSync(join(dirname(input.root), `${PREFIX}${process.pid}-`));
-  const envelopeIdentity = identity(input.root);
+  const envelopeIdentity = input.identity;
   const envelopeMarker: Marker = {
     schema: "tc.sdlc/quarantine-owner/v1",
     owner: OWNER,

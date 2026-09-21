@@ -718,9 +718,10 @@ test/maintenance.test.ts
 ```
 
 Cleanup now accepts exactly one identity-bound payload phase (`candidate` or
-`deleting`), the marker-only completion phase, or an empty unmarked directory
-left between marker removal and `rmdir`. It rejects mixed layouts and mismatched
-payload identity. Before recursive removal, a bounded worker thread revalidates
+`deleting`) or the marker-only completion phase. A markerless empty directory is
+retained because its name and emptiness are not ownership authority. Cleanup
+rejects mixed layouts and mismatched payload identity. Before recursive removal,
+a bounded worker thread revalidates
 the inspected root, atomically moves the complete quarantine below a fresh
 owner-bound envelope, revalidates the moved identity, and performs synchronous
 deletion without yielding. This retains parallel cleanup across independent
@@ -731,8 +732,8 @@ Both scratch and bootstrap-state journeys kill the built `tc-sdlc maintain`
 process with real `SIGKILL`: scratch observes the first `candidate` window and
 bootstrap observes the second `deleting` window. Each recovery then races a
 foreign directory into the inspected pathname and proves the foreign bytes
-survive. Marker-only/empty completion, foreign, mixed and identity-mismatched
-layouts are also covered.
+survive. Marker-only recovery, markerless-empty retention, and foreign, mixed
+and identity-mismatched layouts are also covered.
 
 Fresh terminal source evidence:
 
@@ -741,10 +742,10 @@ pnpm --filter @three-cubes/tc-sdlc build
 exit 0
 
 focused maintenance/catalogue/task4
-3 files, 39 tests passed
+3 files, 40 tests passed
 
 pnpm --filter @three-cubes/tc-sdlc test
-7 files, 126 tests passed
+7 files, 127 tests passed
 
 real Docker/Buildx integration
 1 file, 2 tests passed
@@ -758,3 +759,12 @@ exit 0
 
 No OCI or catalogue regeneration is claimed; independent source rereview still
 precedes that immutable release step.
+
+The follow-up rereview further required the worker boundary itself to be
+observable and bounded. Recovery workers now contribute to
+`peakCleanupWorkers`; `cleanupWorkerMs` is a validated public option and receipt
+field (120 seconds by default, capped at 600 seconds). A one-millisecond public
+sabotage forces real worker termination, records one cleanup failure and leaves
+both the owner payload and unrelated foreign bytes preserved. The envelope
+marker carries the original inspected identity rather than re-reading and
+learning authority from the mutable source path after validation.

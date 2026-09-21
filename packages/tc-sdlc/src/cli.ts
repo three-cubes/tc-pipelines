@@ -73,6 +73,7 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
         "temporary-root",
         "retention-hours",
         "cleanup-workers",
+        "cleanup-worker-ms",
         "uv",
         "pnpm",
         "buildx",
@@ -90,6 +91,10 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
       options["cleanup-workers"] === undefined
         ? undefined
         : Number(options["cleanup-workers"]);
+    const cleanupWorkerMs =
+      options["cleanup-worker-ms"] === undefined
+        ? undefined
+        : Number(options["cleanup-worker-ms"]);
     const receipt = await maintain({
       stateRoot: options["state-root"]!,
       receiptPath: options.receipt!,
@@ -99,6 +104,7 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
         : { temporaryRoot: options["temporary-root"] }),
       ...(retentionHours === undefined ? {} : { retentionHours }),
       ...(cleanupWorkers === undefined ? {} : { cleanupWorkers }),
+      ...(cleanupWorkerMs === undefined ? {} : { cleanupWorkerMs }),
       ...(options.uv === undefined ? {} : { uvExecutable: options.uv }),
       ...(options.pnpm === undefined ? {} : { pnpmExecutable: options.pnpm }),
       ...(options.buildx === undefined ? {} : { buildxExecutable: options.buildx }),
@@ -116,6 +122,7 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
       removedCount: receipt.removedCount,
       reclaimedBytes: receipt.reclaimedBytes,
       cleanupWorkers: receipt.cleanupWorkers,
+      cleanupWorkerMs: receipt.cleanupWorkerMs,
       cleanupFailures: receipt.cleanupFailures,
     });
     return;
