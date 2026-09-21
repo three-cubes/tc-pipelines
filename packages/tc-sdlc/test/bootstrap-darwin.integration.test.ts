@@ -13,11 +13,12 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -158,9 +159,9 @@ function childOutcome(child: ReturnType<typeof spawn>) {
   );
 }
 
-function referenceFixture(prefix: string) {
+function referenceFixture(prefix: string, stateParent = tmpdir()) {
   const root = mkdtempSync(join(tmpdir(), `${prefix}-consumer-`));
-  const stateRoot = mkdtempSync(join(tmpdir(), `${prefix}-state-`));
+  const stateRoot = mkdtempSync(join(stateParent, `${prefix}-state-`));
   const evidence = mkdtempSync(join(tmpdir(), `${prefix}-evidence-`));
   writeFileSync(join(root, "input.txt"), "input\n");
   const catalogue = input(root, ["input.txt"]).catalogue;
@@ -204,9 +205,12 @@ function referenceFixture(prefix: string) {
     maintenanceRunner,
     `import {readFileSync,writeFileSync} from "node:fs"; import * as sdlc from ${JSON.stringify(PUBLIC_PACKAGE)}; writeFileSync(process.argv[3], "started"); const receipt=await sdlc.maintain(JSON.parse(readFileSync(process.argv[2], "utf8"))); process.stdout.write(JSON.stringify(receipt));\n`,
   );
-  const spawnBootstrap = (generation: string) => {
+  const spawnBootstrap = (generation: string, stateRootOverride = stateRoot) => {
     const optionsPath = join(evidence, `${generation}-options.json`);
-    writeFileSync(optionsPath, JSON.stringify(optionsFor(generation)));
+    writeFileSync(optionsPath, JSON.stringify({
+      ...optionsFor(generation),
+      stateRoot: stateRootOverride,
+    }));
     const child = spawn(process.execPath, [runner, optionsPath], {
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -350,6 +354,112 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(existsSync(join(fixture.stateRoot, reference.currentStateKey, "state.json"))).toBe(true);
   }, 60_000);
 
+  test("serialises stale recovery through lexical aliases of one state root", async () => {
+    expect(process.platform).toBe("darwin");
+    const fixture = referenceFixture("bootstrap-reference-alias-race", "/private/tmp");
+    const aliasStateRoot = fixture.stateRoot.replace(/^\/private/, "");
+    expect(aliasStateRoot).not.toBe(fixture.stateRoot);
+    expect(realpathSync(aliasStateRoot)).toBe(realpathSync(fixture.stateRoot));
+    expect(await sdlc.bootstrap(fixture.optionsFor("A"))).toMatchObject({ status: "succeeded" });
+    const staleOwner = fixture.spawnBootstrap("B");
+    await waitForPath(fixture.lockPath, staleOwner.child);
+    expect(staleOwner.child.kill("SIGKILL")).toBe(true);
+    await staleOwner.outcome;
+
+    const first = fixture.spawnBootstrap("C");
+    const recoveryMarker = await waitForRecoveryMarker(
+      dirname(fixture.lockPath),
+      first.child.pid!,
+      first.child,
+    );
+    expect(first.child.kill("SIGSTOP")).toBe(true);
+    let resumed = false;
+    const second = fixture.spawnBootstrap("D", aliasStateRoot);
+    try {
+      await waitForPendingReference(fixture.stateRoot, second.child.pid!, second.child);
+      const escapedCanonicalBoundary = await Promise.race([
+        waitForRecoveryMarker(dirname(fixture.lockPath), second.child.pid!, second.child)
+          .then(() => true),
+        second.outcome.then(() => true),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 500)),
+      ]);
+      expect(escapedCanonicalBoundary).toBe(false);
+      expect(first.child.exitCode).toBeNull();
+      expect(existsSync(recoveryMarker)).toBe(true);
+    } finally {
+      if (first.child.exitCode === null) first.child.kill("SIGCONT");
+      resumed = true;
+    }
+    expect(resumed).toBe(true);
+    const [firstResult, secondResult] = await Promise.all([first.outcome, second.outcome]);
+    expect(firstResult.status, firstResult.stderr).toBe(0);
+    expect(secondResult.status, secondResult.stderr).toBe(0);
+    expect(JSON.parse(firstResult.stdout)).toMatchObject({ status: "succeeded" });
+    expect(JSON.parse(secondResult.stdout)).toMatchObject({ status: "succeeded" });
+  }, 60_000);
+
+  test("destroys accepted recovery clients so a completed bootstrap child exits", async () => {
+    expect(process.platform).toBe("darwin");
+    const fixture = referenceFixture("bootstrap-reference-accepted-client", "/private/tmp");
+    expect(await sdlc.bootstrap(fixture.optionsFor("A"))).toMatchObject({ status: "succeeded" });
+    const staleOwner = fixture.spawnBootstrap("B");
+    await waitForPath(fixture.lockPath, staleOwner.child);
+    expect(staleOwner.child.kill("SIGKILL")).toBe(true);
+    await staleOwner.outcome;
+    const locksRoot = dirname(fixture.lockPath);
+    const liveMarkerPath = join(
+      locksRoot,
+      readdirSync(locksRoot).find((name) => name.endsWith(".marker"))!,
+    );
+    const liveMarker = JSON.parse(readFileSync(fixture.lockPath, "utf8"));
+    const started = execFileSync(
+      "/bin/ps",
+      ["-p", `${process.pid}`, "-o", "lstart="],
+      { encoding: "utf8", env: { LC_ALL: "C", PATH: "/usr/bin:/bin" } },
+    ).trim();
+    liveMarker.pid = process.pid;
+    liveMarker.processStartIdentity = `darwin:${Math.floor(Date.parse(started) / 1_000)}`;
+    writeFileSync(fixture.lockPath, sdlc.canonicalJson(liveMarker));
+
+    const transition = fixture.spawnBootstrap("C");
+    const markerPath = await waitForRecoveryMarker(
+      locksRoot,
+      transition.child.pid!,
+      transition.child,
+    );
+    const port = JSON.parse(readFileSync(markerPath, "utf8")).port as number;
+    const client = createConnection({ host: "127.0.0.1", port });
+    const peerClosed = new Promise<true>((resolve) => client.once("close", () => resolve(true)));
+    await new Promise<void>((resolve, reject) => {
+      client.once("connect", resolve);
+      client.once("error", reject);
+    });
+    try {
+      const rejected = await Promise.race([
+        peerClosed,
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 15_000)),
+      ]);
+      expect(rejected).toBe(true);
+      expect(transition.child.exitCode).toBeNull();
+      unlinkSync(fixture.lockPath);
+      unlinkSync(liveMarkerPath);
+      const result = await Promise.race([
+        transition.outcome,
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 15_000)),
+      ]);
+      expect(result).not.toBe(false);
+      if (result !== false) {
+        expect(result.status, result.stderr).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({ status: "succeeded" });
+      }
+    } finally {
+      client.destroy();
+      if (existsSync(fixture.lockPath)) unlinkSync(fixture.lockPath);
+      if (existsSync(liveMarkerPath)) unlinkSync(liveMarkerPath);
+      if (transition.child.exitCode === null) transition.child.kill("SIGKILL");
+    }
+  }, 60_000);
+
   test("recovers an exact commit lock whose owner was killed", async () => {
     expect(process.platform).toBe("darwin");
     const fixture = referenceFixture("bootstrap-reference-killed-owner");
@@ -456,7 +566,7 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(initial).toMatchObject({ status: "succeeded" });
     const hexadecimal = sdlc.digest({
       boundary: "bootstrap-reference-recovery",
-      stateRoot: fixture.stateRoot,
+      stateRoot: realpathSync(fixture.stateRoot),
       consumer: fixture.project,
       consumerRoot: realpathSync(fixture.root),
     }).slice("sha256:".length, "sha256:".length + 8);

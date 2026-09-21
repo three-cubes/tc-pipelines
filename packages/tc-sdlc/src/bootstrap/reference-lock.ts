@@ -9,6 +9,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   unlinkSync,
 } from "node:fs";
@@ -178,7 +179,7 @@ function recoveryPort(
 ): number {
   const hexadecimal = digest({
     boundary: "bootstrap-reference-recovery",
-    stateRoot,
+    stateRoot: realpathSync(stateRoot),
     consumer: value.consumer,
     consumerRoot: value.consumerRoot,
   }).slice("sha256:".length, "sha256:".length + 8);
@@ -241,7 +242,7 @@ function removeExactFile(path: string, identity: FilesystemIdentity, bytes: stri
 }
 
 async function bindRecoveryServer(port: number): Promise<Server> {
-  const server = createServer();
+  const server = createServer((socket) => socket.destroy());
   return await new Promise<Server>((resolve, reject) => {
     const failed = (error: Error): void => {
       server.removeListener("listening", listening);
