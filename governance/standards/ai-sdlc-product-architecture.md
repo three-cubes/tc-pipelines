@@ -67,36 +67,51 @@ command reads the release catalogue and materialises those references together
 with the package version and image digest. Consumers review one coordinated
 upgrade rather than maintaining independent pins.
 
-## Component model
+## Capability and composition model
 
-The product is released as one coordinated package and image, while each
-capability remains executable and verifiable through its own public command.
-Each command owns one receipt schema. Release admission is the first component
-that combines results from separate producers.
+The coordinated release does not define the test boundary. An atomic capability
+has a public command, explicit inputs and an owned output that can be accepted
+without running a downstream capability or a complete release journey. A
+composer sequences already testable capabilities and owns only its aggregate
+result. Artifact utilities may produce canonical files without producing a
+receipt.
 
-| Component | Public command | Inputs | Owned output | Acceptance evidence |
-|---|---|---|---|---|
-| Bootstrap lifecycle | `tc-sdlc bootstrap` | declaration, catalogue, generated lock and checkout | `tc.sdlc/bootstrap-receipt/v1` | a packed CLI creates, reuses and recovers state in an empty consumer |
-| Consumer graph | `tc-sdlc check-all` and `tc-sdlc check` | bootstrapped state and consumer checkout | `tc.sdlc/run-receipt/v1` | Python, pnpm and mixed consumers execute through the installed CLI |
-| Fitness target | `tc-sdlc fitness` | repository-scoped fitness declaration, generated lock and bootstrapped state | `tc.sdlc/fitness-receipt/v1` | the managed `three-cubes-fitness` executable runs once, reports its installed version and matches the lock |
-| Consumer qualification | `tc-sdlc qualify-consumers` | fixture manifest, candidate release catalogue and packed CLI | `tc.sdlc/consumer-qualification/v1` | all disposable consumers run natively with retained terminal receipts |
-| Image producer | `tc-sdlc produce-image` | source identity and image definition | `tc.sdlc/image-release/v1` | one build records digest, provenance and platform metadata |
-| Image qualification | `tc-sdlc qualify-image` | image-release receipt and fixture manifest | `tc.sdlc/image-qualification/v1` | disposable consumers run inside the referenced digest with matching identities |
-| Release admission | `tc-sdlc admit-release` | consumer-, image-release and image-qualification receipts | `tc.sdlc/release-admission/v1` | receipt bindings are recomputed and complete, current evidence is admitted |
-| Release generation | `tc-sdlc generate-release` | admitted release receipt | catalogue, Dev Container files and `tc.sdlc/release-generation/v1` | generated files carry the admitted identities |
-| Writeback | `tc-sdlc write-release` | generation receipt and repository target | `tc.sdlc/release-writeback/v1` | real Git transport writes and reads back the exact generated files |
-| Hosted composition | reusable hosted workflow | the same public commands | retained component receipts plus workflow identity | one hosted journey composes the released interfaces |
+| Kind | Capability | Public command | Inputs | Owned output | Status |
+|---|---|---|---|---|---|
+| Utility | Catalogue generation | `tc-sdlc catalogue` | release coordinates | `tc.sdlc/release-catalogue/v1` | implemented |
+| Utility | Lock generation | `tc-sdlc lock` | declaration and catalogue | `tc.sdlc/lock/v1` | implemented |
+| Component | Bootstrap lifecycle | `tc-sdlc bootstrap` | declaration, catalogue, generated lock and checkout | `tc.sdlc/bootstrap-receipt/v1` | implemented; packed-install acceptance incomplete |
+| Component | State maintenance | `tc-sdlc maintain` | owned state root and retention policy | `tc.sdlc/maintenance-receipt/v1` | implemented; direct acceptance present |
+| Component | Preparation | `tc-sdlc prepare` | bootstrapped state and consumer checkout | `tc.sdlc/preparation-receipt/v1` | implemented; direct packed acceptance missing |
+| Component | Graph evaluation | `tc-sdlc check-all` and `tc-sdlc check` | bootstrapped, prepared state and consumer checkout | `tc.sdlc/evaluation-receipt/v1` | implemented; direct packed acceptance missing |
+| Component | Fitness target | `tc-sdlc fitness` | repository-scoped fitness declaration, generated lock and bootstrapped state | `tc.sdlc/fitness-receipt/v1` | implemented; successful direct packed acceptance missing |
+| Composer | Native consumer journey | `tc-sdlc qualify-consumers` | fixture manifest, candidate catalogue and packed CLI | `tc.sdlc/consumer-qualification/v1` | implemented; deterministic acceptance incomplete |
+| Component | Image producer | `tc-sdlc produce-image` | source identity and image definition | `tc.sdlc/image-release/v1` | planned |
+| Composer | Image qualification journey | `tc-sdlc qualify-image` | image-release receipt and fixture manifest | `tc.sdlc/image-qualification/v1` | planned |
+| Attestor | Release admission | `tc-sdlc admit-release` | consumer-, image-release and image-qualification receipts | `tc.sdlc/release-admission/v1` | planned |
+| Component | Release generation | `tc-sdlc generate-release` | admitted release receipt | catalogue, Dev Container files and `tc.sdlc/release-generation/v1` | planned |
+| Component | Writeback | `tc-sdlc write-release` | generation receipt and repository target | `tc.sdlc/release-writeback/v1` | planned |
+| Composer | Hosted journey | reusable hosted workflow | the same public commands | retained component receipts plus workflow identity | planned |
 
-The dependency graph is acyclic. Bootstrap precedes graph execution. Consumer
-qualification and image production then run independently. Image qualification
-consumes the immutable image. Release admission consumes the three qualification
-receipts. Generation and writeback follow admission.
+A component is complete only when a direct packed-command acceptance suite
+creates its genuine prerequisites, invokes that command and validates the owned
+output. Malformed-input tests supply the bad input directly to the component
+that consumes it. They do not race a side process against a larger journey. A
+component is not accepted through coverage inherited from a composer. The
+status column records the current acceptance gaps.
 
-Component acceptance invokes the component's public command with real
-prerequisites and validates its owned receipt. Integration acceptance composes
-already-qualified components. Tests use real disposable inputs and receipts
-from their owning producers; a downstream component never supplies evidence
-for an upstream component.
+Composer acceptance is separate integration evidence. It proves sequencing,
+handoff and aggregate terminal evidence after the component suites pass. The
+native consumer journey combines bootstrap, preparation and evaluation; release
+admission later combines the independent native and image qualification
+outcomes. Hosted composition demonstrates portability without redefining any
+component contract.
+
+The dependency graph remains acyclic. Catalogue and lock generation precede
+bootstrap; preparation and evaluation follow bootstrap; native qualification
+composes those capabilities. Image production proceeds independently. Image
+qualification consumes the immutable image. Release admission consumes the
+qualification receipts. Generation and writeback follow admission.
 
 ## Consumer contract
 
