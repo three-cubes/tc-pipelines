@@ -341,6 +341,105 @@ The generated Dev Container verification launched the final local image with
 the rendered `workspaceMount` semantics and read the exact opened-tree marker
 from `/workspace`; exit 0.
 
+## Developer-environment lifecycle final-review remediation
+
+The lifecycle follow-up is implemented by source commit
+`190eb9d32eac11154370ea97c18adfd1f66f5f91`; generated catalogue and Dev
+Container bindings are commit `cd5d6ee`. The implementation is deliberately
+split into owner-scoped modules: scratch inspection/quarantine, bootstrap-state
+references and GC, public tool cache pruning, receipt types, and the `maintain`
+orchestrator. It is not a generic machine cleaner.
+
+The destructive review reproductions failed against the prior built package:
+
+- replacing an inspected owned path before asynchronous removal deleted the
+  foreign replacement (`ENOENT` when reading its marker); and
+- a dirty tracked and untracked Git tree under the real
+  `tc-sdlc-evaluation-*/workspace` layout was omitted from retention and its
+  outer owner root was deleted.
+
+The green implementation records device, inode and birth-time identity, moves
+the candidate synchronously into a fresh private same-filesystem quarantine,
+validates the moved identity, and only then removes that exact object. Any
+changed object is restored where possible or preserved in quarantine with a
+failed cleanup outcome. Nested workspace Git status is checked with the system
+Git boundary. Both foreign replacement bytes and dirty tracked/untracked bytes
+survive the built public `maintain` call.
+
+Ordinary bootstrap, preparation and evaluation now run the same bounded
+48-hour interrupted-scratch recovery and embed a location-independent
+`tc.sdlc/automatic-recovery/v1` result in their terminal receipt. Successful
+and failed preparation both removed owner-marked interrupted scratch. Equivalent
+recovery in two distinct TMPDIR locations serialised identically; absolute
+TMPDIR/HOME paths are not part of task or cache candidate identity.
+
+Bootstrap emits a canonical reference per stable local consumer identity
+(project plus real checkout root). Maintenance retains every referenced current
+state and immediate predecessor. It expires only an old v6 state absent from a
+complete valid reference inventory; missing, linked, corrupt or incomplete
+reference authority retains state. Distinct checkouts with the same declaration
+project create distinct references. The release state includes its dependency
+environments and toolchain launchers, so those bytes share the same reference
+lifecycle. Capability-probe state remains required for offline prerequisite
+validation and is not speculatively deleted.
+
+Cache maintenance invokes only explicit public tool boundaries inside owned
+state: `uv cache prune`, `pnpm store prune`, and named BuildKit `prune`. The
+Darwin suite exercised pnpm pruning through the real managed launcher. The real
+Docker integration built a 2 MiB cache entry, proved the 48-hour run retained
+it with zero reclaimed bytes, then proved the zero-hour run reclaimed bytes.
+It remained green while ambient `DOCKER_HOST`, `DOCKER_CONTEXT`,
+`BUILDX_CONFIG` and `BUILDKIT_HOST` pointed at foreign/denied routes. Cleanup of
+six independent owner roots reported an observed peak of exactly two workers,
+rather than merely echoing the configured limit.
+
+Release building now requires an explicitly owned state root, immutable
+absolute Buildx executable and an explicit local `unix://` or authenticated
+`ssh://` endpoint. Plaintext TCP is rejected. It uses the named
+`tc-sdlc-release` builder and state-owned `DOCKER_CONFIG`, clears ambient Docker
+and BuildKit routing, removes failed staging immediately, and emits lifecycle
+metadata requiring catalogue/current/predecessor or incident reference
+authority before successful artefact deletion.
+
+### Fresh verification evidence
+
+```text
+focused built-public suites: 4 files, 40 passed
+portable package suite: 7 files, 124 passed
+Darwin integration: 1 file, 6 passed
+real BuildKit maintenance integration: 1 passed
+tc-fitness repository gate: 1974 pytest passed; 5/5 self gates passed
+frozen pnpm lock: already up to date
+package pack: 3.0.0 tarball contains all public maintenance modules
+```
+
+The immutable release build produced:
+
+```text
+source commit: 190eb9d32eac11154370ea97c18adfd1f66f5f91
+OCI digest: sha256:734ca688cb22b078b2e684b1ec72aec5eafcf872ea5d1a4b2c4deda2c0e7f0a9
+artifact: artifacts/task5-release-190eb9d
+build evidence: artifacts/task5-release-190eb9d/build-receipt.json
+image evidence: artifacts/task5-release-190eb9d/verification.json
+maintenance evidence: artifacts/task5-release-190eb9d/maintenance.json
+```
+
+The fresh multi-platform `package-tests` target executed all 124 portable tests
+on both Linux/amd64 and Linux/arm64. Image verification then completed native
+Darwin and Linux bootstrap, real pnpm/uv repository dependency closure, installed
+dependency execution, and warm offline reuse. The generated Dev Container again
+opened the exact caller tree at `/workspace`. The first verifier attempt using a
+`/private/tmp` scratch root failed before image bootstrap because Colima does not
+share that host path; its `finally` removed the generated workspace. The passing
+run used a caller-selected Colima-shared scratch root, removed it immediately,
+and retained evidence only in the repository artefact directory.
+
+The previous `edd6` artefact is retained as predecessor and the new `734c`
+artefact as catalogue-current. No deletion authority is claimed for either.
+No new verification or Dev Container scratch directory remains. Remote GHCR
+publication and authenticated remote digest verification remain Task 6
+boundaries and are not claimed here.
+
 Python and repository fitness:
 
 ```text

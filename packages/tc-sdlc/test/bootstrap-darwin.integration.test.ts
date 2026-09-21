@@ -232,6 +232,19 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       },
     });
     expect(warm).toMatchObject({ status: "succeeded", reused: true });
+    const maintenanceTemporaryRoot = join(dirname(stateRoot), "tc-sdlc-pnpm-maintenance");
+    mkdirSync(maintenanceTemporaryRoot);
+    const maintained = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: maintenanceTemporaryRoot,
+      receiptPath: `${receiptPath}.maintenance`,
+      mode: "apply",
+      pnpmExecutable: pnpmLauncher,
+    });
+    expect(maintained).toMatchObject({
+      status: "succeeded",
+      tools: { pnpm: { status: "pruned", reclaimedBytes: expect.any(Number) } },
+    });
     const uvDependency = receipt.dependencies.find((dependency) => dependency.manager === "uv")!;
     expect(uvDependency.installedDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
     const attrsDirectory = execFileSync(
