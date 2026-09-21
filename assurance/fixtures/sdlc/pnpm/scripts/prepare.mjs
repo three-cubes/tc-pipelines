@@ -1,8 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import kleur from "kleur";
 
-const source = await readFile("src/input.txt", "utf8");
-const rendered = kleur.bold(source.trim());
+kleur.enabled = true;
+const source = kleur.bold((await readFile("src/input.txt", "utf8")).trim());
+const rendered = source;
 await mkdir("generated", { recursive: true });
 try {
 if ((await readFile("generated/value.txt", "utf8")) === rendered) process.exit(0);

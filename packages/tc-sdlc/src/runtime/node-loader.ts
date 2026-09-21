@@ -1,6 +1,6 @@
 import { createRequire, registerHooks } from "node:module";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join, relative } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const nodeModules = process.env.TC_SDLC_NODE_MODULES;
 
@@ -12,6 +12,12 @@ function isModuleNotFound(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && (error.code === "MODULE_NOT_FOUND" || error.code === "ERR_MODULE_NOT_FOUND");
 }
 
+function isStateImporter(parentURL: string | undefined, nodeModules: string): boolean {
+  if (parentURL === undefined || !parentURL.startsWith("file:")) return false;
+  const path = relative(nodeModules, fileURLToPath(parentURL));
+  return path === "" || (!path.startsWith("../") && path !== "..");
+}
+
 if (nodeModules !== undefined) {
   const stateParent = pathToFileURL(join(nodeModules, ".tc-sdlc-resolver.mjs")).href;
   const stateRequire = createRequire(stateParent);
@@ -20,22 +26,19 @@ if (nodeModules !== undefined) {
       if (!isBarePackageSpecifier(specifier)) {
         return nextResolve(specifier, context);
       }
-      try {
+      if (isStateImporter(context.parentURL, nodeModules)) {
         return nextResolve(specifier, context);
+      }
+      if (context.conditions.includes("require")) {
+        return {
+          url: pathToFileURL(stateRequire.resolve(specifier)).href,
+          shortCircuit: true,
+        };
+      }
+      try {
+        return nextResolve(specifier, { ...context, parentURL: stateParent });
       } catch (error) {
-        if (!isModuleNotFound(error)) {
-          throw error;
-        }
-        if (context.parentURL !== undefined) {
-          try {
-            return nextResolve(specifier, { ...context, parentURL: stateParent });
-          } catch (stateError) {
-            if (!isModuleNotFound(stateError)) {
-              throw stateError;
-            }
-            // CJS resolution does not honour the replacement parent URL.
-          }
-        }
+        if (!isModuleNotFound(error)) throw error;
         return {
           url: pathToFileURL(stateRequire.resolve(specifier)).href,
           shortCircuit: true,

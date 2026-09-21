@@ -333,7 +333,7 @@ function safeBoundary(
   return boundary;
 }
 
-const ambientToolVariables = /^(?:PATH|HOME|TMPDIR|TMP|TEMP|VIRTUAL_ENV|PYTHONPATH|PYTHONHOME|PYTHONPYCACHEPREFIX|NODE_PATH|NODE_OPTIONS|TC_SDLC_NODE_MODULES|PNPM_HOME|PNPM_STORE_DIR|NPM_CONFIG_[A-Z0-9_]*|XDG_[A-Z0-9_]*|UV_[A-Z0-9_]*|COREPACK_[A-Z0-9_]*|CONDA_[A-Z0-9_]*|NVM_DIR)$/;
+const ambientToolVariables = /^(?:PATH|HOME|TMPDIR|TMP|TEMP|VIRTUAL_ENV|PYTHONPATH|PYTHONHOME|PYTHONPYCACHEPREFIX|NODE_PATH|NODE_OPTIONS|TC_SDLC_NODE_(?:LAUNCHER|LOADER|MODULES)|PNPM_HOME|PNPM_STORE_DIR|NPM_CONFIG_[A-Z0-9_]*|XDG_[A-Z0-9_]*|UV_[A-Z0-9_]*|COREPACK_[A-Z0-9_]*|CONDA_[A-Z0-9_]*|NVM_DIR)$/;
 
 function taskEnvironment(
   options: RunOptions,
@@ -379,8 +379,19 @@ function taskEnvironment(
   const executionEnvironment = options.executionContext.environment;
   const nodeModules = executionEnvironment.TC_SDLC_NODE_MODULES;
   const nodeLoader = join(dirname(fileURLToPath(import.meta.url)), "node-loader.js");
-  if (nodeModules !== undefined && !existsSync(nodeLoader)) {
+  const nodeLauncher = executionEnvironment.TC_SDLC_NODE_LAUNCHER;
+  if (nodeModules !== undefined && (nodeLauncher === undefined || !existsSync(nodeLoader))) {
     throw new SdlcError("TASK_ENVIRONMENT_INVALID", "state-owned Node module resolver is unavailable");
+  }
+  const nodeBin = join(scratch, "node-bin");
+  if (nodeModules !== undefined && nodeLauncher !== undefined) {
+    mkdirSync(nodeBin, { recursive: true, mode: 0o700 });
+    const wrapper = join(nodeBin, "node");
+    writeFileSync(
+      wrapper,
+      `#!/bin/sh\nexec "$TC_SDLC_NODE_LAUNCHER" --import "$TC_SDLC_NODE_LOADER" "$@"\n`,
+      { mode: 0o700 },
+    );
   }
   return {
     ...inherited,
@@ -389,7 +400,10 @@ function taskEnvironment(
     ...isolated,
     ...(nodeModules === undefined
       ? {}
-      : { NODE_OPTIONS: `--import=${pathToFileURL(nodeLoader).href}` }),
+      : {
+          PATH: `${nodeBin}:${executionEnvironment.PATH}`,
+          TC_SDLC_NODE_LOADER: pathToFileURL(nodeLoader).href,
+        }),
   };
 }
 

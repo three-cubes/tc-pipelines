@@ -311,6 +311,7 @@ export function loadBootstrapExecutionContext(
     };
     const environment: Record<string, string> = {
       PATH: toolPath,
+      TC_SDLC_NODE_LAUNCHER: validatedAdapters.find((entry) => entry.adapter.name === "node")!.launcherPath,
       TC_SDLC_EXECUTION_CONTEXT_DIGEST: digest(binding),
       TC_SDLC_BOOTSTRAP_STATE_KEY: receipt.stateKey,
       TC_SDLC_FITNESS_VERSION: lock.fitness.version,

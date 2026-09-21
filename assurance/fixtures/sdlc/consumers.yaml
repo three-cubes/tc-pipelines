@@ -17,4 +17,4 @@ consumers:
     languages: [python, node]
     changed: python/src/input.txt
     complete_tasks: [python-service:check, node-service:check]
-    affected_tasks: [python-service:check]
+    affected_tasks: [python-service:check, node-service:check]

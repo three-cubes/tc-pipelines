@@ -8,9 +8,12 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[3]
+CONSUMERS = yaml.safe_load((ROOT / "assurance/fixtures/sdlc/consumers.yaml").read_text())["consumers"]
+PACKAGE_VERSION = json.loads((ROOT / "packages/tc-sdlc/package.json").read_text())["version"]
 
 
 def command(argv: list[str], cwd: Path, *, timeout: int = 300) -> subprocess.CompletedProcess[str]:
@@ -36,6 +39,9 @@ def installed_cli(tarball: Path, root: Path) -> Path:
     (runner / "package.json").write_text('{"private":true,"packageManager":"pnpm@11.22.0"}\n')
     installed = command(["pnpm", "add", f"file:{tarball}"], runner)
     assert installed.returncode == 0, installed.stdout + installed.stderr
+    runner_lock = (runner / "pnpm-lock.yaml").read_text()
+    assert "@three-cubes/tc-sdlc" in runner_lock
+    assert tarball.name in runner_lock
     cli = runner / "node_modules/.bin/tc-sdlc"
     assert cli.is_file()
     return cli
@@ -45,12 +51,11 @@ def invoke(cli: Path, consumer: Path, *arguments: str, timeout: int = 300) -> su
     return command([str(cli), *arguments], consumer, timeout=timeout)
 
 
-def exercise(tmp_path: Path, packed_cli: Path, fixture: str, changed: str) -> tuple[Path, dict[str, object]]:
+def exercise(tmp_path: Path, packed_cli: Path, spec: dict[str, object], *, shadow: bool = False) -> tuple[Path, dict[str, object]]:
     consumer = tmp_path / "consumer"
-    source = ROOT / "assurance/fixtures/sdlc" / fixture
-    assert not (source / ".venv").exists(), "fixtures must not carry a consumer virtual environment"
+    source = ROOT / "assurance/fixtures/sdlc" / str(spec["fixture"])
+    assert not (source / ".venv").exists() and not (source / "node_modules").exists(), "fixtures must not carry dependency state"
     shutil.copytree(source, consumer)
-    shutil.copy2(ROOT / "release/catalogue.json", consumer / "release-catalogue.json")
     initialized = command(["git", "init", "-q", "-b", "main"], consumer)
     assert initialized.returncode == 0, initialized.stderr
     assert command(["git", "config", "user.name", "disposable-consumer"], consumer).returncode == 0
@@ -66,28 +71,37 @@ def exercise(tmp_path: Path, packed_cli: Path, fixture: str, changed: str) -> tu
     prepare = tmp_path / "prepare.json"
     complete = tmp_path / "complete.json"
     affected = tmp_path / "affected.json"
+    catalogued = invoke(cli, consumer, "catalogue", "--version", PACKAGE_VERSION, "--workflow-commit", "0" * 40, "--image-digest", "sha256:" + "0" * 64, "--output", str(catalogue))
+    assert catalogued.returncode == 0, catalogued.stdout + catalogued.stderr
     locked = invoke(cli, consumer, "lock", "--declaration", str(declaration), "--catalogue", str(catalogue), "--output", str(lock))
     assert locked.returncode == 0, locked.stdout + locked.stderr
     bootstrapped = invoke(cli, consumer, "bootstrap", "--declaration", str(declaration), "--catalogue", str(catalogue), "--lock", str(lock), "--root", str(consumer), "--state-root", str(state), "--receipt", str(bootstrap), timeout=900)
     assert bootstrapped.returncode == 0, bootstrapped.stdout + bootstrapped.stderr
+    if shadow:
+        package = consumer / "node_modules/kleur"
+        package.mkdir(parents=True)
+        (package / "package.json").write_text('{"name":"kleur","version":"0.0.0","type":"module","exports":"./index.js"}\n')
+        (package / "index.js").write_text('export default { bold(value) { return `shadow:${value}`; } };\n')
     prepared = invoke(cli, consumer, "prepare", "--declaration", str(declaration), "--catalogue", str(catalogue), "--lock", str(lock), "--root", str(consumer), "--state-root", str(state), "--bootstrap-receipt", str(bootstrap), "--receipt", str(prepare))
     assert prepared.returncode == 0, prepared.stdout + prepared.stderr
     checked = invoke(cli, consumer, "check-all", "--declaration", str(declaration), "--catalogue", str(catalogue), "--lock", str(lock), "--root", str(consumer), "--state-root", str(state), "--bootstrap-receipt", str(bootstrap), "--preparation-receipt", str(prepare), "--environment", "native", "--producer", "f7-disposable-consumer", "--receipt", str(complete))
     assert checked.returncode == 0, checked.stdout + checked.stderr
-    changed_result = invoke(cli, consumer, "check", "--declaration", str(declaration), "--catalogue", str(catalogue), "--lock", str(lock), "--root", str(consumer), "--state-root", str(state), "--bootstrap-receipt", str(bootstrap), "--preparation-receipt", str(prepare), "--environment", "native", "--producer", "f7-disposable-consumer", "--changed", changed, "--receipt", str(affected))
+    changed_result = invoke(cli, consumer, "check", "--declaration", str(declaration), "--catalogue", str(catalogue), "--lock", str(lock), "--root", str(consumer), "--state-root", str(state), "--bootstrap-receipt", str(bootstrap), "--preparation-receipt", str(prepare), "--environment", "native", "--producer", "f7-disposable-consumer", "--changed", str(spec["changed"]), "--receipt", str(affected))
     assert changed_result.returncode == 0, changed_result.stdout + changed_result.stderr
-    assert not (consumer / ".venv").exists(), "consumer-local virtualenv must not be required or retained"
+    if not shadow:
+        assert not (consumer / ".venv").exists() and not (consumer / "node_modules").exists(), "consumer dependency state must not be retained"
     return consumer, {"complete": json.loads(complete.read_text()), "affected": json.loads(affected.read_text())}
 
 
-@pytest.mark.parametrize(("fixture", "changed", "expected"), [
-    ("python", "src/input.txt", {"python-service:check"}),
-    ("pnpm", "src/input.txt", {"node-service:check"}),
-    ("mixed", "python/src/input.txt", {"python-service:check", "node-service:check"}),
-])
-def test_packed_cli_executes_locked_disposable_consumers(tmp_path: Path, packed_cli: Path, fixture: str, changed: str, expected: set[str]) -> None:
-    consumer, receipts = exercise(tmp_path, packed_cli, fixture, changed)
+@pytest.mark.parametrize("spec", CONSUMERS, ids=lambda spec: str(spec["id"]))
+def test_packed_cli_executes_locked_disposable_consumers(tmp_path: Path, packed_cli: Path, spec: dict[str, object]) -> None:
+    consumer, receipts = exercise(tmp_path, packed_cli, spec)
     assert (consumer / "tc-sdlc.lock").is_file()
-    complete_expected = expected if fixture != "mixed" else {"python-service:check", "node-service:check"}
+    complete_expected = set(spec["complete_tasks"])
     assert {task["key"] for task in receipts["complete"]["tasks"]} == complete_expected
-    assert {task["key"] for task in receipts["affected"]["tasks"]} == expected
+    assert {task["key"] for task in receipts["affected"]["tasks"]} == set(spec["affected_tasks"])
+
+
+def test_packed_cli_prefers_locked_state_over_local_node_shadowing(tmp_path: Path, packed_cli: Path) -> None:
+    spec = next(spec for spec in CONSUMERS if spec["id"] == "pnpm")
+    exercise(tmp_path, packed_cli, spec, shadow=True)
