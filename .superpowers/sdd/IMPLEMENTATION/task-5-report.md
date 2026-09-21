@@ -27,9 +27,9 @@ The implemented boundary is now:
   release, lock digest, task identity, dependency-lock identities and exact
   toolchain versions.
 
-The coordinated release is `3.0.0`. It binds source commit
-`4078c28d5680eff3c8fd2264256ad91c1ec28fea` and OCI index digest
-`sha256:73decf541ad1a15dda01b451b64c6da5b0d58b666898fdf3b7052f187141bb93`.
+The coordinated release is `3.0.0`. After final review remediation it binds
+source commit `29b7d20b85f4481dcd97c62b477d72031b47a27b` and OCI index digest
+`sha256:32cc1c4fb82870e8eda9952091c6d3708fc42a557ea4d2cca8c7a1f0c51e0e0a`.
 Nothing was pushed or published.
 
 ## Public contracts and authorities
@@ -46,7 +46,8 @@ writeReleaseCatalogue(path: string, catalogue: ReleaseCatalogue): void
 `BootstrapHost` contains only `platform`, `architecture` and `offline`; it has
 no injectable PATH. `BootstrapOptions.stateRoot` is an explicit absolute path
 outside the checkout. `BootstrapDependencyEvidence` binds manager, lock digest,
-manifest digest and the state-owned environment path.
+aggregate manifest digest, every canonical dependency input path/content digest
+and the state-owned environment path.
 
 Canonical versions are Node 24 (image patch 24.21.0), pnpm 11.22.0, Python
 3.13 (image patch 3.13.15), uv 0.12.5 and `three-cubes-fitness` 0.17.0 at
@@ -82,9 +83,9 @@ release files.
 The real two-architecture OCI build produced:
 
 ```text
-linux/amd64 manifest sha256:d991e0480a18221dd21e31308fdc16b2a50fb243896f5498ed250a0c0d0b737f
-linux/arm64 manifest sha256:a4b127fb12c2bdc5f765a32ae59de2a7fa3b8c7ea98855f8a41b4a61ad3f21f7
-manifest list sha256:73decf541ad1a15dda01b451b64c6da5b0d58b666898fdf3b7052f187141bb93
+linux/amd64 manifest sha256:e37f8c0f37fefebc96ea07b49caafe9bc7afcbb7c7e9beb4be7c244a2678ee92
+linux/arm64 manifest sha256:c57ced0696af0bc715c2139d1b3910a08b05b8a35949504488faab642384274e
+manifest list sha256:32cc1c4fb82870e8eda9952091c6d3708fc42a557ea4d2cca8c7a1f0c51e0e0a
 ```
 
 The Dev Container and release catalogue both contain the manifest-list digest.
@@ -93,13 +94,15 @@ toolchains and bootstrap distribution provenance as one entry.
 
 ### 4. Frozen dependency materialisation
 
-Bootstrap discovers `pnpm-lock.yaml`/`package.json` and
-`uv.lock`/`pyproject.toml` pairs. It binds both lock and manifest digests into
-the state key, copies the pnpm manifest and lock into managed state before a
-frozen install, and directs uv's project environment into managed state.
-Installed `yaml==2.9.1` and `attrs==26.1.0` are executed in both native and
-canonical-image verification. Warm offline reuse validates the state and a
-manifest-only change cannot reuse the old environment.
+Bootstrap parses the pnpm lock importer graph and binds the root manifest,
+`pnpm-workspace.yaml`, every importer manifest, `.npmrc` when present and every
+declared patch file. It copies that exact graph into managed state and performs
+one frozen workspace install, preserving workspace protocols and patches.
+`uv.lock` and `pyproject.toml` are bound and materialised into the state-owned
+Python environment. Installed workspace links, a patched package, `yaml==2.9.1`,
+`attrs==26.1.0`, repository `nx` and the real `three-cubes-fitness==0.17.0` git
+dependency are executed. Warm offline reuse validates every input digest; a
+member-manifest or patch-byte change cannot reuse the old environment.
 
 ### 5. One executable remediation command
 
@@ -113,6 +116,43 @@ command:
 
 The macOS command is shell-syntax checked and the Linux executable is proven
 available in the behavioural suite.
+
+## Final independent-review remediation
+
+The final five findings were reproduced and closed as follows:
+
+1. The Homebrew pnpm Corepack shim failed with an empty/trap HOME and offline
+   networking (`env: node: No such file or directory`, then an `ENOTDIR`
+   Corepack config failure). The state launcher now invokes the resolved
+   Corepack pnpm module with the validated Node executable and binds HOME,
+   XDG config and Corepack cache to managed state. The public integration test
+   runs the launcher with `PATH=/usr/bin:/bin`, a file-valued HOME and
+   `COREPACK_ENABLE_NETWORK=0`; it reports 11.22.0.
+2. The root-only pnpm materialisation omitted workspace importers and patches.
+   A real fixture with two workspace-protocol members, an external dependency
+   and a patch now proves complete graph installation. The receipt lists all
+   six metadata inputs; one-byte member-manifest and patch changes both produce
+   a distinct state key and fail offline reuse.
+3. The canonical image initially failed `git --version` before it could resolve
+   the repository's immutable uv git dependency. The final image contains git
+   and make. Image verification bootstraps the actual repository pnpm and uv
+   locks, imports `nx`, executes `three-cubes-fitness==0.17.0`, and repeats the
+   bootstrap offline from verified warm state.
+4. The generated Dev Container initially lacked `workspaceMount`. A behavioural
+   verifier now substitutes an editor-opened source tree, starts the container
+   with the generated bind semantics and reads an exact marker at `/workspace`.
+5. The ordinary suite failed on Linux with five macOS-assumption failures. The
+   six real Homebrew tests are now an explicit `test:integration:darwin` suite;
+   ordinary tests contain portable bootstrap ownership/lock behavior. The
+   Docker `package-tests` stage ran all 109 ordinary tests on Linux/arm64, and
+   the final amd64 image executed public declaration/catalogue/lock behavior as
+   Linux x64 while preserving `buildGraph/2` and `runGraph/3`.
+
+An additional cross-location RED found that aggregate dependency manifest
+digests accidentally included internal absolute `sourcePath` values. A public
+relocation regression failed offline reuse before the fix. Manifest digests now
+hash only canonical relative path/content-digest pairs; native and image
+dependency evidence is byte-identical.
 
 ## State, evidence and planning invariants
 
@@ -150,18 +190,19 @@ checkout `node_modules`/`.venv`, actual dependency execution and manifest-bound
 state. It failed before the state-owned-manifest change and now passes. A fifth
 test covers schema-level version sabotage and the macOS remediation command.
 
-Final built-public focused result:
+Final built-public macOS integration result:
 
 ```text
 Test Files  1 passed (1)
-Tests       5 passed (5)
+Tests       6 passed (6)
 ```
 
 The suite covers arbitrary PATH, trap HOME, real Homebrew provenance, exact
-catalogue uv, cold/warm offline behaviour, dependency execution, launcher
-corruption, manifest drift, foreign/symlink/in-checkout state, stale lock,
-canonical receipt bytes, exact version constraints and both remediation
-commands. Catalogue tests cover moving/unresolved refs and atomic output.
+catalogue uv, cold/warm offline behaviour, root and workspace dependency
+execution, offline Corepack use, launcher corruption, manifest/patch drift,
+foreign/symlink/in-checkout state, stale lock, relocation stability, canonical
+receipt bytes, exact version constraints and both remediation commands.
+Catalogue tests cover moving/unresolved refs and atomic output.
 
 ## Verification
 
@@ -170,9 +211,11 @@ Package build, complete tests and frozen pnpm lock:
 ```text
 pnpm --filter @three-cubes/tc-sdlc build
 pnpm --filter @three-cubes/tc-sdlc test
+pnpm --filter @three-cubes/tc-sdlc test:integration:darwin
 pnpm install --frozen-lockfile
 
-6 files passed; 112 tests passed; lock already up to date; exit 0.
+Portable: 6 files and 109 tests passed. Explicit macOS integration: 1 file and
+6 tests passed. Frozen lock already up to date; all exit 0.
 ```
 
 Canonical image:
@@ -187,16 +230,25 @@ amd64 image smoke under QEMU: the same versions and built CLI; exit 0.
 ```
 
 `images/sdlc/verify.mjs` executed a fresh native macOS bootstrap and a fresh
-arm64 canonical-image bootstrap, ran installed Node and Python dependencies,
-then repeated the image bootstrap with networking disabled. Exit 0 with:
+arm64 canonical-image bootstrap, ran installed Node/Python dependencies and
+the actual repository dependency closure, then repeated both image bootstraps
+with networking disabled. Exit 0 with:
 
 ```text
 release 3.0.0
-lockDigest sha256:60cffc4857582a899250d151151ddbc50a2206b57769294eb928326677ef583b
-taskIdentity sha256:491f46293fa05e044a70337fb791e102336420dd6a076e51895ecde6896b94c1
+lockDigest sha256:fb7390b211666f761b7b40660dbbddeccbf648ff33650d60c59845585af093b9
+taskIdentity sha256:dade63a6b816e0a746727ad6b4b6097d452659f0f447479118904b69c339a43b
 nativePlatform darwin
 imagePlatform linux
 ```
+
+The Linux/amd64 image separately reported Node 24.21.0, pnpm 11.22.0, Python
+3.13.15, uv 0.12.5, git 2.39.5 and GNU make 4.3, then executed the public
+declaration/catalogue/lock path with `process.arch === "x64"`; exit 0.
+
+The generated Dev Container verification launched the final local image with
+the rendered `workspaceMount` semantics and read the exact opened-tree marker
+from `/workspace`; exit 0.
 
 Python and repository fitness:
 
@@ -243,7 +295,11 @@ qualification; hosted amd64 execution remains Task 6 evidence.
 - `3774e78` — explicit host/canonical-image bootstrap, dependencies, image and
   generators;
 - `4078c28` — native build-platform packaging for the multiarchitecture image;
-- `19842e9` — generated immutable release catalogue and Dev Container.
+- `19842e9` — initial generated immutable release catalogue and Dev Container;
+- `29b7d20` — final-review launcher, workspace, image, Dev Container and
+  portable-test remediation;
+- `d2b133f` — regenerated immutable catalogue and Dev Container bound to the
+  remediated source and OCI index.
 
 Earlier Task 5 coordination commits remain in history. All Task 5 commits are
 authored by `three-cubes-agent[bot]`. `docs/IMPLEMENTATION.md` was not edited.
