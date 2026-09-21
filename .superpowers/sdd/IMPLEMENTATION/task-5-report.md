@@ -27,10 +27,12 @@ The implemented boundary is now:
   release, lock digest, task identity, dependency-lock identities and exact
   toolchain versions.
 
-The coordinated release is `3.0.0`. After final review remediation it binds
-source commit `29b7d20b85f4481dcd97c62b477d72031b47a27b` and OCI index digest
-`sha256:32cc1c4fb82870e8eda9952091c6d3708fc42a557ea4d2cca8c7a1f0c51e0e0a`.
-Nothing was pushed or published.
+The coordinated release is `3.0.0`. After the second final review remediation
+it binds source commit `f78e72f1fa3a37beb63ce579ed42b0154c554754` and OCI index digest
+`sha256:1d5d444285271c0e840bf009349fc2f8125103e50366875ff3816df88e6c1f19`.
+Nothing was pushed or published. In particular, no claim is made that the
+catalogue's GHCR reference is remotely available: no authenticated registry
+read was performed.
 
 ## Public contracts and authorities
 
@@ -80,12 +82,14 @@ It installs the packed `@three-cubes/tc-sdlc` 3.0.0 package and runs as UID
 nonexistent commits and the old 2.2.0 version before atomically rendering both
 release files.
 
-The real two-architecture OCI build produced:
+The final real two-architecture OCI build produced:
 
 ```text
-linux/amd64 manifest sha256:e37f8c0f37fefebc96ea07b49caafe9bc7afcbb7c7e9beb4be7c244a2678ee92
-linux/arm64 manifest sha256:c57ced0696af0bc715c2139d1b3910a08b05b8a35949504488faab642384274e
-manifest list sha256:32cc1c4fb82870e8eda9952091c6d3708fc42a557ea4d2cca8c7a1f0c51e0e0a
+manifest list sha256:1d5d444285271c0e840bf009349fc2f8125103e50366875ff3816df88e6c1f19
+source commit f78e72f1fa3a37beb63ce579ed42b0154c554754
+artifact artifacts/task5-release-f78e72f/image.oci.tar
+build evidence artifacts/task5-release-f78e72f/build-receipt.json
+verification evidence artifacts/task5-release-f78e72f/verification.json
 ```
 
 The Dev Container and release catalogue both contain the manifest-list digest.
@@ -117,7 +121,7 @@ command:
 The macOS command is shell-syntax checked and the Linux executable is proven
 available in the behavioural suite.
 
-## Final independent-review remediation
+## Earlier independent-review remediation
 
 The final five findings were reproduced and closed as follows:
 
@@ -154,6 +158,46 @@ relocation regression failed offline reuse before the fix. Manifest digests now
 hash only canonical relative path/content-digest pairs; native and image
 dependency evidence is byte-identical.
 
+## Second final-review remediation
+
+All five reproduced findings were first exercised through the public built
+package or executable boundary:
+
+1. A sandboxed warm Darwin bootstrap denied
+   `/Users/danmcmahon/.cache/node/corepack` and returned
+   `host_prerequisite_missing`. Capability probes now run with a state-owned
+   HOME, XDG cache/config and `COREPACK_HOME`; the same sandboxed command now
+   returns `status: ok, reused: true` without reading the ambient account.
+2. Adding a package selected by `pnpm-workspace.yaml` but absent from the lock
+   initially reached host discovery and returned `offline_cold`. Workspace
+   package globs are now expanded independently, every matching `package.json`
+   is inventoried, and exact equality with lock importers is required before
+   host discovery or reuse. The sabotage now fails with
+   `dependency_lock_invalid` and `PNPM_WORKSPACE_LOCK_MISMATCH`.
+3. The prior receipt had no installed-tree content binding, and deleting
+   `dependencies/node/node_modules` still returned `reused: true`. State schema
+   v5 records `installedDigest` for the complete pnpm materialisation. Any byte
+   change or deletion now returns `state_corrupt`; valid unchanged warm state
+   still reuses offline.
+4. Release building previously left a 677 MiB directory in the account home
+   and only a `/private/tmp` pointer. `release:image` now requires a new,
+   caller-selected direct child of repository-owned `artifacts/`, stages and
+   atomically publishes it, refuses overwrite and records its exact evidence
+   path and retention owner. Verification likewise requires explicit scratch
+   and evidence paths and removes scratch in `finally`. After the replacement
+   above passed verification, the superseded 32cc home artifact, pointer and
+   intermediate replacement were deleted.
+5. The Darwin integration suite no longer assumes x64 is foreign. It derives
+   the unavailable architecture from the real fixed Homebrew capability paths
+   and skips only the missing-capability assertion if both architectures are
+   completely installed.
+
+The first Linux image `package-tests` run then exposed one additional real
+packaging RED: the public artifact commands were absent from the Docker build
+context and two tests failed with `MODULE_NOT_FOUND`. The Dockerfile now copies
+both release boundary scripts into the builder; the Linux stage passes all 112
+portable tests.
+
 ## State, evidence and planning invariants
 
 - State roots must be absolute, outside the checkout, non-symlinked and either
@@ -162,8 +206,9 @@ dependency evidence is byte-identical.
 - Nested symlink traversal is rejected. Completion `state.json` is the last
   materialisation write; receipt writes use the existing canonical fsync and
   rename path.
-- Warm reuse reprobes host prerequisites, checks launcher, executable and
-  adapter digests, exact state bindings and dependency environment presence.
+- Warm reuse reprobes host prerequisites inside the managed probe environment,
+  checks launcher, executable and adapter digests, exact state bindings and the
+  content digest of the complete installed pnpm tree.
 - Bootstrap calls `assertCurrentLock`, the canonical input resolver,
   `bindGraphLock`, and the exact two-argument `buildGraph`. There is no second
   lock, input or graph implementation.
@@ -214,7 +259,7 @@ pnpm --filter @three-cubes/tc-sdlc test
 pnpm --filter @three-cubes/tc-sdlc test:integration:darwin
 pnpm install --frozen-lockfile
 
-Portable: 6 files and 109 tests passed. Explicit macOS integration: 1 file and
+Portable: 6 files and 112 tests passed. Explicit macOS integration: 1 file and
 6 tests passed. Frozen lock already up to date; all exit 0.
 ```
 
@@ -223,6 +268,10 @@ Canonical image:
 ```text
 docker buildx build --platform linux/amd64,linux/arm64 --output type=oci,...
 exit 0; real manifest list digest recorded above.
+
+docker buildx build --platform linux/amd64,linux/arm64 \
+  --target package-tests --file images/sdlc/Dockerfile .
+exit 0; Linux package stage contains and passes all 112 portable tests.
 
 arm64 image smoke: UID 1000, Node 24.21.0, pnpm 11.22.0,
 Python 3.13.15 and uv 0.12.5; exit 0.
@@ -236,8 +285,8 @@ with networking disabled. Exit 0 with:
 
 ```text
 release 3.0.0
-lockDigest sha256:fb7390b211666f761b7b40660dbbddeccbf648ff33650d60c59845585af093b9
-taskIdentity sha256:dade63a6b816e0a746727ad6b4b6097d452659f0f447479118904b69c339a43b
+lockDigest sha256:d63b2bf6986f40f99a569f80695e28e680549589b5b1ae57340651baa94eaeed
+taskIdentity sha256:15ce654d6e25f03bc830bc9803946834d696a4ff5aa1f5d9bf9c06430aef09b2
 nativePlatform darwin
 imagePlatform linux
 ```
@@ -299,17 +348,23 @@ qualification; hosted amd64 execution remains Task 6 evidence.
 - `29b7d20` — final-review launcher, workspace, image, Dev Container and
   portable-test remediation;
 - `d2b133f` — regenerated immutable catalogue and Dev Container bound to the
-  remediated source and OCI index.
+  first remediated source and OCI index;
+- `5dc3b0e` — managed prerequisite probes, independent workspace closure,
+  installed-tree binding and explicit artifact/evidence retention contract;
+- `f78e72f` — include release-boundary executables in Linux package tests;
+- `b0f9621` — regenerate the immutable catalogue and Dev Container for source
+  `f78e72f` and the verified `1d5d` OCI index.
 
 Earlier Task 5 coordination commits remain in history. All Task 5 commits are
 authored by `three-cubes-agent[bot]`. `docs/IMPLEMENTATION.md` was not edited.
 
 ## Self-review
 
-All five independent-review findings are addressed in production behavior and
-built-public tests. Task 1-4 package behavior and the exact two-argument
-`buildGraph` API remain intact. The worktree contains no package-local lock,
-untracked release placeholder or simulated toolchain. No known implementation
-blocker remains; the explicit remaining evidence limitation is amd64 hosted
-hardware qualification, which belongs to Task 6 rather than this local arm64
+All findings from both independent reviews are addressed in production
+behavior and built-public tests. Task 1-4 package behavior and the exact
+two-argument `buildGraph` API remain intact. The worktree contains no
+package-local lock, untracked release placeholder or simulated toolchain. No
+known implementation blocker remains; the explicit remaining evidence
+limitation is amd64 hosted hardware qualification, which belongs to Task 6
+rather than this local arm64
 workstation.
