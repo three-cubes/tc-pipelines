@@ -122,11 +122,13 @@ test("the packed fitness command runs only its genuine bootstrapped fitness task
   expect(receipt.engine.executableDigest).toBe(hash(readFileSync(join(stateRoot, bootstrap.stateKey, pythonDependency.environment, "bin", "tc-fitness"))));
 
   const run = JSON.parse(readFileSync(`${receiptPath}.run`, "utf8"));
-  expect(run).toMatchObject({ schema: "tc.sdlc/run-receipt/v1", status: "succeeded", reason: null,
+  expect(run).toMatchObject({ schema: "tc.sdlc/run-receipt/v1", status: "succeeded", reason: null, scratchCleanup: "removed",
     declarationDigest: bindings.declarationDigest, lockDigest: bindings.lockDigest, selection: [receipt.task.identity],
     bootstrapContext: { bootstrapReceiptDigest: hash(readFileSync(bootstrapPath)), stateDigest: bootstrap.stateDigest,
       stateKey: bootstrap.stateKey, lockDigest: bindings.lockDigest, fitness: lock.fitness },
   });
+  expect(run.scratchId).toMatch(/^tc-sdlc-run-[A-Za-z0-9]+$/);
+  expect(existsSync(join(tmpdir(), run.scratchId))).toBe(false);
   expect(receipt.bootstrapContextDigest).toBe(hash(canonical(run.bootstrapContext)));
   expect(run.tasks).toHaveLength(1);
   const task = run.tasks[0];
