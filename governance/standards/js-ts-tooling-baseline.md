@@ -43,21 +43,31 @@ purpose: >
 | CI workflow | `.github/workflows/ci.yml` | repo |
 | Dependabot config | `.github/dependabot.yml` (npm ecosystem) | repo |
 
-## 1. Installing pnpm locally
+## 1. Materialising pnpm locally
 
-The repo uses `corepack` to provision pnpm — no global pnpm install required.
+An AI SDLC consumer's bootstrap owns the exact pnpm distribution beneath its
+declared state root. Do not run `corepack enable`, `corepack prepare --activate`, or
+`corepack install --global` against an ambient user home: those commands create
+mutable machine-global selection state that is not bound to repository
+evidence.
 
 ### macOS / Linux (developer laptops)
 
-```bash
-corepack enable
-corepack prepare pnpm@10.27.0 --activate
-```
+Run the repository's canonical bootstrap entry point. Migrated AI SDLC
+consumers use the exact repository command `make bootstrap`, which drives
+`tc-sdlc bootstrap`. Repositories not yet migrated continue to use their
+existing declared bootstrap; this standard does not claim they already have
+the state-owned distribution contract.
 
 Verify:
 
+For a migrated consumer, verify that the bootstrap receipt records the exact
+`packageManager` version and invoke the state-owned pnpm launcher named by that
+receipt with `--version`. A bare `pnpm --version` is not evidence: it may report
+an unrelated ambient Corepack selection. The host prerequisite remains directly
+verifiable:
+
 ```bash
-pnpm --version    # expect 10.27.0
 node --version    # expect to match .nvmrc (24.x)
 ```
 
@@ -72,21 +82,25 @@ If `node` is wrong, either:
 
 ## 2. First-time bootstrap
 
-After a fresh clone, the canonical one-command path installs both the Python and Node workspaces at once:
+After a fresh clone of a migrated consumer, the canonical one-command path
+installs both the Python and Node workspaces at once:
 
 ```bash
 make bootstrap        # alias: make dev-env
 ```
 
-It enables corepack + the pinned pnpm, then runs `pnpm install --frozen-lockfile`, alongside the uv steps (see the Python dependency-locking standard §2). The uv cache is written outside `$HOME` so sandboxed agents can install. Node-only manual equivalent (e.g. after a `package.json` / `pnpm-lock.yaml` change):
-
-```bash
-pnpm install --frozen-lockfile
-```
+It materialises the pinned pnpm without changing ambient Corepack state, then
+runs `pnpm install --frozen-lockfile`, alongside the uv steps (see the Python
+dependency-locking standard §2). The uv and pnpm caches are written beneath
+declared owned state rather than `$HOME`. Migrated consumers must use
+`make bootstrap` for dependency materialisation; a bare `pnpm install` would
+return to the ambient selection that bootstrap deliberately excludes.
 
 `--frozen-lockfile` refuses to mutate `pnpm-lock.yaml` — if the lockfile and `package.json` disagree, install fails with a clear error. This is the correct CI behaviour and the right default locally.
 
-If you intentionally changed deps (added/removed/bumped), run plain `pnpm install` to regenerate the lockfile, then commit both `package.json` and `pnpm-lock.yaml` together.
+If you intentionally changed dependencies, use the repository's declared
+preparation command to regenerate the lock, then commit both `package.json` and
+`pnpm-lock.yaml` together.
 
 ## 3. Running lint / build / test locally
 

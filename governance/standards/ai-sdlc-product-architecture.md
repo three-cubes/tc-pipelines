@@ -129,6 +129,12 @@ low-latency inner loop. Native execution proves product behaviour within the
 declared platform scope. The canonical image supplies cross-environment release
 evidence.
 
+macOS treats Homebrew Node, Python and uv as validated host prerequisites, but
+not Homebrew or ambient-user pnpm selection. Bootstrap materialises the exact
+declared pnpm distribution under state-owned Corepack storage, executes it
+through a state-owned launcher and binds the complete distribution digest into
+state evidence. Warm offline reuse reads no ambient Corepack home.
+
 Platform-specific tests form explicit tasks. A macOS bootstrap task verifies
 the native developer boundary. Linux container tasks verify the production
 user-space boundary. Live service journeys verify external runtime boundaries.

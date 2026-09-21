@@ -270,6 +270,12 @@ Bootstrap consumes the release catalogue and generated lock. It reports missing
 host capabilities with one actionable command and does not depend on state under
 a particular user's home directory. Native macOS/Linux and the canonical image
 must report the same SDLC release, lock digest and task identities.
+On macOS, Homebrew supplies the reviewed Node, Python and uv prerequisites;
+bootstrap invokes Corepack with an owned `COREPACK_HOME` to materialise the
+exact declared pnpm distribution beneath the immutable release state. The
+launcher executes that state-owned distribution directly. Ambient Corepack
+selection is neither read nor mutated, and the complete distribution digest is
+bound into bootstrap state evidence.
 
 The developer-environment lifecycle is part of these commands, not an optional
 operator chore. Each command removes its own scratch in `finally`; bootstrap,

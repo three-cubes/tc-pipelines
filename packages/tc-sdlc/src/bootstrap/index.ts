@@ -120,6 +120,18 @@ type HostCapability = Readonly<{
   executableDigest: string;
 }>;
 
+type PnpmInstaller = Readonly<{
+  node: string;
+  nodeRoot: string;
+  corepack: string;
+}>;
+
+type HostCapabilities = Readonly<{
+  adapters: readonly HostCapability[];
+  installerUv: HostCapability;
+  pnpmInstaller?: PnpmInstaller;
+}>;
+
 type ResolvedAdapter = BootstrapAdapterEvidence & Readonly<{ executable: string }>;
 
 type DependencyInput = BootstrapDependencyInput & Readonly<{ sourcePath: string }>;
@@ -283,7 +295,7 @@ function installedEnvironmentDigest(manager: "pnpm" | "uv", root: string): strin
 
 function remediation(host: BootstrapHost, catalogue: ReleaseCatalogue): string {
   return host.platform === "darwin"
-    ? "/bin/bash -lc 'brew install node@24 python@3.13 uv && \"$(brew --prefix node@24)/bin/corepack\" install --global pnpm@11.22.0'"
+    ? "/bin/bash -lc 'brew install node@24 python@3.13 uv'"
     : `docker pull ghcr.io/three-cubes/tc-sdlc@${catalogue.release.imageDigest}`;
 }
 
@@ -494,7 +506,7 @@ function homebrewCapabilities(
   declaration: SdlcDeclaration,
   catalogue: ReleaseCatalogue,
   stateRoot: string,
-): Readonly<{ adapters: readonly HostCapability[]; installerUv: HostCapability }> {
+): HostCapabilities {
   const prefix = host.architecture === "arm64" ? "/opt/homebrew" : "/usr/local";
   try {
     accessSync(join(prefix, "bin", "brew"), constants.X_OK);
@@ -509,7 +521,6 @@ function homebrewCapabilities(
       throw new Error("Homebrew capability escaped its formula cellar");
     }
     const node = join(prefix, "opt", "node@24", "bin", "node");
-    const pnpm = join(prefix, "opt", "node@24", "bin", "pnpm");
     const python = join(prefix, "opt", "python@3.13", "libexec", "bin", "python3");
     const pathValue = [dirname(node), dirname(python), join(prefix, "bin"), "/usr/bin", "/bin"].join(":");
     const probeEnvironment = managedProbeEnvironment(
@@ -522,14 +533,6 @@ function homebrewCapabilities(
         contracts[0]!,
         node,
         declaration.toolchains.node,
-        "homebrew",
-        pathValue,
-        probeEnvironment,
-      ),
-      capability(
-        contracts[1]!,
-        pnpm,
-        declaration.toolchains.packageManager.replace(/^pnpm@/, ""),
         "homebrew",
         pathValue,
         probeEnvironment,
@@ -558,7 +561,15 @@ function homebrewCapabilities(
       executable: uvExecutable,
       executableDigest: fileDigest(uvExecutable),
     };
-    return { adapters, installerUv };
+    return {
+      adapters,
+      installerUv,
+      pnpmInstaller: {
+        node: realpathSync(node),
+        nodeRoot,
+        corepack: join(nodeRoot, "lib", "node_modules", "corepack", "dist", "corepack.js"),
+      },
+    };
   } catch (error) {
     throw prerequisiteFailure(
       host,
@@ -574,7 +585,7 @@ function canonicalImageCapabilities(
   declaration: SdlcDeclaration,
   catalogue: ReleaseCatalogue,
   stateRoot: string,
-): Readonly<{ adapters: readonly HostCapability[]; installerUv: HostCapability }> {
+): HostCapabilities {
   try {
     const marker = readCanonical("/etc/tc-sdlc-release.json") as Record<string, unknown>;
     if (
@@ -622,7 +633,7 @@ function hostCapabilities(
   declaration: SdlcDeclaration,
   catalogue: ReleaseCatalogue,
   stateRoot: string,
-): ReturnType<typeof homebrewCapabilities> {
+): HostCapabilities {
   return host.platform === "darwin"
     ? homebrewCapabilities(host, declaration, catalogue, stateRoot)
     : canonicalImageCapabilities(host, declaration, catalogue, stateRoot);
@@ -937,6 +948,110 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+function pnpmDistributionRoot(executable: string): string {
+  return dirname(dirname(executable));
+}
+
+function materializeCataloguePnpm(
+  options: BootstrapOptions,
+  host: BootstrapHost,
+  stateRoot: string,
+  stateDirectory: string,
+  installer: PnpmInstaller | undefined,
+): HostCapability {
+  if (installer === undefined) {
+    throw prerequisiteFailure(
+      host,
+      options.catalogue,
+      "macOS bootstrap requires Corepack from the reviewed Homebrew node@24 prerequisite",
+    );
+  }
+  if (host.offline) {
+    throw new BootstrapFailure("offline_cold", [
+      {
+        code: "BOOTSTRAP_OFFLINE_COLD",
+        message: "offline bootstrap requires an existing verified warm state",
+        action: "retry without offline mode to materialise the release state",
+      },
+    ]);
+  }
+  let corepack: string;
+  try {
+    corepack = realpathSync(installer.corepack);
+    if (
+      !resolvesInside(installer.nodeRoot, corepack) ||
+      lstatSync(corepack).isSymbolicLink() ||
+      !lstatSync(corepack).isFile()
+    ) {
+      throw new Error("Corepack escaped the reviewed node@24 formula");
+    }
+  } catch (error) {
+    throw prerequisiteFailure(
+      host,
+      options.catalogue,
+      "macOS bootstrap requires Corepack from the reviewed Homebrew node@24 prerequisite",
+      error instanceof Error ? error.message : "invalid Corepack prerequisite",
+    );
+  }
+  const version = options.declaration.toolchains.packageManager.replace(/^pnpm@/, "");
+  const pathValue = `${dirname(installer.node)}:/usr/bin:/bin`;
+  rejectSymlinkComponents(stateRoot, join(stateDirectory, "corepack"));
+  const environment = managedEnvironment(
+    stateRoot,
+    stateDirectory,
+    pathValue,
+  );
+  execFileSync(
+    installer.node,
+    [corepack, "install", "--global", `pnpm@${version}`],
+    { cwd: options.root, env: environment, stdio: "pipe" },
+  );
+  const distribution = join(stateDirectory, "corepack", "v1", "pnpm", version);
+  const executable = join(distribution, "bin", "pnpm.cjs");
+  rejectSymlinkComponents(stateRoot, executable);
+  if (
+    !existsSync(executable) ||
+    lstatSync(executable).isSymbolicLink() ||
+    !lstatSync(executable).isFile()
+  ) {
+    throw new BootstrapFailure("distribution_corrupt", [
+      {
+        code: "PNPM_DISTRIBUTION_INVALID",
+        capability: "pnpm",
+        expected: version,
+        message: "Corepack did not materialise the exact pnpm distribution in owned state",
+        action: "discard the partial state and retry online",
+      },
+    ]);
+  }
+  const observed = contracts[1]!.observed(
+    execFileSync(installer.node, [executable, "--version"], {
+      encoding: "utf8",
+      env: { ...environment, COREPACK_ENABLE_NETWORK: "0" },
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim(),
+  );
+  if (observed === null || !contracts[1]!.matches(observed, version)) {
+    throw new BootstrapFailure("distribution_corrupt", [
+      {
+        code: "PNPM_DISTRIBUTION_VERSION_MISMATCH",
+        capability: "pnpm",
+        expected: version,
+        observed: observed ?? "unrecognised",
+        message: "state-owned pnpm distribution does not match the declared version",
+        action: "discard the partial state and retry online",
+      },
+    ]);
+  }
+  return {
+    name: "pnpm",
+    version,
+    provider: "catalogue-distribution",
+    executable,
+    executableDigest: directoryDigest(distribution),
+  };
+}
+
 async function materializeCatalogueUv(
   options: BootstrapOptions,
   host: BootstrapHost,
@@ -1155,6 +1270,13 @@ async function materializeState(
   let capabilities = prerequisites.adapters;
   if (host.platform === "darwin") {
     const python = capabilities.find((value) => value.name === "python")!;
+    const pnpm = materializeCataloguePnpm(
+      options,
+      host,
+      stateRoot,
+      directory,
+      prerequisites.pnpmInstaller,
+    );
     const uv = await materializeCatalogueUv(
       options,
       host,
@@ -1163,7 +1285,12 @@ async function materializeState(
       prerequisites.installerUv,
       python,
     );
-    capabilities = [...capabilities, { ...uv, provider: "catalogue-distribution" }];
+    const byName = new Map<string, HostCapability>([
+      ...capabilities.map((capability) => [capability.name, capability] as const),
+      [pnpm.name, pnpm],
+      [uv.name, { ...uv, provider: "catalogue-distribution" }],
+    ]);
+    capabilities = contracts.map((contract) => byName.get(contract.name)!);
   }
   const adapters = capabilities.map((value) =>
     resolvedAdapter(stateRoot, stateKey, value, capabilities),
@@ -1251,13 +1378,24 @@ function validateWarmState(
       }
       const launcher = resolve(stateRoot, adapter.launcher);
       rejectSymlinkComponents(stateRoot, launcher);
+      if (adapter.provider === "catalogue-distribution") {
+        rejectSymlinkComponents(
+          realpathSync(stateRoot),
+          realpathSync(adapter.executable),
+        );
+      }
+      const executableDigest =
+        adapter.name === "pnpm" && adapter.provider === "catalogue-distribution"
+          ? directoryDigest(pnpmDistributionRoot(adapter.executable))
+          : fileDigest(adapter.executable);
       if (
         !existsSync(launcher) ||
         lstatSync(launcher).isSymbolicLink() ||
         fileDigest(launcher) !== adapter.launcherDigest ||
         !existsSync(adapter.executable) ||
         lstatSync(adapter.executable).isSymbolicLink() ||
-        fileDigest(adapter.executable) !== adapter.executableDigest
+        !lstatSync(adapter.executable).isFile() ||
+        executableDigest !== adapter.executableDigest
       ) {
         throw new Error("adapter artifact mismatch");
       }

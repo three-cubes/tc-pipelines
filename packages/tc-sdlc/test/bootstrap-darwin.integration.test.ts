@@ -47,7 +47,6 @@ function homebrewPrerequisitesAvailable(architecture: "arm64" | "x64"): boolean 
   return [
     "bin/brew",
     "opt/node@24/bin/node",
-    "opt/node@24/bin/pnpm",
     "opt/python@3.13/libexec/bin/python3",
     "bin/uv",
   ].every((path) => existsSync(join(prefix, path)));
@@ -352,9 +351,103 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     });
     const action = receipt.diagnostics[0]?.action;
     expect(action).toContain("brew install node@24 python@3.13 uv");
-    expect(action).toContain("pnpm@11.22.0");
+    expect(action).not.toContain("corepack install --global");
     expect(spawnSync("/bin/bash", ["-n", "-c", action!]).status).toBe(0);
   });
+
+  test("materialises exact pnpm inside owned state without ambient Corepack", async () => {
+    expect(process.platform).toBe("darwin");
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-python-only-consumer-"));
+    for (const name of ["pyproject.toml", "uv.lock"]) {
+      writeFileSync(join(root, name), readFileSync(join(consumer, name)));
+    }
+    const stateRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-python-only-state-"));
+    const evidence = mkdtempSync(join(tmpdir(), "tc-sdlc-python-only-evidence-"));
+    const ambientCorepack = join(evidence, "ambient-corepack-is-a-file");
+    const ambientHome = join(evidence, "ambient-home-is-a-file");
+    writeFileSync(ambientCorepack, "ambient corepack must remain untouched\n");
+    writeFileSync(ambientHome, "ambient home must remain untouched\n");
+    const values = input(root, ["pyproject.toml", "uv.lock"]);
+    const options = {
+      ...values,
+      stateRoot,
+      receiptPath: join(evidence, "online.json"),
+      host: { platform: "darwin" as const, architecture: process.arch, offline: false },
+    };
+    const previous = {
+      HOME: process.env.HOME,
+      COREPACK_HOME: process.env.COREPACK_HOME,
+      COREPACK_ENABLE_NETWORK: process.env.COREPACK_ENABLE_NETWORK,
+    };
+    process.env.HOME = ambientHome;
+    process.env.COREPACK_HOME = ambientCorepack;
+    process.env.COREPACK_ENABLE_NETWORK = "0";
+    try {
+      const online = await sdlc.bootstrap(options);
+      expect(online).toMatchObject({ status: "succeeded", reused: false });
+      expect(online.dependencies.map((dependency) => dependency.manager)).toEqual(["uv"]);
+      const pnpmEvidence = online.adapters.find((adapter) => adapter.name === "pnpm")!;
+      expect(pnpmEvidence).toMatchObject({
+        version: "11.22.0",
+        provider: "catalogue-distribution",
+      });
+      const state = JSON.parse(
+        readFileSync(join(stateRoot, online.stateKey, "state.json"), "utf8"),
+      );
+      const pnpmState = state.adapters.find(
+        (adapter: { name: string }) => adapter.name === "pnpm",
+      );
+      expect(pnpmState.executable.startsWith(`${join(stateRoot, online.stateKey)}/`)).toBe(true);
+      const launcher = join(stateRoot, pnpmEvidence.launcher);
+      expect(execFileSync(launcher, ["--version"], {
+        encoding: "utf8",
+        env: {
+          HOME: ambientHome,
+          COREPACK_HOME: ambientCorepack,
+          COREPACK_ENABLE_NETWORK: "0",
+          PATH: "/usr/bin:/bin",
+        },
+      }).trim()).toBe("11.22.0");
+
+      const warm = await sdlc.bootstrap({
+        ...options,
+        receiptPath: join(evidence, "offline.json"),
+        host: { ...options.host, offline: true },
+      });
+      expect(warm).toMatchObject({ status: "succeeded", reused: true });
+      expect(readFileSync(ambientCorepack, "utf8")).toBe(
+        "ambient corepack must remain untouched\n",
+      );
+      expect(readFileSync(ambientHome, "utf8")).toBe(
+        "ambient home must remain untouched\n",
+      );
+
+      const distributionRoot = dirname(dirname(pnpmState.executable));
+      const distributionBytes = join(distributionRoot, "dist", "pnpm.mjs");
+      writeFileSync(distributionBytes, "\n// corrupted\n", { flag: "a" });
+      const corrupt = await sdlc.bootstrap({
+        ...options,
+        receiptPath: join(evidence, "corrupt.json"),
+        host: { ...options.host, offline: true },
+      });
+      expect(corrupt).toMatchObject({ status: "failed", reason: "state_corrupt" });
+
+      const cold = await sdlc.bootstrap({
+        ...options,
+        stateRoot: mkdtempSync(join(tmpdir(), "tc-sdlc-python-only-cold-state-")),
+        receiptPath: join(evidence, "cold.json"),
+        host: { ...options.host, offline: true },
+      });
+      expect(cold).toMatchObject({ status: "failed", reason: "offline_cold" });
+      expect(cold.diagnostics[0]?.action).toContain("retry without offline mode");
+      expect(cold.diagnostics[0]?.action).not.toContain("corepack install --global");
+    } finally {
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  }, 180_000);
 
   test("uses real platform prerequisites and materialises both dependency locks outside the checkout", async () => {
     expect(process.platform).toBe("darwin");
@@ -385,7 +478,7 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     });
     expect(receipt.adapters.map((adapter) => [adapter.name, adapter.provider])).toEqual([
       ["node", "homebrew"],
-      ["pnpm", "homebrew"],
+      ["pnpm", "catalogue-distribution"],
       ["python", "homebrew"],
       ["uv", "catalogue-distribution"],
     ]);
