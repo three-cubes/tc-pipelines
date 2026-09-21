@@ -93,7 +93,7 @@ each task remains independently executable before the next consumes it.
   `7.0.2`, Vitest `5.0.1`, `yaml` `2.9.1`, Ajv `8.20.0` and `@types/node`
   `24.13.6` are exact pins.
 - Python is `3.13`, uv is `0.12.5`, and the coordinated fitness engine is
-  `three-cubes-fitness` `0.16.1`.
+  `three-cubes-fitness` `0.17.0`.
 - Runtime package dependencies use exact versions. Internal workspace
   dependencies use `workspace:*` and resolve through the root
   `pnpm-lock.yaml`.
@@ -257,6 +257,10 @@ their owning trust boundary.
 
 ### Task 5 — Native bootstrap and canonical Linux image
 
+**Status:** native bootstrap complete and independently reviewed through
+`896bd4c`; immutable image publication remains in progress and cannot publish
+the release catalogue until Task 6 functional qualification succeeds.
+
 **Files**
 
 - `packages/tc-sdlc/src/bootstrap/` resolves capabilities and materialises the
@@ -322,6 +326,8 @@ but deliberately implements no successful-release artefact collector: until a
 canonical reference inventory exists, successful artefacts are retained.
 
 ### Task 6 — Disposable consumers and hosted adapter
+
+**Status:** in progress
 
 **Files**
 
