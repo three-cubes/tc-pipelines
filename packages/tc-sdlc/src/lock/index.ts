@@ -31,10 +31,10 @@ function assertCoordinated(
       "declaration and release catalogue toolchains must be upgraded together",
     );
   }
-  if (!sameRecord(declaration.fitness, release.fitness)) {
+  if (declaration.fitness.package !== release.fitness.package) {
     throw new SdlcError(
       "COORDINATED_UPGRADE_REQUIRED",
-      "declaration and release catalogue fitness versions must be upgraded together",
+      "declaration and release catalogue fitness package identities must match",
     );
   }
 }

@@ -19,6 +19,7 @@ export function evaluationCandidate(
     declarationDigest: receipt.declarationDigest,
     catalogueDigest: receipt.catalogueDigest,
     lockDigest: receipt.lockDigest,
+    bootstrapContext: receipt.bootstrapContext,
     environmentClass: receipt.environmentClass,
     producer: receipt.producer,
     tasks: receipt.tasks,

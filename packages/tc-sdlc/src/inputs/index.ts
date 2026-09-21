@@ -79,20 +79,23 @@ export function resolveInputInventory(
   const input = validateDeclaration(declaration);
   const files = snapshotFiles(root);
   return Object.fromEntries(
-    [...input.projects]
-      .sort((left, right) => left.name.localeCompare(right.name))
-      .flatMap((project) =>
-        Object.entries(input.targets)
-          .sort(([left], [right]) => left.localeCompare(right))
-          .map(([targetName, target]) => {
+    Object.entries(input.targets)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .flatMap(([targetName, target]) => {
+        const projects = target.scope === "repository"
+          ? [{ name: input.project, root: "." }]
+          : [...input.projects].sort((left, right) => left.name.localeCompare(right.name));
+        return projects.map((project) => {
             const task: TaskDeclaration = {
               project: project.name,
               target: targetName,
               projectRoot: project.root,
               mode: target.mode,
               trustBoundary: target.trustBoundary,
+              ...(target.scope === undefined ? {} : { scope: target.scope }),
               ...(target.command === undefined ? {} : { command: target.command }),
               ...(target.executor === undefined ? {} : { executor: target.executor }),
+              ...(target.profile === undefined ? {} : { profile: target.profile }),
               dependsOn: [],
               inputs: target.inputs ?? [],
               sharedInputs: target.sharedInputs ?? [],
@@ -104,7 +107,7 @@ export function resolveInputInventory(
               `${project.name}:${targetName}`,
               files.filter((file) => taskConsumesPath(task, file.path)),
             ] as const;
-          }),
-      ),
+          });
+      }),
   );
 }

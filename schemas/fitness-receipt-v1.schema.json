@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://three-cubes.github.io/tc-pipelines/schemas/fitness-receipt-v1.schema.json",
+  "title": "Three Cubes SDLC fitness receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "reason", "declarationDigest", "catalogueDigest", "lockDigest", "bootstrapContextDigest", "task", "engine", "config", "profile", "gateOutcome", "exitCode", "runReceiptDigest"],
+  "properties": {
+    "schema": { "const": "tc.sdlc/fitness-receipt/v1" },
+    "status": { "enum": ["succeeded", "failed", "stalled", "cancelled"] },
+    "reason": { "type": ["string", "null"] },
+    "declarationDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "catalogueDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "lockDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "bootstrapContextDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "task": { "type": "object", "additionalProperties": false, "required": ["key", "identity"], "properties": { "key": { "type": ["string", "null"], "minLength": 1 }, "identity": { "type": ["string", "null"], "minLength": 1 } } },
+    "engine": { "type": "object", "additionalProperties": false, "required": ["distribution", "expectedVersion", "observedVersion", "executableDigest", "environmentDigest"], "properties": { "distribution": { "type": ["string", "null"], "pattern": "^three-cubes-fitness$" }, "expectedVersion": { "type": ["string", "null"], "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }, "observedVersion": { "type": ["string", "null"], "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }, "executableDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" }, "environmentDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" } } },
+    "config": { "type": "object", "additionalProperties": false, "required": ["path", "digest"], "properties": { "path": { "type": ["string", "null"], "minLength": 1 }, "digest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" } } },
+    "profile": { "type": "object", "additionalProperties": false, "required": ["name", "tier"], "properties": { "name": { "type": ["string", "null"], "minLength": 1 }, "tier": { "type": ["string", "null"], "minLength": 1 } } },
+    "gateOutcome": { "enum": ["passed", "failed", "versionMismatch", "invalidConfig", "notRun"] },
+    "exitCode": { "type": ["integer", "null"] },
+    "runReceiptDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" }
+  }
+}

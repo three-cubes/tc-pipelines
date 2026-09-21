@@ -56,9 +56,18 @@ const version = readFileSync(join(repository, "VERSION"), "utf8").trim();
 if (packageMetadata.version !== version || version === "2.2.0") {
   throw new Error("VERSION and package version must name the new coordinated release");
 }
+const fitnessVersion = execFileSync(
+  "python3",
+  [join(repository, "images/sdlc/read-locked-fitness-version.py"), join(repository, "uv.lock")],
+  { encoding: "utf8" },
+).trim();
+if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(fitnessVersion)) {
+  throw new Error("uv.lock must resolve three-cubes-fitness to a SemVer version");
+}
 
 const catalogue = generateReleaseCatalogue({
   releaseVersion: version,
+  fitnessVersion,
   workflowCommit,
   imageDigest,
 });

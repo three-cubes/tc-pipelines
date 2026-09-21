@@ -8,16 +8,20 @@ export type ProjectDeclaration = Readonly<{
 
 export type TaskMode = "prepare" | "evaluate";
 export type TrustBoundary = "portable" | "hosted" | "live" | "deployment";
+export type TargetScope = "project" | "repository";
 
 export type TargetDeclaration = Readonly<{
   mode: TaskMode;
   trustBoundary: TrustBoundary;
+  scope?: TargetScope;
   command?: string;
   executor?: string;
+  profile?: string;
   dependsOn?: readonly string[];
   inputs?: readonly string[];
   sharedInputs?: readonly string[];
   outputs?: readonly string[];
+  evidence?: readonly TaskEvidenceDeclaration[];
   resources?: TaskResources;
   budget?: TaskBudget;
 }>;
@@ -35,6 +39,11 @@ export type TaskBudget = Readonly<{
   heartbeatMs: number;
 }>;
 
+export type TaskEvidenceDeclaration = Readonly<{
+  path: string;
+  mediaType: "application/json" | "text/plain";
+}>;
+
 export type SdlcToolchains = Readonly<{
   python: "3.13";
   node: "24";
@@ -44,7 +53,13 @@ export type SdlcToolchains = Readonly<{
 
 export type SdlcFitness = Readonly<{
   package: "three-cubes-fitness";
-  version: "0.17.0";
+  config: "pyproject.toml" | ".tc-fitness.toml";
+  profiles: Readonly<Record<string, string>>;
+}>;
+
+export type ResolvedFitness = Readonly<{
+  package: "three-cubes-fitness";
+  version: string;
 }>;
 
 export type SdlcDeclaration = Readonly<{
@@ -66,7 +81,7 @@ export type ReleaseEntry = Readonly<{
   imageDigest: string;
   declarationSchema: "tc.sdlc/v1";
   lockSchema: "tc.sdlc/lock/v1";
-  fitness: SdlcFitness;
+  fitness: ResolvedFitness;
   toolchains: SdlcToolchains;
   bootstrap: Readonly<{
     uv: Readonly<{
@@ -131,6 +146,7 @@ export type TaskDeclaration = Readonly<{
   inputs: readonly string[];
   sharedInputs?: readonly string[];
   outputs: readonly string[];
+  evidence?: readonly TaskEvidenceDeclaration[];
   resources?: TaskResources;
   budget?: TaskBudget;
 }>;

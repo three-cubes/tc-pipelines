@@ -25,7 +25,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 MAKEFILE = REPO_ROOT / "Makefile"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-FITNESS_COMMIT = "73d7ffc4b563849edcd607b377fbb3ee4ba6da32"
 
 
 def _project_config() -> dict:
@@ -114,18 +113,22 @@ def test_every_direct_ci_fitness_install_matches_the_locked_engine_commit() -> N
             )
         )
     ]
-    assert locked_refs == [FITNESS_COMMIT], (
+    assert len(locked_refs) == 1, (
+        f"{PYPROJECT.name}: expected one immutable three-cubes-fitness pin, found {locked_refs!r}."
+    )
+    approved_commit = locked_refs[0]
+    assert len(approved_commit) == 40, (
         f"{PYPROJECT.name}: expected the approved immutable three-cubes-fitness "
-        f"commit {FITNESS_COMMIT}, found {locked_refs!r}."
+        f"commit, found {locked_refs!r}."
     )
     direct_refs = re.findall(
         r"git\+https://github\.com/three-cubes/tc-fitness@"
         r"([a-f0-9]{40})",
         CI_WORKFLOW.read_text(encoding="utf-8"),
     )
-    assert direct_refs and set(direct_refs) == {FITNESS_COMMIT}, (
+    assert direct_refs and set(direct_refs) == {approved_commit}, (
         f"{CI_WORKFLOW.name}: direct fitness installs {direct_refs!r}, not the "
-        f"locked engine {FITNESS_COMMIT}. fix: repin every executable fitness "
+        f"locked engine {approved_commit}. fix: repin every executable fitness "
         "reference with pyproject.toml and regenerate uv.lock."
     )
 

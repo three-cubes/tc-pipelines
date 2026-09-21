@@ -31,7 +31,7 @@ export type EvaluationOptions = Readonly<{
   preparationReceipt?: PreparationReceipt;
   maxMutations?: number;
   changedPaths?: readonly string[];
-  runOptions?: Omit<RunOptions, "cwd" | "receiptPath">;
+  runOptions: Omit<RunOptions, "cwd" | "receiptPath">;
 }>;
 
 export function serialiseEvaluationReceipt(receipt: EvaluationReceipt): string {
@@ -55,6 +55,7 @@ async function evaluate(
   const workspace = materializeTree(options.root);
   try {
     try {
+      options.runOptions.executionContext.assertIdentity();
       const full = plan({ ...options, root: workspace.root });
       const graph = phaseGraph(full, "evaluate");
       const selected = all
@@ -98,7 +99,9 @@ async function evaluate(
           preparation.finalTreeDigest !== source.treeDigest ||
           preparation.declarationDigest !== digest(options.declaration) ||
           preparation.catalogueDigest !== digest(options.catalogue) ||
-          preparation.lockDigest !== digest(options.lock)
+          preparation.lockDigest !== digest(options.lock) ||
+          canonicalJson(preparation.bootstrapContext) !==
+            canonicalJson(options.runOptions.executionContext.binding)
         ) {
           throw new SdlcError(
             "PREPARATION_EVIDENCE_INVALID",
@@ -152,6 +155,7 @@ async function evaluate(
       declarationDigest: digest(options.declaration),
       catalogueDigest: digest(options.catalogue),
       lockDigest: digest(options.lock),
+      bootstrapContext: options.runOptions.executionContext.binding,
       environmentClass: options.environmentClass,
       producer: options.producer,
       recovery,

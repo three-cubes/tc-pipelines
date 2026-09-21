@@ -38,6 +38,7 @@ export type MaintenanceRetainedEntry = Readonly<{
     | "linked"
     | "changed_during_apply"
     | "referenced"
+    | "leased"
     | "reference_metadata_absent"
     | "inspection_failed";
 }>;

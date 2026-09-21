@@ -1,5 +1,4 @@
 export {
-  CANONICAL_SDLC_FITNESS,
   CANONICAL_SDLC_BOOTSTRAP,
   CANONICAL_SDLC_TOOLCHAINS,
   createReleaseCatalogue,
@@ -74,6 +73,10 @@ export { check, checkAll, serialiseEvaluationReceipt } from "./tasks/check.js";
 export type { EvaluationOptions } from "./tasks/check.js";
 export { prepare, serialisePreparationReceipt } from "./tasks/prepare.js";
 export type { PreparationOptions } from "./tasks/prepare.js";
+export { fitness } from "./tasks/fitness.js";
+export type { FitnessOptions } from "./tasks/fitness.js";
+export { parseFitnessReceipt } from "./executors/fitness.js";
+export type { FitnessReceipt } from "./executors/fitness.js";
 export { loadDeclaration, validateDeclaration } from "./schema/declaration.js";
 export type {
   GraphProject,

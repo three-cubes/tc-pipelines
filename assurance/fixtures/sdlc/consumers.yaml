@@ -1,0 +1,20 @@
+schema: tc.sdlc/disposable-consumers/v1
+consumers:
+  - id: python
+    fixture: python
+    languages: [python]
+    changed: src/input.txt
+    complete_tasks: [python-service:check, tc-sdlc-python-consumer:fitness]
+    affected_tasks: [python-service:check]
+  - id: pnpm
+    fixture: pnpm
+    languages: [node]
+    changed: src/input.txt
+    complete_tasks: [node-service:check]
+    affected_tasks: [node-service:check]
+  - id: mixed
+    fixture: mixed
+    languages: [python, node]
+    changed: python/src/input.txt
+    complete_tasks: [python-service:check, node-service:check]
+    affected_tasks: [python-service:check, node-service:check]

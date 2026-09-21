@@ -12,6 +12,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import { canonicalJson, digest } from "../canonical.js";
 import { writeCanonicalEvidence } from "../evidence/index.js";
 import type { FilesystemIdentity } from "../maintenance/types.js";
+import { processOwnerState } from "./process-identity.js";
 import {
   assertBootstrapReferenceCommitLock,
   cleanupExpiredDeadReferenceLockMarkers,
@@ -50,7 +51,10 @@ export type PendingBootstrapReference = Readonly<{
   createdAtMs: number;
 }>;
 
-export type BootstrapReferenceAuthorities = ReadonlyMap<string, ReadonlySet<string>>;
+export type BootstrapReferenceAuthorities = Readonly<{
+  references: ReadonlyMap<string, ReadonlySet<string>>;
+  leases: ReadonlyMap<string, ReadonlySet<string>>;
+}>;
 
 export type PendingPublication = Readonly<{
   path: string;
@@ -85,7 +89,16 @@ export function referenceMatches(
   stateKey: string,
   identity: FilesystemIdentity,
 ): boolean {
-  return references?.get(stateKey)?.has(stableIdentityKey(identity)) === true;
+  return references?.references.get(stateKey)?.has(stableIdentityKey(identity)) === true ||
+    leaseMatches(references, stateKey, identity);
+}
+
+export function leaseMatches(
+  references: BootstrapReferenceAuthorities | undefined,
+  stateKey: string,
+  identity: FilesystemIdentity,
+): boolean {
+  return references?.leases.get(stateKey)?.has(stableIdentityKey(identity)) === true;
 }
 
 function safeOwnedPath(stateRoot: string, target: string): void {
@@ -160,6 +173,32 @@ function parsePending(name: string, value: unknown): PendingBootstrapReference |
   return record as PendingBootstrapReference;
 }
 
+type BootstrapExecutionLeaseMarker = Readonly<{
+  schema: "tc.sdlc/bootstrap-execution-lease/v1";
+  owner: typeof OWNER;
+  leaseId: string;
+  stateKey: string;
+  stateIdentity: FilesystemIdentity;
+  pid: number;
+  processStartIdentity: string;
+  createdAtMs: number;
+}>;
+
+function parseLease(name: string, value: unknown): BootstrapExecutionLeaseMarker | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  if (
+    record.schema !== "tc.sdlc/bootstrap-execution-lease/v1" || record.owner !== OWNER ||
+    typeof record.leaseId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(record.leaseId) ||
+    name !== `${record.leaseId}.json` || !validStateKey(record.stateKey) ||
+    !validIdentity(record.stateIdentity) || !Number.isSafeInteger(record.pid) || Number(record.pid) < 1 ||
+    typeof record.processStartIdentity !== "string" || record.processStartIdentity.length === 0 ||
+    !Number.isSafeInteger(record.createdAtMs)
+  ) return undefined;
+  return record as BootstrapExecutionLeaseMarker;
+}
+
 function bind(
   authorities: Map<string, Set<string>>,
   stateKey: string,
@@ -179,6 +218,7 @@ export function readBootstrapReferenceAuthorities(
     const details = lstatSync(references);
     if (!details.isDirectory() || details.isSymbolicLink()) return undefined;
     const authorities = new Map<string, Set<string>>();
+    const leaseAuthorities = new Map<string, Set<string>>();
     let observed = false;
     for (const name of readdirSync(references).sort()) {
       const path = join(references, name);
@@ -201,6 +241,24 @@ export function readBootstrapReferenceAuthorities(
         }
         continue;
       }
+      if (name === "leases") {
+        const leasesRoot = lstatSync(path);
+        if (!leasesRoot.isDirectory() || leasesRoot.isSymbolicLink()) return undefined;
+        for (const leaseName of readdirSync(path).sort()) {
+          const leasePath = join(path, leaseName);
+          const leaseDetails = lstatSync(leasePath);
+          if (!leaseDetails.isFile() || leaseDetails.isSymbolicLink()) return undefined;
+          const lease = parseLease(leaseName, readCanonical(leasePath));
+          if (lease === undefined) return undefined;
+          observed = true;
+          bind(
+            leaseAuthorities,
+            lease.stateKey,
+            lease.stateIdentity,
+          );
+        }
+        continue;
+      }
       const file = lstatSync(path);
       if (!file.isFile() || file.isSymbolicLink()) return undefined;
       const committed = parseCommitted(name, readCanonical(path));
@@ -211,7 +269,7 @@ export function readBootstrapReferenceAuthorities(
         bind(authorities, committed.predecessorStateKey, committed.predecessorStateIdentity!);
       }
     }
-    return observed ? authorities : undefined;
+    return observed ? { references: authorities, leases: leaseAuthorities } : undefined;
   } catch {
     return undefined;
   }
@@ -335,7 +393,8 @@ export async function cleanupExpiredDeadPending(
     safeOwnedPath(stateRoot, pending);
     const details = lstatSync(pending);
     if (!details.isDirectory() || details.isSymbolicLink()) {
-      return await cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
+      return cleanupExpiredDeadExecutionLeases(stateRoot, cutoff) +
+        await cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
     }
     for (const name of readdirSync(pending).sort()) {
       const path = join(pending, name);
@@ -351,7 +410,40 @@ export async function cleanupExpiredDeadPending(
       removed += 1;
     }
   } catch {
-    return removed + await cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
+    return removed + cleanupExpiredDeadExecutionLeases(stateRoot, cutoff) +
+      await cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
   }
-  return removed + await cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
+  return removed + cleanupExpiredDeadExecutionLeases(stateRoot, cutoff) +
+    await cleanupExpiredDeadReferenceLockMarkers(stateRoot, cutoff);
+}
+
+function cleanupExpiredDeadExecutionLeases(stateRoot: string, cutoff: number): number {
+  const leases = join(stateRoot, "references", "leases");
+  let removed = 0;
+  try {
+    safeOwnedPath(stateRoot, leases);
+    const directory = lstatSync(leases);
+    if (!directory.isDirectory() || directory.isSymbolicLink()) return 0;
+    for (const name of readdirSync(leases).sort()) {
+      const path = join(leases, name);
+      const details = lstatSync(path);
+      if (!details.isFile() || details.isSymbolicLink() || details.mtimeMs > cutoff) continue;
+      const marker = parseLease(name, readCanonical(path));
+      if (
+        marker === undefined || marker.createdAtMs > cutoff ||
+        processOwnerState(marker.pid, marker.processStartIdentity) !== "dead"
+      ) continue;
+      const bytes = canonicalJson(marker);
+      const identity = filesystemIdentity(path);
+      if (
+        canonicalJson(filesystemIdentity(path)) !== canonicalJson(identity) ||
+        readFileSync(path, "utf8") !== bytes
+      ) continue;
+      rmSync(path);
+      removed += 1;
+    }
+  } catch {
+    return removed;
+  }
+  return removed;
 }

@@ -23,6 +23,7 @@ describe("tc-sdlc release catalogue generation", () => {
   test("generates and atomically writes one complete catalogue from immutable release inputs", () => {
     const catalogue = (sdlc as Record<string, any>).generateReleaseCatalogue({
       releaseVersion: "3.0.0",
+      fitnessVersion: "0.17.1",
       workflowCommit,
       imageDigest,
     });
@@ -36,7 +37,7 @@ describe("tc-sdlc release catalogue generation", () => {
         imageDigest,
         declarationSchema: "tc.sdlc/v1",
         lockSchema: "tc.sdlc/lock/v1",
-        fitness: { package: "three-cubes-fitness", version: "0.17.0" },
+        fitness: { package: "three-cubes-fitness", version: "0.17.1" },
         toolchains: {
           node: "24",
           packageManager: "pnpm@11.22.0",
@@ -72,6 +73,7 @@ describe("tc-sdlc release catalogue generation", () => {
         output,
         (sdlc as Record<string, any>).generateReleaseCatalogue({
           releaseVersion: "3.0.0",
+          fitnessVersion: "0.17.1",
           workflowCommit: input.workflowCommit,
           imageDigest: input.imageDigest,
         }),
@@ -94,6 +96,7 @@ describe("tc-sdlc release catalogue generation", () => {
         CLI,
         "catalogue",
         "--version", "3.0.0",
+        "--fitness-version", "0.17.1",
         "--workflow-commit", workflowCommit,
         "--image-digest", imageDigest,
         "--output", output,

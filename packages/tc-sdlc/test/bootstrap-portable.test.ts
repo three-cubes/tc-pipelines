@@ -31,7 +31,11 @@ function fixture() {
     schema: "tc.sdlc/v1",
     project: "bootstrap-portable-boundary",
     toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
-    fitness: sdlc.CANONICAL_SDLC_FITNESS,
+    fitness: {
+      package: "three-cubes-fitness",
+      config: "pyproject.toml",
+      profiles: { full: "full" },
+    },
     projects: [{ name: "consumer", root: "." }],
     targets: {
       check: {
@@ -44,6 +48,7 @@ function fixture() {
   });
   const catalogue = sdlc.generateReleaseCatalogue({
     releaseVersion: "3.0.0",
+    fitnessVersion: "0.17.1",
     workflowCommit: "1234567890abcdef1234567890abcdef12345678",
     imageDigest:
       "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

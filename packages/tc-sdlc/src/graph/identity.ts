@@ -67,6 +67,9 @@ export function taskIdentity(
   ]) {
     assertRelativePath(path, "task declared path");
   }
+  for (const item of task.evidence ?? []) {
+    assertRelativePath(item.path, "task declared evidence path");
+  }
   const canonicalInputs = canonicalInputDigests(inputs);
   return digest({
     task: {
@@ -81,6 +84,9 @@ export function taskIdentity(
       inputs: sorted(task.inputs.map(normalisePath)),
       sharedInputs: sorted((task.sharedInputs ?? []).map(normalisePath)),
       outputs: sorted(task.outputs.map(normalisePath)),
+      evidence: [...(task.evidence ?? [])]
+        .map((item) => ({ path: normalisePath(item.path), mediaType: item.mediaType }))
+        .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0),
       ...(task.resources === undefined
         ? {}
         : {

@@ -15,7 +15,7 @@ const release = {
   lockSchema: "tc.sdlc/lock/v1",
   fitness: {
     package: "three-cubes-fitness",
-    version: "0.17.0",
+    version: "0.17.1",
   },
   toolchains: {
     node: "24",
@@ -26,12 +26,18 @@ const release = {
   bootstrap: sdlc.CANONICAL_SDLC_BOOTSTRAP,
 } as const;
 
+const declarationFitness = {
+  package: "three-cubes-fitness",
+  config: "pyproject.toml",
+  profiles: { full: "full" },
+} as const;
+
 function declaration(projects: readonly Record<string, unknown>[]) {
   return {
     schema: "tc.sdlc/v1",
     project: "graph-fixture",
     toolchains: release.toolchains,
-    fitness: release.fitness,
+    fitness: declarationFitness,
     projects,
     targets: {
       check: {
@@ -80,6 +86,39 @@ function lockedGraph(
 }
 
 describe("tc-sdlc graph", () => {
+  test("expands the repository-scoped fitness executor exactly once", () => {
+    const input = {
+      ...declaration([
+        { name: "api", root: "services/api" },
+        { name: "web", root: "apps/web" },
+      ]),
+      targets: {
+        ...declaration([{ name: "api", root: "services/api" }]).targets,
+        fitness: {
+          executor: "tc-sdlc:fitness",
+          profile: "full",
+          scope: "repository",
+          mode: "evaluate",
+          trustBoundary: "portable",
+          evidence: [{ path: "fitness.json", mediaType: "application/json" }],
+          inputs: ["pyproject.toml"],
+        },
+      },
+    } as const;
+
+    const { graph } = lockedGraph(input as never, {
+      "api:check": [],
+      "api:prepare": [],
+      "web:check": [],
+      "web:prepare": [],
+      "graph-fixture:fitness": [],
+    });
+
+    expect(graph.tasks.filter((task) => task.target === "fitness").map((task) => task.key)).toEqual([
+      "graph-fixture:fitness",
+    ]);
+  });
+
   test("requires task mode and trust boundary and binds both into identity", () => {
     const input = {
       ...declaration([{ name: "api", root: "services/api" }]),

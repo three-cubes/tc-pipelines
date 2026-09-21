@@ -1,4 +1,5 @@
 import * as sdlc from "../dist/index.js";
+import { bootstrapKernelBoundaryPort } from "../dist/bootstrap/kernel-boundary.js";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -19,7 +20,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { createConnection, createServer } from "node:net";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, test } from "vitest";
@@ -66,7 +67,7 @@ function input(
     schema: "tc.sdlc/v1",
     project: "bootstrap-real-consumer",
     toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
-    fitness: sdlc.CANONICAL_SDLC_FITNESS,
+    fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
     projects: [{ name: "consumer", root: "." }],
     targets: {
       check: {
@@ -79,6 +80,7 @@ function input(
   });
   const catalogue = sdlc.generateReleaseCatalogue({
     releaseVersion: "3.0.0",
+    fitnessVersion: "0.17.1",
     workflowCommit: "1234567890abcdef1234567890abcdef12345678",
     imageDigest,
   });
@@ -101,6 +103,23 @@ async function waitForPath(path: string, child: ReturnType<typeof spawn>): Promi
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
   expect(existsSync(path)).toBe(true);
+}
+
+async function waitForPort(port: number, child: ReturnType<typeof spawn>): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (child.exitCode === null && Date.now() < deadline) {
+    const available = await new Promise<boolean>((resolve) => {
+      const socket = createConnection({ host: "127.0.0.1", port });
+      socket.once("connect", () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once("error", () => resolve(false));
+    });
+    if (available) return;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  throw new Error(`deterministic bootstrap kernel boundary port ${port} was not observed`);
 }
 
 async function waitForRecoveryMarker(
@@ -171,7 +190,7 @@ function referenceFixture(prefix: string, stateParent = tmpdir()) {
       schema: "tc.sdlc/v1",
       project,
       toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
-      fitness: sdlc.CANONICAL_SDLC_FITNESS,
+      fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
       projects: [{ name: "consumer", root: "." }],
       targets: {
         check: {
@@ -205,10 +224,14 @@ function referenceFixture(prefix: string, stateParent = tmpdir()) {
     maintenanceRunner,
     `import {readFileSync,writeFileSync} from "node:fs"; import * as sdlc from ${JSON.stringify(PUBLIC_PACKAGE)}; writeFileSync(process.argv[3], "started"); const receipt=await sdlc.maintain(JSON.parse(readFileSync(process.argv[2], "utf8"))); process.stdout.write(JSON.stringify(receipt));\n`,
   );
-  const spawnBootstrap = (generation: string, stateRootOverride = stateRoot) => {
-    const optionsPath = join(evidence, `${generation}-options.json`);
+  const spawnBootstrap = (
+    generation: string,
+    stateRootOverride = stateRoot,
+    receipt = `${generation}.json`,
+  ) => {
+    const optionsPath = join(evidence, `${generation}-${receipt}-options.json`);
     writeFileSync(optionsPath, JSON.stringify({
-      ...optionsFor(generation),
+      ...optionsFor(generation, receipt),
       stateRoot: stateRootOverride,
     }));
     const child = spawn(process.execPath, [runner, optionsPath], {
@@ -244,6 +267,707 @@ function referenceFixture(prefix: string, stateParent = tmpdir()) {
 }
 
 describe("reviewed macOS bootstrap host and dependency boundary", () => {
+  test("public CLI rebuilds a poisoned generation at the same state key before succeeding", async () => {
+    expect(process.platform).toBe("darwin");
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-generation-rebuild-consumer-"));
+    const stateRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-generation-rebuild-state-"));
+    const evidence = mkdtempSync(join(tmpdir(), "tc-sdlc-generation-rebuild-evidence-"));
+    const ready = join(evidence, "check-ready");
+    const release = join(evidence, "check-release");
+    const downstreamSentinel = join(evidence, "downstream-ran");
+    for (const name of ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"]) {
+      writeFileSync(join(root, name), readFileSync(join(consumer, name)));
+    }
+    writeFileSync(join(root, "input.txt"), "input\n");
+    writeFileSync(join(root, "shape-input.txt"), "shape check input\n");
+    writeFileSync(
+      join(root, "check.mjs"),
+      `import { existsSync, writeFileSync } from "node:fs";\n` +
+        `const ready = process.argv[2];\n` +
+        `const release = process.argv[3];\n` +
+        `if (!existsSync(ready)) {\n` +
+        `  writeFileSync(ready, "ready\\n");\n` +
+        `  if (Object.hasOwn(process.env, "TC_SDLC_BOOTSTRAP_STATE_ROOT")) process.exit(78);\n` +
+        `  while (!existsSync(release)) await new Promise((resolve) => setTimeout(resolve, 5));\n` +
+        `}\n`,
+    );
+    writeFileSync(
+      join(root, "downstream.mjs"),
+      `import { writeFileSync } from "node:fs";\n` +
+        `writeFileSync(process.argv[2], "downstream ran\\n");\n`,
+    );
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Fixture"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "fixture@example.invalid"], { cwd: root });
+    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync("git", ["commit", "-qm", "consumer fixture"], { cwd: root });
+
+    const catalogue = input(root, ["input.txt"]).catalogue;
+    const declaration = sdlc.validateDeclaration({
+      schema: "tc.sdlc/v1",
+      project: "bootstrap-state-generation-rebuild",
+      toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
+      fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
+      projects: [{ name: "consumer", root: "." }],
+      targets: {
+        prepare: {
+          command: "node --version",
+          mode: "prepare",
+          trustBoundary: "portable",
+          inputs: ["input.txt"],
+        },
+        shapeCheck: {
+          command: "node --version",
+          mode: "evaluate",
+          trustBoundary: "portable",
+          inputs: ["shape-input.txt"],
+        },
+        check: {
+          command: `node check.mjs ${JSON.stringify(ready)} ${JSON.stringify(release)}`,
+          mode: "evaluate",
+          trustBoundary: "portable",
+          inputs: ["input.txt", "check.mjs"],
+        },
+        downstream: {
+          command: `node downstream.mjs ${JSON.stringify(downstreamSentinel)}`,
+          mode: "evaluate",
+          trustBoundary: "portable",
+          dependsOn: ["check"],
+          inputs: ["input.txt", "downstream.mjs"],
+        },
+      },
+    });
+    const lock = sdlc.resolveLock(declaration, catalogue);
+    const declarationPath = join(evidence, "declaration.json");
+    const cataloguePath = join(evidence, "catalogue.json");
+    const lockPath = join(evidence, "lock.json");
+    writeFileSync(declarationPath, sdlc.canonicalJson(declaration));
+    writeFileSync(cataloguePath, sdlc.canonicalJson(catalogue));
+    writeFileSync(lockPath, sdlc.canonicalJson(lock));
+    const publicArgsFor = (consumerRoot = root) => [
+      "--declaration", declarationPath,
+      "--catalogue", cataloguePath,
+      "--lock", lockPath,
+      "--root", consumerRoot,
+      "--state-root", stateRoot,
+    ];
+    const invoke = (
+      command: string,
+      args: readonly string[],
+      consumerRoot = root,
+    ) => spawnSync(
+      process.execPath,
+      [CLI, command, ...publicArgsFor(consumerRoot), ...args],
+      { encoding: "utf8" },
+    );
+    const bootstrap = (name: string) => {
+      const receiptPath = join(evidence, `${name}-bootstrap.json`);
+      const result = invoke("bootstrap", ["--receipt", receiptPath]);
+      expect(result.status, result.stderr).toBe(0);
+      return { receiptPath, receipt: JSON.parse(readFileSync(receiptPath, "utf8")) };
+    };
+    const prepare = (name: string, bootstrapReceipt: string) => {
+      const receiptPath = join(evidence, `${name}-prepare.json`);
+      const result = invoke("prepare", [
+        "--bootstrap-receipt", bootstrapReceipt,
+        "--receipt", receiptPath,
+      ]);
+      expect(result.status, result.stderr).toBe(0);
+      return receiptPath;
+    };
+    const check = (
+      name: string,
+      bootstrapReceipt: string,
+      preparationReceipt: string,
+    ) => {
+      const receiptPath = join(evidence, `${name}-evaluation.json`);
+      const result = invoke("check", [
+        "--bootstrap-receipt", bootstrapReceipt,
+        "--receipt", receiptPath,
+        "--changed", "input.txt",
+        "--environment", "native-darwin",
+        "--producer", "f6-generation-rebuild-test",
+        "--preparation-receipt", preparationReceipt,
+      ]);
+      return { result, receiptPath };
+    };
+
+    const initial = bootstrap("initial");
+    expect(initial.receipt.status).toBe("succeeded");
+    const secondRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-generation-rebuild-second-consumer-"));
+    cpSync(root, secondRoot, { recursive: true });
+    const secondBootstrapPath = join(evidence, "second-consumer-bootstrap.json");
+    const secondBootstrapResult = invoke(
+      "bootstrap",
+      ["--receipt", secondBootstrapPath],
+      secondRoot,
+    );
+    expect(secondBootstrapResult.status, secondBootstrapResult.stderr).toBe(0);
+    const secondBootstrap = JSON.parse(readFileSync(secondBootstrapPath, "utf8"));
+    expect(secondBootstrap).toMatchObject({
+      status: "succeeded",
+      reused: true,
+      stateKey: initial.receipt.stateKey,
+    });
+    const secondReferencePath = join(
+      stateRoot,
+      "references",
+      `${bootstrapReferenceStem(declaration.project, secondRoot)}.json`,
+    );
+    const secondReferenceBeforeRebuild = JSON.parse(readFileSync(secondReferencePath, "utf8"));
+    expect(secondReferenceBeforeRebuild.currentStateKey).toBe(initial.receipt.stateKey);
+    const poisonedPath = join(stateRoot, initial.receipt.stateKey);
+    const poisonedIdentity = filesystemIdentity(poisonedPath);
+    expect(secondReferenceBeforeRebuild.currentStateIdentity).toMatchObject({
+      device: poisonedIdentity.device,
+      inode: poisonedIdentity.inode,
+    });
+    const undeclaredMember = join(poisonedPath, "foreign-cache.json");
+    writeFileSync(undeclaredMember, "not declared by bootstrap state\n");
+    const rejectedPreparationPath = join(evidence, "undeclared-state-prepare.json");
+    const rejectedPreparation = invoke("prepare", [
+      "--bootstrap-receipt", initial.receiptPath,
+      "--receipt", rejectedPreparationPath,
+    ]);
+    expect(rejectedPreparation.status).not.toBe(0);
+    expect(existsSync(rejectedPreparationPath)).toBe(false);
+    const offlineBootstrapPath = join(evidence, "offline-corrupt-state-bootstrap.json");
+    const offlineBootstrap = invoke("bootstrap", [
+      "--offline", "true",
+      "--receipt", offlineBootstrapPath,
+    ]);
+    expect(offlineBootstrap.status).not.toBe(0);
+    expect(JSON.parse(readFileSync(offlineBootstrapPath, "utf8"))).toMatchObject({
+      status: "failed",
+      reason: "state_corrupt",
+    });
+    expect(filesystemIdentity(poisonedPath)).toEqual(poisonedIdentity);
+    expect(existsSync(undeclaredMember)).toBe(true);
+    expect(existsSync(join(stateRoot, "invalidated"))).toBe(false);
+
+    const shapeRebuilt = bootstrap("shape-rebuilt");
+    expect(shapeRebuilt.receipt).toMatchObject({
+      status: "succeeded",
+      reused: false,
+      stateKey: initial.receipt.stateKey,
+    });
+    const shapeRebuiltIdentity = filesystemIdentity(poisonedPath);
+    expect(shapeRebuiltIdentity.device).toBe(poisonedIdentity.device);
+    expect(shapeRebuiltIdentity.inode).not.toBe(poisonedIdentity.inode);
+    const shapePoisonedGenerationIdentity = sdlc.digest({
+      type: "directory",
+      device: poisonedIdentity.device,
+      inode: poisonedIdentity.inode,
+    });
+    const shapeTombstone = readdirSync(join(stateRoot, "invalidated"))
+      .find((name) => JSON.parse(readFileSync(join(stateRoot, "invalidated", name), "utf8"))
+        .poisonedDirectoryIdentity === shapePoisonedGenerationIdentity);
+    expect(shapeTombstone).toBeDefined();
+    expect(existsSync(undeclaredMember)).toBe(false);
+    const shapeQuarantine = readdirSync(dirname(poisonedPath))
+      .filter((name) => name.startsWith(".tc-sdlc-quarantine-"))
+      .map((name) => join(dirname(poisonedPath), name))
+      .find((path) => existsSync(join(path, "candidate", "foreign-cache.json")));
+    expect(shapeQuarantine).toBeDefined();
+    expect(readFileSync(join(shapeQuarantine!, "candidate", "foreign-cache.json"), "utf8"))
+      .toBe("not declared by bootstrap state\n");
+    const shapePreparation = prepare("shape-rebuilt", shapeRebuilt.receiptPath);
+    const shapeExecutionPath = join(evidence, "shape-rebuild-execution.json");
+    const shapeExecution = invoke("check", [
+      "--bootstrap-receipt", shapeRebuilt.receiptPath,
+      "--receipt", shapeExecutionPath,
+      "--changed", "shape-input.txt",
+      "--environment", "native-darwin",
+      "--producer", "f6-generation-rebuild-test",
+      "--preparation-receipt", shapePreparation,
+    ]);
+    expect(shapeExecution.status, shapeExecution.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(shapeExecutionPath, "utf8"))).toMatchObject({
+      status: "succeeded",
+      scheduler: { status: "succeeded", scratchCleanup: "removed" },
+    });
+    const secondRebound = join(evidence, "second-consumer-rebound.json");
+    const secondReboundResult = invoke(
+      "bootstrap",
+      ["--receipt", secondRebound],
+      secondRoot,
+    );
+    expect(secondReboundResult.status, secondReboundResult.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(secondRebound, "utf8"))).toMatchObject({
+      status: "succeeded",
+      reused: true,
+      stateKey: initial.receipt.stateKey,
+    });
+    expect(JSON.parse(readFileSync(secondReferencePath, "utf8")).currentStateIdentity).toMatchObject({
+      device: shapeRebuiltIdentity.device,
+      inode: shapeRebuiltIdentity.inode,
+    });
+
+    const uvDependency = initial.receipt.dependencies.find(
+      (dependency: Record<string, string>) => dependency.manager === "uv",
+    );
+    expect(uvDependency).toBeDefined();
+    const firstPythonSource = (directory: string): string | undefined => {
+      for (const entry of readdirSync(directory, { withFileTypes: true }).sort(
+        (left, right) => left.name.localeCompare(right.name),
+      )) {
+        if (entry.isSymbolicLink()) continue;
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) {
+          const nested = firstPythonSource(path);
+          if (nested !== undefined) return nested;
+        } else if (entry.isFile() && entry.name.endsWith(".py")) {
+          return path;
+        }
+      }
+      return undefined;
+    };
+    const mutatedStateFile = firstPythonSource(join(poisonedPath, uvDependency!.environment));
+    expect(mutatedStateFile).toBeDefined();
+    const initialPreparation = prepare("shape-rebuilt", shapeRebuilt.receiptPath);
+    const poisonedEvaluationPath = join(evidence, "poisoned-evaluation.json");
+    const poisonedChild = spawn(process.execPath, [
+      CLI,
+      "check",
+      ...publicArgsFor(),
+      "--bootstrap-receipt", shapeRebuilt.receiptPath,
+      "--receipt", poisonedEvaluationPath,
+      "--changed", "input.txt",
+      "--environment", "native-darwin",
+      "--producer", "f6-generation-rebuild-test",
+      "--preparation-receipt", initialPreparation,
+    ], { stdio: ["ignore", "pipe", "pipe"] });
+    const poisonedOutcome = childOutcome(poisonedChild);
+    await waitForPath(ready, poisonedChild);
+    writeFileSync(mutatedStateFile!, Buffer.concat([
+      readFileSync(mutatedStateFile!),
+      Buffer.from("\n# external integrity sabotage\n"),
+    ]));
+    writeFileSync(release, "continue\n");
+    const poisonedResult = await poisonedOutcome;
+    const poisoned = { result: poisonedResult, receiptPath: poisonedEvaluationPath };
+    expect(poisoned.result.status).not.toBe(0);
+    const poisonedEvaluation = JSON.parse(readFileSync(poisoned.receiptPath, "utf8"));
+    expect(poisonedEvaluation).toMatchObject({ status: "failed" });
+    expect(poisonedEvaluation.scheduler).toMatchObject({
+      status: "failed",
+      reason: "bootstrap_state_changed",
+      scratchCleanup: "removed",
+    });
+    expect(poisonedEvaluation.scheduler.tasks.some(
+      (task: Record<string, unknown>) => task.reason === "bootstrap_state_changed",
+    )).toBe(true);
+    expect(existsSync(downstreamSentinel)).toBe(true);
+    expect(poisonedEvaluation.scheduler.tasks.flatMap(
+      (task: { events: readonly Record<string, unknown>[] }) => task.events,
+    ).filter((event: Record<string, unknown>) => event.type === "terminal").every(
+      (event: Record<string, unknown>) => event.status !== "succeeded",
+    )).toBe(true);
+
+    const rebuilt = bootstrap("rebuilt");
+    expect(rebuilt.receipt).toMatchObject({
+      status: "succeeded",
+      reused: false,
+      stateKey: initial.receipt.stateKey,
+    });
+    const rebuiltIdentity = filesystemIdentity(poisonedPath);
+    expect(rebuiltIdentity.device).toBe(poisonedIdentity.device);
+    expect(rebuiltIdentity.inode).not.toBe(poisonedIdentity.inode);
+    expect(readdirSync(join(stateRoot, "invalidated")).length).toBeGreaterThan(0);
+    const rebuiltPreparation = prepare("rebuilt", rebuilt.receiptPath);
+    const recovered = check("recovered", rebuilt.receiptPath, rebuiltPreparation);
+    expect(recovered.result.status, recovered.result.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(recovered.receiptPath, "utf8"))).toMatchObject({
+      status: "succeeded",
+      scheduler: { status: "succeeded", scratchCleanup: "removed" },
+    });
+    expect(existsSync(downstreamSentinel)).toBe(true);
+
+    const stateParent = dirname(poisonedPath);
+    const quarantineName = readdirSync(stateParent)
+      .filter((name) => name.startsWith(".tc-sdlc-quarantine-"))
+      .find((name) => {
+        const marker = JSON.parse(readFileSync(
+          join(stateParent, name, ".tc-sdlc-quarantine.json"),
+          "utf8",
+        ));
+        return marker.payloadIdentity.device === shapeRebuiltIdentity.device &&
+          marker.payloadIdentity.inode === shapeRebuiltIdentity.inode;
+      });
+    expect(quarantineName).toBeDefined();
+    const quarantineRoot = join(stateParent, quarantineName!);
+    const quarantinePayload = join(quarantineRoot, "candidate");
+    expect(existsSync(quarantinePayload)).toBe(true);
+    const quarantineMarker = JSON.parse(
+      readFileSync(join(quarantineRoot, ".tc-sdlc-quarantine.json"), "utf8"),
+    );
+    expect(quarantineMarker.payloadIdentity).toMatchObject({
+      device: shapeRebuiltIdentity.device,
+      inode: shapeRebuiltIdentity.inode,
+    });
+    const invalidationStem = `${sdlc.digest(initial.receipt.stateKey).slice("sha256:".length)}.`;
+    const poisonedGenerationIdentity = sdlc.digest({
+      type: "directory",
+      device: shapeRebuiltIdentity.device,
+      inode: shapeRebuiltIdentity.inode,
+    });
+    const tombstoneName = readdirSync(join(stateRoot, "invalidated"))
+      .filter((name) => name.startsWith(invalidationStem))
+      .find((name) => JSON.parse(readFileSync(join(stateRoot, "invalidated", name), "utf8"))
+        .poisonedDirectoryIdentity === poisonedGenerationIdentity);
+    expect(tombstoneName).toBeDefined();
+    const tombstonePath = join(stateRoot, "invalidated", tombstoneName!);
+    expect(JSON.parse(readFileSync(tombstonePath, "utf8"))).toMatchObject({
+      stateKey: initial.receipt.stateKey,
+    });
+    const quarantineRelativePath = posix.relative(stateRoot, quarantineRoot);
+    const rebuiltIdentityBeforeMaintenance = filesystemIdentity(poisonedPath);
+    const maintenanceTemporaryRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-generation-rebuild-maintenance-"));
+    const beforeCutoff = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: maintenanceTemporaryRoot,
+      receiptPath: join(evidence, "maintenance-before-quarantine-cutoff.json"),
+      mode: "apply",
+    });
+    expect(beforeCutoff.status).toBe("succeeded");
+    expect(beforeCutoff.retained).toContainEqual({
+      path: quarantineRelativePath,
+      reason: "retention_window",
+    });
+    expect(existsSync(quarantinePayload)).toBe(true);
+    expect(existsSync(tombstonePath)).toBe(true);
+    expect(filesystemIdentity(poisonedPath)).toEqual(rebuiltIdentityBeforeMaintenance);
+    expect(JSON.parse(readFileSync(secondReferencePath, "utf8")).currentStateIdentity).toMatchObject({
+      device: shapeRebuiltIdentity.device,
+      inode: shapeRebuiltIdentity.inode,
+    });
+
+    const expired = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(quarantineRoot, expired, expired);
+    const atCutoff = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: maintenanceTemporaryRoot,
+      receiptPath: join(evidence, "maintenance-after-quarantine-cutoff.json"),
+      mode: "apply",
+    });
+    expect(atCutoff.status).toBe("succeeded");
+    expect(atCutoff.removedCount).toBeGreaterThan(0);
+    expect(existsSync(quarantineRoot)).toBe(false);
+    expect(existsSync(tombstonePath)).toBe(false);
+    expect(existsSync(shapeQuarantine)).toBe(true);
+    expect(readFileSync(join(shapeQuarantine!, "candidate", "foreign-cache.json"), "utf8"))
+      .toBe("not declared by bootstrap state\n");
+    expect(existsSync(poisonedPath)).toBe(true);
+    expect(filesystemIdentity(poisonedPath)).toEqual(rebuiltIdentityBeforeMaintenance);
+    const firstReferenceAfterMaintenance = JSON.parse(readFileSync(
+      join(
+        stateRoot,
+        "references",
+        `${bootstrapReferenceStem(declaration.project, root)}.json`,
+      ),
+      "utf8",
+    ));
+    expect(firstReferenceAfterMaintenance.currentStateIdentity).toMatchObject({
+      device: rebuiltIdentityBeforeMaintenance.device,
+      inode: rebuiltIdentityBeforeMaintenance.inode,
+    });
+
+    const secondRecoveryPath = join(evidence, "second-consumer-recovered-bootstrap.json");
+    const secondRecovery = invoke(
+      "bootstrap",
+      ["--receipt", secondRecoveryPath],
+      secondRoot,
+    );
+    expect(secondRecovery.status, secondRecovery.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(secondRecoveryPath, "utf8"))).toMatchObject({
+      status: "succeeded",
+      reused: true,
+      stateKey: initial.receipt.stateKey,
+    });
+    expect(JSON.parse(readFileSync(secondReferencePath, "utf8")).currentStateIdentity).toMatchObject({
+      device: rebuiltIdentityBeforeMaintenance.device,
+      inode: rebuiltIdentityBeforeMaintenance.inode,
+    });
+  }, 180_000);
+
+  test("online CLI bootstrap rebuilds an exactly incomplete referenced generation", () => {
+    expect(process.platform).toBe("darwin");
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-incomplete-state-consumer-"));
+    const stateRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-incomplete-state-root-"));
+    const evidence = mkdtempSync(join(tmpdir(), "tc-sdlc-incomplete-state-evidence-"));
+    for (const name of ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"]) {
+      writeFileSync(join(root, name), readFileSync(join(consumer, name)));
+    }
+    writeFileSync(join(root, "input.txt"), "input\n");
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Fixture"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "fixture@example.invalid"], { cwd: root });
+    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync("git", ["commit", "-qm", "consumer fixture"], { cwd: root });
+
+    const { declaration, catalogue, lock } = input(root, ["input.txt"]);
+    const declarationPath = join(evidence, "declaration.json");
+    const cataloguePath = join(evidence, "catalogue.json");
+    const lockPath = join(evidence, "lock.json");
+    writeFileSync(declarationPath, sdlc.canonicalJson(declaration));
+    writeFileSync(cataloguePath, sdlc.canonicalJson(catalogue));
+    writeFileSync(lockPath, sdlc.canonicalJson(lock));
+    const publicArgs = [
+      "--declaration", declarationPath,
+      "--catalogue", cataloguePath,
+      "--lock", lockPath,
+      "--root", root,
+      "--state-root", stateRoot,
+    ];
+    const invoke = (receiptPath: string, offline = false) => spawnSync(
+      process.execPath,
+      [CLI, "bootstrap", ...publicArgs, ...(offline ? ["--offline", "true"] : []), "--receipt", receiptPath],
+      { encoding: "utf8" },
+    );
+    const initialReceiptPath = join(evidence, "initial.json");
+    const initialResult = invoke(initialReceiptPath);
+    expect(initialResult.status, initialResult.stderr).toBe(0);
+    const initial = JSON.parse(readFileSync(initialReceiptPath, "utf8"));
+    expect(initial.status).toBe("succeeded");
+    const stateDirectory = join(stateRoot, initial.stateKey);
+    const stateManifest = join(stateDirectory, "state.json");
+    const originalIdentity = filesystemIdentity(stateDirectory);
+    const referencePath = join(
+      stateRoot,
+      "references",
+      `${bootstrapReferenceStem(declaration.project, root)}.json`,
+    );
+    expect(JSON.parse(readFileSync(referencePath, "utf8")).currentStateIdentity).toMatchObject({
+      device: originalIdentity.device,
+      inode: originalIdentity.inode,
+    });
+
+    rmSync(stateManifest);
+    expect(existsSync(stateDirectory)).toBe(true);
+    expect(existsSync(stateManifest)).toBe(false);
+    const offlineReceiptPath = join(evidence, "offline.json");
+    const offlineResult = invoke(offlineReceiptPath, true);
+    expect(offlineResult.status).not.toBe(0);
+    expect(JSON.parse(readFileSync(offlineReceiptPath, "utf8"))).toMatchObject({
+      status: "failed",
+      reason: "state_corrupt",
+    });
+    expect(filesystemIdentity(stateDirectory)).toEqual(originalIdentity);
+    expect(existsSync(stateManifest)).toBe(false);
+    expect(existsSync(join(stateRoot, "invalidated"))).toBe(false);
+    expect(JSON.parse(readFileSync(referencePath, "utf8")).currentStateIdentity).toMatchObject({
+      device: originalIdentity.device,
+      inode: originalIdentity.inode,
+    });
+
+    const rebuiltReceiptPath = join(evidence, "rebuilt.json");
+    const rebuiltResult = invoke(rebuiltReceiptPath);
+    expect(rebuiltResult.status, rebuiltResult.stderr).toBe(0);
+    const rebuilt = JSON.parse(readFileSync(rebuiltReceiptPath, "utf8"));
+    expect(rebuilt).toMatchObject({
+      status: "succeeded",
+      reused: false,
+      stateKey: initial.stateKey,
+    });
+    const rebuiltIdentity = filesystemIdentity(stateDirectory);
+    expect(rebuiltIdentity.device).toBe(originalIdentity.device);
+    expect(rebuiltIdentity.inode).not.toBe(originalIdentity.inode);
+    expect(existsSync(stateManifest)).toBe(true);
+
+    const quarantine = readdirSync(dirname(stateDirectory))
+      .filter((name) => name.startsWith(".tc-sdlc-quarantine-"))
+      .map((name) => join(dirname(stateDirectory), name))
+      .find((path) => existsSync(join(path, "candidate", "bin")));
+    expect(quarantine).toBeDefined();
+    const marker = JSON.parse(readFileSync(join(quarantine!, ".tc-sdlc-quarantine.json"), "utf8"));
+    expect(marker.payloadIdentity).toMatchObject({
+      device: originalIdentity.device,
+      inode: originalIdentity.inode,
+    });
+    expect(existsSync(join(quarantine!, "candidate", "state.json"))).toBe(false);
+    const generationIdentity = sdlc.digest({
+      type: "directory",
+      device: originalIdentity.device,
+      inode: originalIdentity.inode,
+    });
+    const tombstone = readdirSync(join(stateRoot, "invalidated"))
+      .map((name) => join(stateRoot, "invalidated", name))
+      .find((path) => JSON.parse(readFileSync(path, "utf8")).poisonedDirectoryIdentity === generationIdentity);
+    expect(tombstone).toBeDefined();
+    const reference = JSON.parse(readFileSync(referencePath, "utf8"));
+    expect(reference).toMatchObject({
+      currentStateKey: initial.stateKey,
+      currentStateIdentity: {
+        device: rebuiltIdentity.device,
+        inode: rebuiltIdentity.inode,
+      },
+    });
+  }, 180_000);
+
+  test("offline leaves a pre-reference interrupted cold generation intact for online recovery", () => {
+    expect(process.platform).toBe("darwin");
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-cold-partial-consumer-"));
+    const stateRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-cold-partial-state-"));
+    const evidence = mkdtempSync(join(tmpdir(), "tc-sdlc-cold-partial-evidence-"));
+    for (const name of ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"]) {
+      writeFileSync(join(root, name), readFileSync(join(consumer, name)));
+    }
+    writeFileSync(join(root, "input.txt"), "input\n");
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Fixture"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "fixture@example.invalid"], { cwd: root });
+    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync("git", ["commit", "-qm", "consumer fixture"], { cwd: root });
+
+    const { declaration, catalogue, lock } = input(root, ["input.txt"]);
+    const declarationPath = join(evidence, "declaration.json");
+    const cataloguePath = join(evidence, "catalogue.json");
+    const lockPath = join(evidence, "lock.json");
+    writeFileSync(declarationPath, sdlc.canonicalJson(declaration));
+    writeFileSync(cataloguePath, sdlc.canonicalJson(catalogue));
+    writeFileSync(lockPath, sdlc.canonicalJson(lock));
+    const publicArgs = [
+      "--declaration", declarationPath,
+      "--catalogue", cataloguePath,
+      "--lock", lockPath,
+      "--root", root,
+      "--state-root", stateRoot,
+    ];
+    const invoke = (receiptPath: string, offline = false) => spawnSync(
+      process.execPath,
+      [CLI, "bootstrap", ...publicArgs, ...(offline ? ["--offline", "true"] : []), "--receipt", receiptPath],
+      { encoding: "utf8" },
+    );
+    const initialReceiptPath = join(evidence, "initial.json");
+    const initialResult = invoke(initialReceiptPath);
+    expect(initialResult.status, initialResult.stderr).toBe(0);
+    const initial = JSON.parse(readFileSync(initialReceiptPath, "utf8"));
+    expect(initial.status).toBe("succeeded");
+    const stateKey = initial.stateKey as string;
+    const stateDirectory = join(stateRoot, stateKey);
+    const stateManifest = join(stateDirectory, "state.json");
+    const partialIdentity = filesystemIdentity(stateDirectory);
+    rmSync(join(stateRoot, "references"), { recursive: true });
+    rmSync(stateManifest);
+
+    const offlineReceiptPath = join(evidence, "offline.json");
+    const offlineResult = invoke(offlineReceiptPath, true);
+    expect(offlineResult.status).not.toBe(0);
+    expect(JSON.parse(readFileSync(offlineReceiptPath, "utf8"))).toMatchObject({
+      status: "failed",
+      reason: "state_corrupt",
+    });
+    expect(filesystemIdentity(stateDirectory)).toEqual(partialIdentity);
+    expect(existsSync(stateManifest)).toBe(false);
+    expect(existsSync(join(stateRoot, "invalidated"))).toBe(false);
+    expect(existsSync(join(stateRoot, "references"))).toBe(false);
+
+    const onlineReceiptPath = join(evidence, "online.json");
+    const onlineResult = invoke(onlineReceiptPath);
+    expect(onlineResult.status, onlineResult.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(onlineReceiptPath, "utf8"))).toMatchObject({
+      status: "succeeded",
+      reused: false,
+      stateKey,
+    });
+    const rebuiltIdentity = filesystemIdentity(stateDirectory);
+    expect(rebuiltIdentity.device).toBe(partialIdentity.device);
+    expect(rebuiltIdentity.inode).not.toBe(partialIdentity.inode);
+    expect(existsSync(join(stateDirectory, "state.json"))).toBe(true);
+    expect(existsSync(join(stateRoot, "references"))).toBe(true);
+  }, 180_000);
+
+  test("a killed cold bootstrap releases the kernel boundary and the next bootstrap recovers", async () => {
+    expect(process.platform).toBe("darwin");
+    const fixture = referenceFixture("bootstrap-state-killed-owner");
+    writeFileSync(
+      join(fixture.stateRoot, ".tc-sdlc-owner.json"),
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/state-owner/v1",
+        owner: "@three-cubes/tc-sdlc",
+      }),
+    );
+    const options = fixture.optionsFor("crash-recovery", "after-crash.json");
+    const dependencyDigest = sdlc.digest([]);
+    const stateKey = posix.join(
+      "releases",
+      sdlc.digest(options.lock).slice("sha256:".length),
+      dependencyDigest.slice("sha256:".length),
+      `darwin-${process.arch}`,
+    );
+    const port = bootstrapKernelBoundaryPort(
+      fixture.stateRoot,
+      "bootstrap-state-materialization",
+      { stateKey },
+    );
+    const crashed = fixture.spawnBootstrap("crash-recovery");
+    await waitForPort(port, crashed.child);
+    expect(crashed.child.kill("SIGKILL")).toBe(true);
+    const outcome = await crashed.outcome;
+    expect(outcome.status).toBeNull();
+
+    const recovered = await sdlc.bootstrap(fixture.optionsFor("crash-recovery", "recovered.json"));
+    expect(recovered.status, JSON.stringify(recovered)).toBe("succeeded");
+    expect(recovered.stateKey).toBe(stateKey);
+    expect(existsSync(join(fixture.stateRoot, stateKey, "state.json"))).toBe(true);
+  }, 180_000);
+
+  test("fails closed when an unrelated process occupies the public state boundary port", async () => {
+    expect(process.platform).toBe("darwin");
+    const fixture = referenceFixture("bootstrap-state-port-collision");
+    const options = fixture.optionsFor("collision", "collision.json");
+    const stateKey = posix.join(
+      "releases",
+      sdlc.digest(options.lock).slice("sha256:".length),
+      sdlc.digest([]).slice("sha256:".length),
+      `darwin-${process.arch}`,
+    );
+    const port = bootstrapKernelBoundaryPort(
+      fixture.stateRoot,
+      "bootstrap-state-materialization",
+      { stateKey },
+    );
+    const listener = createServer();
+    await new Promise<void>((resolve, reject) => {
+      listener.once("error", reject);
+      listener.listen({ host: "127.0.0.1", port, exclusive: true }, () => resolve());
+    });
+    try {
+      const receipt = await sdlc.bootstrap(options);
+      expect(receipt).toMatchObject({
+        status: "failed",
+        reason: "state_materialization_busy",
+        diagnostics: [{ code: "BOOTSTRAP_STATE_MATERIALIZATION_BUSY" }],
+      });
+      expect(existsSync(join(fixture.stateRoot, stateKey))).toBe(false);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        listener.close((error) => error === undefined ? resolve() : reject(error));
+      });
+    }
+  }, 30_000);
+
+  test("serialises separate cold bootstraps for the same state key", async () => {
+    expect(process.platform).toBe("darwin");
+    const fixture = referenceFixture("bootstrap-state-materialisation-race");
+    const first = fixture.spawnBootstrap("same", fixture.stateRoot, "same-first.json");
+    const second = fixture.spawnBootstrap("same", fixture.stateRoot, "same-second.json");
+    const [firstResult, secondResult] = await Promise.all([first.outcome, second.outcome]);
+    expect(firstResult.status, firstResult.stderr).toBe(0);
+    expect(secondResult.status, secondResult.stderr).toBe(0);
+    const receipts = [JSON.parse(firstResult.stdout), JSON.parse(secondResult.stdout)];
+    expect(
+      receipts.every((receipt) => receipt.status === "succeeded"),
+      JSON.stringify({ receipts, stderr: [firstResult.stderr, secondResult.stderr] }),
+    ).toBe(true);
+    expect(new Set(receipts.map((receipt) => receipt.stateKey)).size).toBe(1);
+    expect(receipts.map((receipt) => receipt.reused).sort()).toEqual([false, true]);
+    const statePath = join(fixture.stateRoot, receipts[0].stateKey, "state.json");
+    expect(existsSync(statePath)).toBe(true);
+    expect(JSON.parse(readFileSync(statePath, "utf8")).schema)
+      .toBe("tc.sdlc/bootstrap-state/v6");
+  }, 180_000);
+
   test("serialises concurrent commits for one consumer without losing either successful state", async () => {
     expect(process.platform).toBe("darwin");
     const fixture = referenceFixture("bootstrap-reference-commit");
@@ -564,13 +1288,14 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     const fixture = referenceFixture("bootstrap-reference-port-collision");
     const initial = await sdlc.bootstrap(fixture.optionsFor("A"));
     expect(initial).toMatchObject({ status: "succeeded" });
-    const hexadecimal = sdlc.digest({
-      boundary: "bootstrap-reference-recovery",
-      stateRoot: realpathSync(fixture.stateRoot),
-      consumer: fixture.project,
-      consumerRoot: realpathSync(fixture.root),
-    }).slice("sha256:".length, "sha256:".length + 8);
-    const port = 10_000 + Number.parseInt(hexadecimal, 16) % 20_000;
+    const port = bootstrapKernelBoundaryPort(
+      fixture.stateRoot,
+      "bootstrap-reference-recovery",
+      {
+        consumer: fixture.project,
+        consumerRoot: realpathSync(fixture.root),
+      },
+    );
     const listener = createServer();
     await new Promise<void>((resolve, reject) => {
       listener.once("error", reject);
@@ -690,11 +1415,6 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(initialSentinel.status).toBe("succeeded");
     expect(initialRace.stateKey).not.toBe(initialSentinel.stateKey);
 
-    const runner = join(evidence, "bootstrap-child.mjs");
-    writeFileSync(
-      runner,
-      `import {readFileSync} from "node:fs"; import * as sdlc from ${JSON.stringify(PUBLIC_PACKAGE)}; const options=JSON.parse(readFileSync(process.argv[2], "utf8")); const receipt=await sdlc.bootstrap(options); process.stdout.write(JSON.stringify({status:receipt.status,stateKey:receipt.stateKey}));\n`,
-    );
     const referencePath = join(
       stateRoot,
       "references",
@@ -729,12 +1449,7 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
     utimesSync(statePath, old, old);
 
-    const bootstrapReceipt = join(evidence, "race-bootstrap.json");
-    const optionsPath = join(evidence, "race-options.json");
-    writeFileSync(
-      optionsPath,
-      JSON.stringify({ ...raceOptions, receiptPath: bootstrapReceipt }),
-    );
+    const blockedBootstrapReceipt = join(evidence, "race-bootstrap-blocked.json");
     const maintenanceReceipt = join(evidence, "race-maintenance.json");
     const maintenanceChild = spawn(
       process.execPath,
@@ -759,19 +1474,22 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     }
     expect(quarantinePath).toBeDefined();
     expect(maintenanceChild.kill("SIGSTOP")).toBe(true);
-    expect(existsSync(join(stateParent, quarantinePath!))).toBe(true);
+    const quarantinePathname = join(stateParent, quarantinePath!);
+    expect(existsSync(quarantinePathname)).toBe(true);
+    const quarantineIdentity = filesystemIdentity(quarantinePathname);
 
-    const bootstrapChild = spawn(process.execPath, [runner, optionsPath], {
-      stdio: ["ignore", "ignore", "pipe"],
+    const blockedBootstrap = await sdlc.bootstrap({
+      ...raceOptions,
+      receiptPath: blockedBootstrapReceipt,
     });
-    const bootstrapExit = await waitFor(bootstrapChild);
-    expect(bootstrapExit.stderr).toBe("");
-    expect(bootstrapExit.status).toBe(0);
-    expect(JSON.parse(readFileSync(bootstrapReceipt, "utf8"))).toMatchObject({
-      schema: "tc.sdlc/bootstrap-receipt/v1",
-      status: "succeeded",
-      stateKey: initialRace.stateKey,
+    expect(blockedBootstrap).toMatchObject({
+      status: "failed",
+      reason: "state_materialization_busy",
+      diagnostics: [{ code: "BOOTSTRAP_STATE_MATERIALIZATION_BUSY" }],
     });
+    expect(existsSync(statePath)).toBe(false);
+    expect(filesystemIdentity(quarantinePathname)).toEqual(quarantineIdentity);
+
     expect(maintenanceChild.kill("SIGCONT")).toBe(true);
     const maintenanceExit = await maintenanceExitPromise;
     expect(maintenanceExit.stderr).toBe("");
@@ -780,6 +1498,10 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       schema: "tc.sdlc/maintenance-receipt/v1",
       status: "succeeded",
     });
+    expect(existsSync(quarantinePathname)).toBe(false);
+    const retriedReceipt = join(evidence, "race-bootstrap-retried.json");
+    const retried = await sdlc.bootstrap({ ...raceOptions, receiptPath: retriedReceipt });
+    expect(retried).toMatchObject({ status: "succeeded", stateKey: initialRace.stateKey });
     const reference = JSON.parse(readFileSync(referencePath, "utf8"));
     expect(existsSync(join(stateRoot, reference.currentStateKey, "state.json"))).toBe(true);
     expect(reference.currentStateIdentity).toEqual(
@@ -810,11 +1532,22 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       `${sdlc.digest({ consumer: options.declaration.project, consumerRoot: realpathSync(root) }).slice("sha256:".length)}.json`,
     );
     rmSync(referencePath);
-
-    const pythonRoot = join(stateRoot, initial.stateKey, "dependencies", "python");
-    for (let index = 0; index < 20_000; index += 1) {
-      writeFileSync(join(pythonRoot, `pending-window-${index}.pyc`), "");
-    }
+    const recoveryPort = bootstrapKernelBoundaryPort(
+      stateRoot,
+      "bootstrap-reference-recovery",
+      {
+        consumer: options.declaration.project,
+        consumerRoot: realpathSync(root),
+      },
+    );
+    const recoveryBlocker = createServer();
+    await new Promise<void>((resolve, reject) => {
+      recoveryBlocker.once("error", reject);
+      recoveryBlocker.listen(
+        { host: "127.0.0.1", port: recoveryPort, exclusive: true },
+        () => resolve(),
+      );
+    });
     const runner = join(evidence, "pending-child.mjs");
     const optionsPath = join(evidence, "pending-options.json");
     writeFileSync(
@@ -840,6 +1573,9 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(pendingName).toBeDefined();
     expect(child.kill("SIGKILL")).toBe(true);
     await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    await new Promise<void>((resolve, reject) => {
+      recoveryBlocker.close((error) => error === undefined ? resolve() : reject(error));
+    });
     expect(existsSync(referencePath)).toBe(false);
     const pendingPath = join(pendingRoot, pendingName!);
     expect(JSON.parse(readFileSync(pendingPath, "utf8"))).toMatchObject({
@@ -1149,7 +1885,11 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(existsSync(join(root, ".venv"))).toBe(false);
     expect(existsSync(join(stateRoot, receipt.stateKey, "dependencies", "node", "node_modules", "yaml"))).toBe(true);
     const python = join(stateRoot, receipt.stateKey, "dependencies", "python", "bin", "python");
-    expect(execFileSync(python, ["-c", "import attrs; print(attrs.__version__)"], { encoding: "utf8" }).trim()).toBe("26.1.0");
+    const pythonEnvironment = { ...process.env, PYTHONDONTWRITEBYTECODE: "1" };
+    expect(execFileSync(python, ["-c", "import attrs; print(attrs.__version__)"], {
+      encoding: "utf8",
+      env: pythonEnvironment,
+    }).trim()).toBe("26.1.0");
     const pnpmLauncher = join(
       stateRoot,
       receipt.adapters.find((adapter) => adapter.name === "pnpm")!.launcher,
@@ -1222,11 +1962,14 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     const attrsDirectory = execFileSync(
       python,
       ["-c", "import attrs; print(attrs.__path__[0])"],
-      { encoding: "utf8" },
+      { encoding: "utf8", env: pythonEnvironment },
     ).trim();
     const movedAttrsDirectory = `${attrsDirectory}.renamed`;
     renameSync(attrsDirectory, movedAttrsDirectory);
-    expect(() => execFileSync(python, ["-c", "import attrs"], { stdio: "pipe" })).toThrow();
+    expect(() => execFileSync(python, ["-c", "import attrs"], {
+      stdio: "pipe",
+      env: pythonEnvironment,
+    })).toThrow();
     const renamedPythonTree = await sdlc.bootstrap({
       ...options,
       stateRoot,
@@ -1238,12 +1981,15 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     const attrModule = execFileSync(
       python,
       ["-c", "import attr._make; print(attr._make.__file__)"],
-      { encoding: "utf8" },
+      { encoding: "utf8", env: pythonEnvironment },
     ).trim();
     const attrModuleBytes = readFileSync(attrModule);
     rmSync(attrModule);
     rmSync(join(dirname(attrModule), "__pycache__"), { recursive: true, force: true });
-    expect(() => execFileSync(python, ["-c", "import attr._make"], { stdio: "pipe" })).toThrow();
+    expect(() => execFileSync(python, ["-c", "import attr._make"], {
+      stdio: "pipe",
+      env: pythonEnvironment,
+    })).toThrow();
     const deletedPythonFile = await sdlc.bootstrap({
       ...options,
       stateRoot,

@@ -30,7 +30,7 @@ const release = {
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   declarationSchema: "tc.sdlc/v1",
   lockSchema: "tc.sdlc/lock/v1",
-  fitness: { package: "three-cubes-fitness", version: "0.17.0" },
+  fitness: { package: "three-cubes-fitness", version: "0.17.1" },
   toolchains: {
     node: "24",
     packageManager: "pnpm@11.22.0",
@@ -38,6 +38,12 @@ const release = {
     uv: "0.12.5",
   },
   bootstrap: sdlc.CANONICAL_SDLC_BOOTSTRAP,
+} as const;
+
+const declarationFitness = {
+  package: "three-cubes-fitness",
+  config: "pyproject.toml",
+  profiles: { full: "full" },
 } as const;
 
 function target(
@@ -65,13 +71,42 @@ function planning(
     schema: "tc.sdlc/v1",
     project: "task4-fixture",
     toolchains: release.toolchains,
-    fitness: release.fitness,
+    fitness: declarationFitness,
     projects: [{ name: "fixture", root: "." }],
     targets,
   } as const;
   const catalogue = sdlc.createReleaseCatalogue(release);
   const lock = sdlc.resolveLock(declaration as never, catalogue);
   return { root, declaration, catalogue, lock };
+}
+
+function taskRunOptions(extra: Readonly<Record<string, unknown>> = {}) {
+  return {
+    capacity: { cpu: 1, memoryMiB: 128 },
+    executionContext: {
+      binding: {
+        schema: "tc.sdlc/execution-context/v1",
+        release: release.version,
+        platform: process.platform === "linux" ? "linux" : "darwin",
+        architecture: process.arch,
+        lockDigest: `sha256:${"a".repeat(64)}`,
+        stateKey: "releases/test/task4",
+        stateGenerationIdentity: `sha256:${"e".repeat(64)}`,
+        bootstrapReceiptDigest: `sha256:${"b".repeat(64)}`,
+        stateDigest: `sha256:${"c".repeat(64)}`,
+        dependencyDigest: `sha256:${"d".repeat(64)}`,
+        fitness: declarationFitness,
+        adapters: [],
+      },
+      stateRoot: tmpdir(),
+      stateDirectory: tmpdir(),
+      environment: { PATH: process.env.PATH ?? "" },
+      lease: { assertCurrent: () => undefined, release: () => undefined },
+      assertIdentity: () => undefined,
+      verifyIntegrity: () => undefined,
+    },
+    ...extra,
+  };
 }
 
 function initialiseGit(root: string): void {
@@ -157,7 +192,7 @@ describe("tc-sdlc Task 4", () => {
     const receipt = await (sdlc as Record<string, any>).prepare({
       ...input,
       receiptPath,
-      runOptions: { capacity: { cpu: 1, memoryMiB: 128 } },
+      runOptions: taskRunOptions(),
     });
 
     expect(receipt.status).toBe(status);
@@ -195,7 +230,7 @@ describe("tc-sdlc Task 4", () => {
       receiptPath,
       environmentClass: "native-linux",
       producer: "local-fixture",
-      runOptions: { capacity: { cpu: 1, memoryMiB: 128 } },
+      runOptions: taskRunOptions(),
     });
     expect(receipt.status).toBe("succeeded");
     expect(receipt.scheduler.status).toBe("succeeded");
@@ -209,7 +244,7 @@ describe("tc-sdlc Task 4", () => {
         receiptPath: `${receiptPath}.dirty`,
         environmentClass: "native-linux",
         producer: "local-fixture",
-        runOptions: { capacity: { cpu: 1, memoryMiB: 128 } },
+        runOptions: taskRunOptions(),
       }),
     ).resolves.toMatchObject({ status: "failed", reason: "dirty_source_tree" });
   });
@@ -233,7 +268,7 @@ describe("tc-sdlc Task 4", () => {
       environmentClass: "native-linux",
       producer: "local-fixture",
       maxMutations: 1,
-      runOptions: { capacity: { cpu: 1, memoryMiB: 128 } },
+      runOptions: taskRunOptions(),
     });
 
     expect(receipt).toMatchObject({
@@ -283,7 +318,7 @@ describe("tc-sdlc Task 4", () => {
     const receipt = await (sdlc as Record<string, any>).prepare({
       ...input,
       receiptPath,
-      runOptions: { capacity: { cpu: 1, memoryMiB: 128 } },
+      runOptions: taskRunOptions(),
     });
 
     expect(receipt).toMatchObject({
@@ -313,6 +348,7 @@ describe("tc-sdlc Task 4", () => {
       ...input,
       lock: stale,
       receiptPath,
+      runOptions: taskRunOptions(),
     });
 
     expect(receipt.status).toBe("failed");
@@ -338,7 +374,7 @@ describe("tc-sdlc Task 4", () => {
       receiptPath: join(dirname(root), `${root.split("/").at(-1)}-all.json`),
       environmentClass: "canonical-linux",
       producer: "trusted-ci",
-      runOptions: { capacity: { cpu: 1, memoryMiB: 128 } },
+      runOptions: taskRunOptions(),
     });
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
     const now = new Date("2026-09-21T00:00:00.000Z");
@@ -570,7 +606,7 @@ describe("tc-sdlc Task 4", () => {
       receiptPath: join(dirname(root), `${root.split("/").at(-1)}.json`),
       environmentClass: "canonical-linux",
       producer: "local-fixture",
-      runOptions: { capacity: { cpu: 1, memoryMiB: 128 } },
+      runOptions: taskRunOptions(),
     });
     const cache = mkdtempSync(join(tmpdir(), "tc-sdlc-cache-alias-entry-"));
     const entry = (sdlc as Record<string, any>).storeEvaluationCache(
@@ -644,10 +680,7 @@ describe("tc-sdlc Task 4", () => {
       receiptPath: join(dirname(root), `${root.split("/").at(-1)}.json`),
       environmentClass: "native-linux",
       producer: "local-fixture",
-      runOptions: {
-        capacity: { cpu: 1, memoryMiB: 128 },
-        environment: { EXECUTION_LOG: executionLog },
-      },
+      runOptions: taskRunOptions({ environment: { EXECUTION_LOG: executionLog } }),
     });
 
     expect(receipt.status).toBe("succeeded");
@@ -684,7 +717,7 @@ describe("tc-sdlc Task 4", () => {
     const preparation = await (sdlc as Record<string, any>).prepare({
       ...input,
       receiptPath: join(dirname(root), `${root.split("/").at(-1)}-prepare.json`),
-      runOptions: { capacity: { cpu: 1, memoryMiB: 128 } },
+      runOptions: taskRunOptions(),
     });
     expect(preparation.status).toBe("succeeded");
     expect(
@@ -702,10 +735,9 @@ describe("tc-sdlc Task 4", () => {
         environmentClass: "native-linux",
         producer: "local-fixture",
         ...(preparationReceipt === undefined ? {} : { preparationReceipt }),
-        runOptions: {
-          capacity: { cpu: 1, memoryMiB: 128 },
+        runOptions: taskRunOptions({
           onEvent: (event: Record<string, unknown>) => observed.push(event),
-        },
+        }),
       });
 
     await expect(evaluation(undefined, "missing")).resolves.toMatchObject({
@@ -768,7 +800,7 @@ describe("tc-sdlc Task 4", () => {
     const preparation = await (sdlc as Record<string, any>).prepare({
       ...input,
       receiptPath: join(dirname(root), `${root.split("/").at(-1)}-prepare.json`),
-      runOptions: { capacity: { cpu: 1, memoryMiB: 128 } },
+      runOptions: taskRunOptions(),
     });
     const commit = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: root,
@@ -783,15 +815,14 @@ describe("tc-sdlc Task 4", () => {
       environmentClass: "native-linux",
       producer: "local-fixture",
       preparationReceipt: preparation,
-      runOptions: {
-        capacity: { cpu: 1, memoryMiB: 128 },
+      runOptions: taskRunOptions({
         onEvent: (event: Record<string, unknown>) => {
           if (!changed && event.type === "start") {
             changed = true;
             writeFileSync(join(root, "input.txt"), "substituted-after-proof");
           }
         },
-      },
+      }),
     });
 
     expect(evaluation).toMatchObject({
@@ -807,7 +838,7 @@ describe("tc-sdlc Task 4", () => {
     );
   });
 
-  test("exposes prepare, check and check-all through the built CLI", () => {
+  test("refuses unbound prepare, check and check-all CLI execution", () => {
     const root = mkdtempSync(join(tmpdir(), "tc-sdlc-task4-cli-"));
     const receiptRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-task4-cli-evidence-"));
     writeFileSync(
@@ -821,7 +852,7 @@ describe("tc-sdlc Task 4", () => {
       `schema: tc.sdlc/v1
 project: cli-fixture
 toolchains: {python: "3.13", node: "24", packageManager: pnpm@11.22.0, uv: "0.12.5"}
-fitness: {package: three-cubes-fitness, version: "0.17.0"}
+fitness: {package: three-cubes-fitness, config: pyproject.toml, profiles: {full: full}}
 projects: [{name: fixture, root: .}]
 targets:
   prepare:
@@ -855,29 +886,20 @@ targets:
       "--catalogue", join(root, "catalogue.json"), "--output", lockPath,
     ]).status).toBe(0);
 
-    const preparationReceiptPath = join(receiptRoot, "prepare.json");
-    const prepared = spawnSync(CLI, [
-      "prepare", ...common, "--receipt", preparationReceiptPath,
-    ], { encoding: "utf8" });
-    expect(prepared.status, prepared.stderr).toBe(0);
-    initialiseGit(root);
-    for (const [command, extra] of [
-      ["check", ["--changed", "input.txt"]],
-      ["check-all", []],
-    ] as const) {
+    for (const command of ["prepare", "check", "check-all"] as const) {
       const result = spawnSync(CLI, [
         command,
         ...common,
         "--receipt", join(receiptRoot, `${command}.json`),
-        "--environment", "native-linux",
-        "--producer", "cli-fixture",
-        "--preparation-receipt", preparationReceiptPath,
-        ...extra,
       ], { encoding: "utf8" });
-      expect(result.status, result.stderr).toBe(0);
-      expect(JSON.parse(result.stdout)).toMatchObject({
+      expect(result.status).toBe(1);
+      expect(JSON.parse(result.stderr)).toMatchObject({
         command,
-        status: "ok",
+        status: "error",
+        error: {
+          code: "USAGE",
+          message: expect.stringContaining("--bootstrap-receipt"),
+        },
       });
     }
   });

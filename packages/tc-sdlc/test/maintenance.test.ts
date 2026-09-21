@@ -34,6 +34,34 @@ function temporary(prefix: string): string {
   return root;
 }
 
+function taskRunOptions(capacity = { cpu: 1, memoryMiB: 64 }) {
+  return {
+    capacity,
+    executionContext: {
+      binding: {
+        schema: "tc.sdlc/execution-context/v1",
+        release: "3.0.0",
+        platform: process.platform === "linux" ? "linux" : "darwin",
+        architecture: process.arch,
+        lockDigest: `sha256:${"a".repeat(64)}`,
+        stateKey: "releases/test/maintenance",
+        stateGenerationIdentity: `sha256:${"e".repeat(64)}`,
+        bootstrapReceiptDigest: `sha256:${"b".repeat(64)}`,
+        stateDigest: `sha256:${"c".repeat(64)}`,
+        dependencyDigest: `sha256:${"d".repeat(64)}`,
+        fitness: { package: "three-cubes-fitness", version: "0.17.1" },
+        adapters: [],
+      },
+      stateRoot: tmpdir(),
+      stateDirectory: tmpdir(),
+      environment: { PATH: process.env.PATH ?? "" },
+      lease: { assertCurrent: () => undefined, release: () => undefined },
+      assertIdentity: () => undefined,
+      verifyIntegrity: () => undefined,
+    },
+  };
+}
+
 function ownedState(root: string): void {
   mkdirSync(root, { recursive: true, mode: 0o700 });
   writeFileSync(
@@ -1250,7 +1278,7 @@ describe("tc-sdlc managed lifecycle", () => {
       schema: "tc.sdlc/v1",
       project: "lifecycle-fixture",
       toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
-      fitness: sdlc.CANONICAL_SDLC_FITNESS,
+      fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
       projects: [{ name: "fixture", root: "." }],
       targets: {
         check: {
@@ -1266,6 +1294,7 @@ describe("tc-sdlc managed lifecycle", () => {
     });
     const catalogue = sdlc.generateReleaseCatalogue({
       releaseVersion: "3.0.0",
+      fitnessVersion: "0.17.1",
       workflowCommit: "1234567890abcdef1234567890abcdef12345678",
       imageDigest:
         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1281,7 +1310,7 @@ describe("tc-sdlc managed lifecycle", () => {
         receiptPath: join(evidence, "evaluation.json"),
         environmentClass: `native-${process.platform}`,
         producer: "lifecycle-test",
-        runOptions: { capacity: { cpu: 1, memoryMiB: 64 } },
+        runOptions: taskRunOptions({ cpu: 1, memoryMiB: 64 }),
       });
       expect(result.status).toBe("failed");
       expect(
@@ -1295,11 +1324,16 @@ describe("tc-sdlc managed lifecycle", () => {
         receiptPath: join(evidence, "evaluation-invalid-capacity.json"),
         environmentClass: `native-${process.platform}`,
         producer: "lifecycle-test",
-        runOptions: { capacity: { cpu: 0, memoryMiB: 64 } },
+        runOptions: taskRunOptions({ cpu: 0, memoryMiB: 64 }),
       });
       expect(rejected).toMatchObject({
         status: "failed",
-        reason: "host capacity must be positive",
+        reason: "scheduler_failed",
+        scheduler: {
+          status: "failed",
+          reason: "host capacity must be positive",
+          scratchCleanup: "removed",
+        },
       });
       expect(
         readdirSync(temporaryRoot).filter((name) => name.startsWith("tc-sdlc-evaluation-")),
@@ -1319,6 +1353,7 @@ describe("tc-sdlc managed lifecycle", () => {
     writeFileSync(join(root, "input.txt"), "input\n");
     const catalogue = sdlc.generateReleaseCatalogue({
       releaseVersion: "3.0.0",
+      fitnessVersion: "0.17.1",
       workflowCommit: "1234567890abcdef1234567890abcdef12345678",
       imageDigest:
         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1328,7 +1363,7 @@ describe("tc-sdlc managed lifecycle", () => {
         schema: "tc.sdlc/v1",
         project: "lifecycle-prepare",
         toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
-        fitness: sdlc.CANONICAL_SDLC_FITNESS,
+        fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
         projects: [{ name: "fixture", root: "." }],
         targets: {
           prepare: {
@@ -1363,7 +1398,7 @@ describe("tc-sdlc managed lifecycle", () => {
           catalogue,
           lock: sdlc.resolveLock(declaration, catalogue),
           receiptPath: join(evidence, `${name}.json`),
-          runOptions: { capacity: { cpu: 1, memoryMiB: 64 } },
+          runOptions: taskRunOptions({ cpu: 1, memoryMiB: 64 }),
         });
         expect(result.status).toBe(status);
         expect(result.recovery).toMatchObject({
