@@ -79,7 +79,7 @@ that combines results from separate producers.
 | Bootstrap lifecycle | `tc-sdlc bootstrap` | declaration, catalogue, generated lock and checkout | `tc.sdlc/bootstrap-receipt/v1` | a packed CLI creates, reuses and recovers state in an empty consumer |
 | Consumer graph | `tc-sdlc check-all` and `tc-sdlc check` | bootstrapped state and consumer checkout | `tc.sdlc/run-receipt/v1` | Python, pnpm and mixed consumers execute through the installed CLI |
 | Fitness target | `tc-sdlc fitness` | repository-scoped fitness declaration, generated lock and bootstrapped state | `tc.sdlc/fitness-receipt/v1` | the managed `three-cubes-fitness` executable runs once, reports its installed version and matches the lock |
-| Consumer qualification | `tc-sdlc qualify-consumers` | fixture manifest and packed CLI | `tc.sdlc/consumer-qualification/v1` | all disposable consumers run natively with retained terminal receipts |
+| Consumer qualification | `tc-sdlc qualify-consumers` | fixture manifest, candidate release catalogue and packed CLI | `tc.sdlc/consumer-qualification/v1` | all disposable consumers run natively with retained terminal receipts |
 | Image producer | `tc-sdlc produce-image` | source identity and image definition | `tc.sdlc/image-release/v1` | one build records digest, provenance and platform metadata |
 | Image qualification | `tc-sdlc qualify-image` | image-release receipt and fixture manifest | `tc.sdlc/image-qualification/v1` | disposable consumers run inside the referenced digest with matching identities |
 | Release admission | `tc-sdlc admit-release` | consumer-, image-release and image-qualification receipts | `tc.sdlc/release-admission/v1` | receipt bindings are recomputed and complete, current evidence is admitted |

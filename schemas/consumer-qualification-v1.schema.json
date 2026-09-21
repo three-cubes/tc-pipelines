@@ -4,12 +4,13 @@
   "title": "Three Cubes SDLC consumer qualification receipt",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "status", "reason", "manifestDigest", "package", "executableDigest", "environment", "fixtures"],
+  "required": ["schema", "status", "reason", "manifestDigest", "catalogueDigest", "package", "executableDigest", "environment", "fixtures"],
   "properties": {
     "schema": { "const": "tc.sdlc/consumer-qualification/v1" },
     "status": { "enum": ["succeeded", "failed"] },
     "reason": { "type": ["string", "null"] },
     "manifestDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "catalogueDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
     "package": {
       "type": "object",
       "additionalProperties": false,
@@ -54,9 +55,10 @@
       "then": {
         "properties": {
           "manifestDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "catalogueDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
           "fixtures": { "type": "array", "minItems": 1, "items": { "type": "object", "properties": { "status": { "const": "succeeded" }, "fixtureDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }, "identityStable": { "const": true } }, "required": ["status", "fixtureDigest", "identityStable"] } }
         },
-        "required": ["manifestDigest", "fixtures"]
+        "required": ["manifestDigest", "catalogueDigest", "fixtures"]
       }
     }
   ],

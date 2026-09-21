@@ -82,9 +82,10 @@ function requestedReceipt(args: readonly string[]): string | undefined {
 
 async function run(command: Command, args: readonly string[]): Promise<void> {
   if (command === "qualify-consumers") {
-    const options = parseOptions(args, ["manifest", "output", "receipt"]);
+    const options = parseOptions(args, ["manifest", "catalogue", "output", "receipt"]);
     const receipt = await qualifyConsumers({
       manifestPath: options.manifest!,
+      cataloguePath: options.catalogue!,
       outputDirectory: options.output!,
       receiptPath: options.receipt!,
       executablePath: process.argv[1]!,

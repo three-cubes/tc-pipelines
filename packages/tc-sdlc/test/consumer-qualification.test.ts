@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const fixtureManifest = fileURLToPath(
   new URL("../../../assurance/fixtures/sdlc/consumers.yaml", import.meta.url),
 );
+const candidateCatalogue = fileURLToPath(new URL("../../../release/catalogue.json", import.meta.url));
 
 function packedCli(): string {
   const packageDirectory = mkdtempSync(join(tmpdir(), "tc-sdlc-packed-package-"));
@@ -57,7 +58,7 @@ function qualification(
     receipt,
     result: spawnSync(
       cli,
-      ["qualify-consumers", "--manifest", manifest, "--output", output, "--receipt", receipt],
+      ["qualify-consumers", "--manifest", manifest, "--catalogue", candidateCatalogue, "--output", output, "--receipt", receipt],
       { encoding: "utf8", env: { ...process.env, ...environment } },
     ),
   };
@@ -83,6 +84,12 @@ function sha256(path: string): string {
 
 function evaluationIdentities(receipt: { tasks: readonly { identity: string }[] }): readonly string[] {
   return receipt.tasks.map((task) => task.identity).sort();
+}
+
+function taskInventories(receipt: { tasks: readonly { key: string; inputs: unknown; outputs: unknown }[] }): readonly unknown[] {
+  return receipt.tasks
+    .map((task) => ({ key: task.key, inputs: task.inputs, outputs: task.outputs }))
+    .sort((left, right) => left.key.localeCompare(right.key));
 }
 
 describe("tc-sdlc qualify-consumers", () => {
@@ -117,6 +124,8 @@ describe("tc-sdlc qualify-consumers", () => {
       ]),
     });
     expect(receiptValue.manifestDigest).toBe(sha256(fixtureManifest));
+    expect(receiptValue.catalogueDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(JSON.parse(readFileSync(join(output, "candidate-catalogue.json"), "utf8"))).toEqual(JSON.parse(readFileSync(candidateCatalogue, "utf8")));
     for (const fixture of receiptValue.fixtures) {
       expect(fixture.fixtureDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
       expect(fixture.preparation.firstPassTaskIdentities.length).toBeGreaterThan(0);
@@ -130,13 +139,22 @@ describe("tc-sdlc qualify-consumers", () => {
         const reference = fixture[name];
         const nestedPath = join(output, reference.path);
         expect(reference.digest).toBe(sha256(nestedPath));
-        expect(JSON.parse(readFileSync(nestedPath, "utf8"))).toMatchObject({ schema, status: "succeeded" });
+        const nested = JSON.parse(readFileSync(nestedPath, "utf8"));
+        expect(nested).toMatchObject({ schema, status: "succeeded" });
+        expect(Object.keys(nested).sort()).toEqual(
+          schema === "tc.sdlc/bootstrap-receipt/v1"
+            ? ["adapters", "architecture", "dependencies", "diagnostics", "diagnosticsCount", "diagnosticsTruncated", "lockDigest", "platform", "reason", "recovery", "release", "reused", "schema", "stateDigest", "stateKey", "status", "taskIdentities"].sort()
+            : schema === "tc.sdlc/preparation-receipt/v1"
+              ? ["bootstrapContext", "catalogueDigest", "declarationDigest", "finalTreeDigest", "firstPass", "lockDigest", "reason", "recovery", "schema", "secondPass", "status"].sort()
+              : ["bootstrapContext", "catalogueDigest", "declarationDigest", "environmentClass", "lockDigest", "mutationCount", "mutations", "mutationsTruncated", "producer", "reason", "recovery", "schema", "source", "status", "tasks", "scheduler"].sort(),
+        );
       }
       for (const name of ["complete", "affected"] as const) {
         const receiptPath = join(output, fixture[name].path);
         const oneSlot = JSON.parse(readFileSync(`${receiptPath}.single`, "utf8"));
         const detected = JSON.parse(readFileSync(receiptPath, "utf8"));
         expect(evaluationIdentities(oneSlot)).toEqual(evaluationIdentities(detected));
+        expect(taskInventories(oneSlot)).toEqual(taskInventories(detected));
       }
     }
   }, 180_000);
@@ -188,11 +206,32 @@ describe("tc-sdlc qualify-consumers", () => {
     expect(existsSync(join(external, "HEAD"))).toBe(false);
   });
 
+  test("rejects platform-equivalent Git metadata before copying the fixture", () => {
+    const manifest = copiedManifest((value) => value);
+    writeFileSync(join(dirname(manifest), "python", ".GIT"), "foreign metadata\n");
+    const run = qualification(cli, manifest);
+    expect(run.result.status).toBe(1);
+    expect(run.result.stderr).toContain("fixture may not contain Git metadata");
+  });
+
   test("does not honour hostile inherited Git routing when creating a checkout", () => {
     const external = mkdtempSync(join(tmpdir(), "tc-sdlc-external-git-routing-"));
     const run = qualification(cli, fixtureManifest, "consumer-qualification.json", { GIT_DIR: external });
     expect(run.result.status).toBe(0);
     expect(existsSync(join(external, "HEAD"))).toBe(false);
+  }, 180_000);
+
+  test("does not resolve dependencies from hostile ambient command shadows", () => {
+    const shadow = mkdtempSync(join(tmpdir(), "tc-sdlc-dependency-shadow-"));
+    const marker = join(shadow, "used");
+    for (const executable of ["uv", "pnpm"]) {
+      const path = join(shadow, executable);
+      writeFileSync(path, `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)}, 'used')\nprocess.exit(99)\n`);
+      chmodSync(path, 0o755);
+    }
+    const run = qualification(cli, fixtureManifest, "consumer-qualification.json", { PATH: `${shadow}:${process.env.PATH}` });
+    expect(run.result.status).toBe(0);
+    expect(existsSync(marker)).toBe(false);
   }, 180_000);
 
   test("rejects a missing dependency lock before bootstrap", () => {
@@ -219,6 +258,31 @@ describe("tc-sdlc qualify-consumers", () => {
     });
   }, 180_000);
 
+  test("retains an outer receipt when a hostile fixture corrupts nested evidence", () => {
+    const manifest = copiedManifest((value) => value);
+    const scripts = join(dirname(manifest), "python", "scripts");
+    writeFileSync(join(scripts, "corrupt-preparation.py"), [
+      "from pathlib import Path",
+      "import time",
+      "receipt = Path(__file__).resolve().parents[3] / 'python' / 'evidence' / 'preparation.json'",
+      "for _ in range(500):",
+      "    if receipt.exists():",
+      "        receipt.write_text('null\\n')",
+      "        raise SystemExit(0)",
+      "    time.sleep(0.01)",
+    ].join("\n"));
+    const preparation = join(scripts, "prepare.py");
+    writeFileSync(preparation, `${readFileSync(preparation, "utf8")}\nfrom subprocess import DEVNULL, Popen\nimport sys\nPopen([sys.executable, 'scripts/corrupt-preparation.py'], stdout=DEVNULL, stderr=DEVNULL, start_new_session=True)\n`);
+    const run = failedQualification(cli, manifest);
+    const python = run.receipt.fixtures.find((fixture: { id: string }) => fixture.id === "python");
+    expect(python).toMatchObject({
+      status: "failed",
+      preparation: { path: "python/evidence/preparation.json", status: null },
+    });
+    expect(existsSync(join(run.output, python.preparation.path))).toBe(true);
+    expect(readFileSync(join(run.output, python.preparation.path), "utf8")).toBe("null\n");
+  }, 180_000);
+
   test("reserves the outer receipt path from nested qualification evidence", () => {
     const run = qualification(cli, fixtureManifest, "python/evidence/complete.json");
     expect(run.result.status).toBe(1);
@@ -236,7 +300,7 @@ describe("tc-sdlc qualify-consumers", () => {
     const output = join(root, "qualification");
     const result = spawnSync(
       cli,
-      ["qualify-consumers", "--manifest", fixtureManifest, "--output", output, "--receipt", join(root, "outside.json")],
+      ["qualify-consumers", "--manifest", fixtureManifest, "--catalogue", candidateCatalogue, "--output", output, "--receipt", join(root, "outside.json")],
       { encoding: "utf8" },
     );
     expect(result.status).toBe(1);
@@ -251,6 +315,16 @@ describe("tc-sdlc qualify-consumers", () => {
     expect(pnpm).toMatchObject({
       status: "failed",
       complete: { status: "succeeded", path: "pnpm/evidence/complete.json" },
+    });
+  }, 180_000);
+
+  test("rejects an affected-closure mismatch after retaining nested affected evidence", () => {
+    const manifest = copiedManifest((value) => value.replace("affected_tasks: [node-service:check]", "affected_tasks: [not-a-task]"));
+    const run = failedQualification(cli, manifest);
+    const pnpm = run.receipt.fixtures.find((fixture: { id: string }) => fixture.id === "pnpm");
+    expect(pnpm).toMatchObject({
+      status: "failed",
+      affected: { status: "succeeded", path: "pnpm/evidence/affected.json" },
     });
   }, 180_000);
 });
