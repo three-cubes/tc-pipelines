@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,9 +33,16 @@ function inventory(root: string): unknown[] {
   });
 }
 
-function childEnvironment(): NodeJS.ProcessEnv {
+function childEnvironment(home: string): NodeJS.ProcessEnv {
+  mkdirSync(home, { recursive: true, mode: 0o700 });
   return {
-    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith("GIT_"))),
+    PATH: process.env.PATH,
+    HOME: home,
+    TMPDIR: process.env.TMPDIR,
+    TMP: process.env.TMP,
+    TEMP: process.env.TEMP,
+    LANG: process.env.LANG,
+    LC_ALL: process.env.LC_ALL,
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_TERMINAL_PROMPT: "0",
@@ -44,8 +51,10 @@ function childEnvironment(): NodeJS.ProcessEnv {
 
 function installPackedCli(): string {
   const packageDirectory = mkdtempSync(join(tmpdir(), "tc-sdlc-bootstrap-package-"));
+  const environment = childEnvironment(join(packageDirectory, "home"));
   execFileSync("pnpm", ["pack", "--pack-destination", packageDirectory], {
     cwd: packageRoot,
+    env: environment,
     encoding: "utf8",
     timeout: childTimeoutMs,
   });
@@ -54,6 +63,7 @@ function installPackedCli(): string {
   const installation = mkdtempSync(join(tmpdir(), "tc-sdlc-bootstrap-installation-"));
   execFileSync("pnpm", ["add", "--ignore-scripts", "--lockfile=false", join(packageDirectory, archives[0]!)], {
     cwd: installation,
+    env: environment,
     encoding: "utf8",
     timeout: childTimeoutMs,
   });
@@ -82,7 +92,7 @@ test("the packed bootstrap command owns reproducible state and terminal receipts
   for (const target of Object.values(declaration.targets) as { inputs: string[] }[]) target.inputs.sort();
   writeFileSync(declarationPath, stringify(declaration));
 
-  const environment = childEnvironment();
+  const environment = childEnvironment(join(directory, "home"));
   const git = (...args: string[]) => execFileSync("git", args, {
     cwd: root,
     env: environment,
@@ -152,14 +162,76 @@ test("the packed bootstrap command owns reproducible state and terminal receipts
     });
   }
   expect(first.dependencies).toHaveLength(1);
+  const expectedDependencyInputs = ["pyproject.toml", "uv.lock"].map((path) => ({
+    path,
+    digest: hash(readFileSync(join(root, path))),
+  }));
   expect(first.dependencies[0]).toMatchObject({
     manager: "uv",
-    lockDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-    manifestDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-    environment: expect.any(String),
+    lockDigest: hash(readFileSync(join(root, "uv.lock"))),
+    manifestDigest: hash(canonical(expectedDependencyInputs.filter((input) => input.path !== "uv.lock"))),
+    environment: "dependencies/python",
+    inputs: expectedDependencyInputs,
     installedDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
   });
-  expect(existsSync(join(stateRoot, first.stateKey))).toBe(true);
+  const dependencyBinding = first.dependencies.map(({ installedDigest: _installedDigest, ...binding }: Record<string, unknown>) => binding);
+  const dependencyDigest = hash(canonical(dependencyBinding));
+  const expectedStateKey = `releases/${first.lockDigest.slice("sha256:".length)}/${dependencyDigest.slice("sha256:".length)}/${first.platform}-${first.architecture}`;
+  expect(first.stateKey).toBe(expectedStateKey);
+  const stateDirectory = join(stateRoot, first.stateKey);
+  const statePath = join(stateDirectory, "state.json");
+  expect(existsSync(statePath)).toBe(true);
+  const stateBytes = readFileSync(statePath);
+  const state = JSON.parse(stateBytes.toString("utf8"));
+  expect(first.stateDigest).toBe(hash(stateBytes));
+  expect(state).toMatchObject({
+    schema: "tc.sdlc/bootstrap-state/v6",
+    release: first.release,
+    lockDigest: first.lockDigest,
+    dependencyDigest,
+    platform: first.platform,
+    architecture: first.architecture,
+    dependencies: first.dependencies,
+  });
+  expect(state.adapters.map(({ executable: _executable, ...adapter }: Record<string, unknown>) => adapter)).toEqual(first.adapters);
+  const declaredVersions: Record<string, string> = {
+    node: declaration.toolchains.node,
+    pnpm: declaration.toolchains.packageManager.replace(/^pnpm@/, ""),
+    python: declaration.toolchains.python,
+    uv: declaration.toolchains.uv,
+  };
+  for (const adapter of state.adapters) {
+    expect(adapter.version).toBe(declaredVersions[adapter.name]);
+    expect(["homebrew", "canonical-image", "catalogue-distribution"]).toContain(adapter.provider);
+    const launcher = join(stateRoot, adapter.launcher);
+    expect(existsSync(launcher)).toBe(true);
+    expect(lstatSync(launcher).isSymbolicLink()).toBe(false);
+    expect(hash(readFileSync(launcher))).toBe(adapter.launcherDigest);
+    expect(existsSync(adapter.executable)).toBe(true);
+  }
+  expect(JSON.parse(readFileSync(join(stateRoot, ".tc-sdlc-owner.json"), "utf8"))).toEqual({
+    owner: "@three-cubes/tc-sdlc",
+    schema: "tc.sdlc/state-owner/v1",
+  });
+  const committedReferences = readdirSync(join(stateRoot, "references")).filter((name) => name.endsWith(".json"));
+  expect(committedReferences).toHaveLength(1);
+  const reference = JSON.parse(readFileSync(join(stateRoot, "references", committedReferences[0]!), "utf8"));
+  const identity = lstatSync(stateDirectory, { bigint: true });
+  expect(reference).toMatchObject({
+    schema: "tc.sdlc/bootstrap-reference/v2",
+    owner: "@three-cubes/tc-sdlc",
+    phase: "committed",
+    consumer: declaration.project,
+    consumerRoot: realpathSync(root),
+    currentStateKey: first.stateKey,
+    currentStateIdentity: {
+      device: identity.dev.toString(),
+      inode: identity.ino.toString(),
+      birthtimeNanoseconds: identity.birthtimeNs.toString(),
+    },
+  });
+  expect(readdirSync(join(stateRoot, "references", "pending"))).toEqual([]);
+  expect(readdirSync(join(stateRoot, "references", "locks"))).toEqual([]);
   expect(inventory(root)).toEqual(before);
 
   invoke(cli, root, environment, "bootstrap", [...common, "--receipt", secondPath]);
@@ -174,6 +246,41 @@ test("the packed bootstrap command owns reproducible state and terminal receipts
     taskIdentities: first.taskIdentities,
     adapters: first.adapters,
     dependencies: first.dependencies,
+  });
+  expect(hash(readFileSync(statePath))).toBe(first.stateDigest);
+  expect(lstatSync(stateDirectory, { bigint: true }).ino.toString()).toBe(identity.ino.toString());
+  expect(readdirSync(join(stateRoot, "references", "pending"))).toEqual([]);
+  expect(readdirSync(join(stateRoot, "references", "locks"))).toEqual([]);
+  expect(inventory(root)).toEqual(before);
+
+  const coldStateRoot = join(directory, "cold-state");
+  const failedPath = join(directory, "bootstrap-failed.json");
+  const failed = spawnSync(cli, ["bootstrap", ...common.slice(0, -2), "--state-root", coldStateRoot, "--offline", "true", "--receipt", failedPath], {
+    cwd: root,
+    env: environment,
+    encoding: "utf8",
+    timeout: childTimeoutMs,
+  });
+  expect(failed.error).toBeUndefined();
+  expect(failed.status).toBe(1);
+  expect(JSON.parse(failed.stderr)).toMatchObject({
+    schema: "tc.sdlc/command-error/v1",
+    command: "bootstrap",
+    status: "error",
+    error: { code: "BOOTSTRAP_FAILED" },
+  });
+  const failure = JSON.parse(readFileSync(failedPath, "utf8"));
+  expect(failure).toMatchObject({
+    schema: "tc.sdlc/bootstrap-receipt/v1",
+    status: "failed",
+    reason: "offline_cold",
+    release: first.release,
+    lockDigest: first.lockDigest,
+    stateDigest: null,
+    reused: false,
+    diagnostics: [expect.objectContaining({ code: "BOOTSTRAP_OFFLINE_COLD" })],
+    diagnosticsCount: 1,
+    diagnosticsTruncated: false,
   });
   expect(inventory(root)).toEqual(before);
 }, 180_000);
