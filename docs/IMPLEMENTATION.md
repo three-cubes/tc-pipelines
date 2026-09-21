@@ -279,10 +279,17 @@ provides dry-run and apply receipts for the same bounded policy. It never scans
 foreign roots or deployment data. Deletion workers revalidate and atomically
 re-quarantine complete roots before synchronous removal, so path replacement
 cannot redirect an asynchronous recursive delete. Worker terminal budgets and
-observed peak concurrency are recorded in maintenance evidence. Materialised bootstrap states carry stable
-local-consumer references: maintenance retains every current state and immediate
-predecessor and expires only old states made explicitly unreferenced by valid
-producer metadata. The release-image producer uses a named tc-sdlc BuildKit
+observed peak concurrency are recorded in maintenance evidence. Materialised
+bootstrap states carry stable local-consumer references: maintenance retains
+every current state and immediate predecessor and expires only old states made
+explicitly unreferenced by valid producer metadata. Bootstrap references bind
+the exact state filesystem identity; after atomic publication bootstrap
+revalidates that identity and rolls back only its unchanged publication if
+state moved. Maintenance moves an identity-matched candidate into quarantine,
+refreshes references, and restores the candidate when a matching reference
+appeared during the move. A changed identity never grants deletion authority.
+Cleanup setup failures retain the candidate and terminate in a canonical failed
+maintenance receipt. The release-image producer uses a named tc-sdlc BuildKit
 builder and state-owned Docker configuration with explicit daemon routing;
 release artefacts remain retained until catalogue/current/predecessor or incident
 references provide deletion authority. Task 5 emits that retention declaration

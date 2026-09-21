@@ -145,7 +145,22 @@ type BootstrapReference = Readonly<{
   consumer: string;
   consumerRoot: string;
   currentStateKey: string;
+  currentStateIdentity: FilesystemIdentity;
   predecessorStateKey?: string;
+  predecessorStateIdentity?: FilesystemIdentity;
+}>;
+
+type FilesystemIdentity = Readonly<{
+  device: string;
+  inode: string;
+  birthtimeNanoseconds: string;
+}>;
+
+type ReferencePublication = Readonly<{
+  path: string;
+  identity: FilesystemIdentity;
+  bytes: string;
+  previous?: BootstrapReference;
 }>;
 
 const OWNER = { schema: "tc.sdlc/state-owner/v1", owner: "@three-cubes/tc-sdlc" } as const;
@@ -190,6 +205,31 @@ class BootstrapFailure extends Error {
 
 function fileDigest(path: string): string {
   return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
+}
+
+function filesystemIdentity(path: string): FilesystemIdentity {
+  const details = lstatSync(path, { bigint: true });
+  return {
+    device: details.dev.toString(),
+    inode: details.ino.toString(),
+    birthtimeNanoseconds: details.birthtimeNs.toString(),
+  };
+}
+
+function sameFilesystemIdentity(path: string, expected: FilesystemIdentity): boolean {
+  try {
+    return canonicalJson(filesystemIdentity(path)) === canonicalJson(expected);
+  } catch {
+    return false;
+  }
+}
+
+function validFilesystemIdentity(value: unknown): value is FilesystemIdentity {
+  if (typeof value !== "object" || value === null) return false;
+  const identity = value as Record<string, unknown>;
+  return ["device", "inode", "birthtimeNanoseconds"].every(
+    (key) => typeof identity[key] === "string" && identity[key] !== "",
+  );
 }
 
 function isPythonRuntimeCache(path: string): boolean {
@@ -1357,7 +1397,8 @@ function writeBootstrapReference(
   consumer: string,
   consumerRoot: string,
   stateKey: string,
-): void {
+  stateIdentity: FilesystemIdentity,
+): ReferencePublication {
   const directory = join(stateRoot, "references");
   rejectSymlinkComponents(stateRoot, directory);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -1373,7 +1414,10 @@ function writeBootstrapReference(
       value.schema !== "tc.sdlc/bootstrap-reference/v1" ||
       value.owner !== OWNER.owner ||
       value.consumer !== consumer ||
-      value.consumerRoot !== consumerRoot
+      value.consumerRoot !== consumerRoot ||
+      !validFilesystemIdentity(value.currentStateIdentity) ||
+      (value.predecessorStateKey !== undefined &&
+        !validFilesystemIdentity(value.predecessorStateIdentity))
     ) {
       throw new BootstrapFailure("state_corrupt", [
         {
@@ -1389,14 +1433,44 @@ function writeBootstrapReference(
     previous?.currentStateKey !== undefined && previous.currentStateKey !== stateKey
       ? previous.currentStateKey
       : previous?.predecessorStateKey;
-  writeCanonicalEvidence(referencePath, {
+  const predecessorStateIdentity =
+    previous?.currentStateKey !== undefined && previous.currentStateKey !== stateKey
+      ? previous.currentStateIdentity
+      : previous?.predecessorStateIdentity;
+  const value = {
     schema: "tc.sdlc/bootstrap-reference/v1",
     owner: OWNER.owner,
     consumer,
     consumerRoot,
     currentStateKey: stateKey,
-    ...(predecessorStateKey === undefined ? {} : { predecessorStateKey }),
-  } satisfies BootstrapReference);
+    currentStateIdentity: stateIdentity,
+    ...(predecessorStateKey === undefined || predecessorStateIdentity === undefined
+      ? {}
+      : { predecessorStateKey, predecessorStateIdentity }),
+  } satisfies BootstrapReference;
+  writeCanonicalEvidence(referencePath, value);
+  return {
+    path: referencePath,
+    identity: filesystemIdentity(referencePath),
+    bytes: canonicalJson(value),
+    ...(previous === undefined ? {} : { previous }),
+  };
+}
+
+function rollbackBootstrapReference(publication: ReferencePublication): void {
+  try {
+    if (
+      !sameFilesystemIdentity(publication.path, publication.identity) ||
+      readFileSync(publication.path, "utf8") !== publication.bytes
+    ) return;
+    if (publication.previous === undefined) {
+      rmSync(publication.path);
+    } else {
+      writeCanonicalEvidence(publication.path, publication.previous);
+    }
+  } catch {
+    // A changed publication belongs to a later bootstrap and is never removed here.
+  }
 }
 
 export async function bootstrap(options: BootstrapOptions): Promise<BootstrapReceipt> {
@@ -1485,12 +1559,64 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       adapters = state.adapters.map(adapterEvidence);
       dependencyEvidence = state.dependencies;
     }
-    writeBootstrapReference(
+    const finalStatePath = resolve(stateRoot, stateKey);
+    const verified = validateWarmState(
+      options,
+      host,
+      stateRoot,
+      stateKey,
+      lockDigest,
+      dependencyDigest,
+      dependencies,
+      prerequisites,
+    );
+    if (verified === null) {
+      throw new BootstrapFailure("state_changed", [
+        {
+          code: "BOOTSTRAP_STATE_CHANGED",
+          message: "bootstrap state changed before reference publication",
+          action: "retry bootstrap to materialise and reference one verified state",
+        },
+      ]);
+    }
+    const verifiedIdentity = filesystemIdentity(finalStatePath);
+    const publication = writeBootstrapReference(
       stateRoot,
       options.declaration.project,
       realpathSync(options.root),
       stateKey,
+      verifiedIdentity,
     );
+    let finalState: BootstrapState | null = null;
+    try {
+      finalState = validateWarmState(
+        options,
+        host,
+        stateRoot,
+        stateKey,
+        lockDigest,
+        dependencyDigest,
+        dependencies,
+        prerequisites,
+      );
+      if (
+        finalState === null ||
+        !sameFilesystemIdentity(finalStatePath, verifiedIdentity)
+      ) {
+        throw new BootstrapFailure("state_changed", [
+          {
+            code: "BOOTSTRAP_STATE_CHANGED",
+            message: "bootstrap state changed before reference publication",
+            action: "retry bootstrap to materialise and reference one verified state",
+          },
+        ]);
+      }
+    } catch (error) {
+      rollbackBootstrapReference(publication);
+      throw error;
+    }
+    adapters = finalState.adapters.map(adapterEvidence);
+    dependencyEvidence = finalState.dependencies;
     const receipt: BootstrapReceipt = {
       schema: "tc.sdlc/bootstrap-receipt/v1",
       status: "succeeded",

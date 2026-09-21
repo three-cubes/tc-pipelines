@@ -132,7 +132,11 @@ not an operator memory task.
   beneath tc-sdlc-owned roots or builders;
 - materialised toolchain and dependency states are retained while referenced as
   a consumer's current state or immediate predecessor; only old states made
-  explicitly unreferenced by canonical producer metadata can expire;
+  explicitly unreferenced by canonical producer metadata can expire. Reference
+  publication binds the exact state filesystem identity. Maintenance refreshes
+  references after identity-bound quarantine and restores a newly referenced
+  candidate; bootstrap revalidates the same state identity after publication
+  and rolls back only its unchanged reference if the state moved;
 - release artefacts and evidence retain catalogue, current, predecessor and
   incident references. Failed staging is removed immediately, while successful
   outputs cannot expire until their producer emits sufficient reference
@@ -154,7 +158,9 @@ synchronously without yielding. Foreign, mixed or changed layouts remain
 preserved. A markerless empty directory is also retained: its name and emptiness
 alone are not ownership authority. Each worker has a receipt-bound terminal
 budget so a crash or non-response becomes a cleanup failure instead of hanging
-the command.
+the command. Failure to create an identity-bound quarantine is itself terminal
+receipt evidence; the candidate remains in place rather than escaping without
+an outcome.
 
 The persistent bootstrap inventory consists of referenced release states
 (including their dependency environments and toolchain launchers), managed

@@ -286,12 +286,22 @@ export async function removeTemporaryCandidates(
         };
         continue;
       }
-      const created = createQuarantine(
-        temporaryRoot,
-        path,
-        "temporary",
-        candidate.identity,
-      );
+      let created: ReturnType<typeof createQuarantine>;
+      try {
+        created = createQuarantine(
+          temporaryRoot,
+          path,
+          "temporary",
+          candidate.identity,
+        );
+      } catch {
+        results[index] = {
+          removed: false,
+          retained: { path: candidate.path, reason: "inspection_failed" },
+          failed: true,
+        };
+        continue;
+      }
       const quarantineRoot = created.root;
       const quarantine = created.payload;
       try {

@@ -69,6 +69,15 @@ function bootstrapState(root: string, stateKey: string, old = true): string {
   return directory;
 }
 
+function filesystemIdentity(path: string) {
+  const details = lstatSync(path, { bigint: true });
+  return {
+    device: details.dev.toString(),
+    inode: details.ino.toString(),
+    birthtimeNanoseconds: details.birthtimeNs.toString(),
+  };
+}
+
 function managedTemporary(
   parent: string,
   name: string,
@@ -531,6 +540,91 @@ describe("tc-sdlc managed lifecycle", () => {
     expect(receipt.removedCount).toBeLessThanOrEqual(1);
   });
 
+  test.runIf(process.platform !== "win32" && process.getuid?.() !== 0)(
+    "records quarantine-creation failures and retains scratch and bootstrap candidates",
+    async () => {
+      const parent = temporary("tc-sdlc-maintenance-unwritable-temp-");
+      const stateRoot = temporary("tc-sdlc-maintenance-unwritable-state-");
+      const evidence = temporary("tc-sdlc-maintenance-unwritable-evidence-");
+      ownedState(stateRoot);
+      const scratch = managedTemporary(parent, "tc-sdlc-evaluation-unwritable", {
+        pid: 2_147_483_647,
+        old: true,
+      });
+      chmodSync(parent, 0o500);
+      let scratchReceipt: sdlc.MaintenanceReceipt | undefined;
+      try {
+        scratchReceipt = await sdlc.maintain({
+          stateRoot,
+          temporaryRoot: parent,
+          receiptPath: join(evidence, "scratch.json"),
+          mode: "apply",
+        });
+      } finally {
+        chmodSync(parent, 0o700);
+      }
+      expect(scratchReceipt).toMatchObject({
+        status: "failed",
+        reason: "temporary_cleanup_failed",
+        candidateCount: 1,
+        removedCount: 0,
+        cleanupFailures: 1,
+        retained: [{ path: "tc-sdlc-evaluation-unwritable", reason: "inspection_failed" }],
+      });
+      expect(existsSync(scratch)).toBe(true);
+      expect(readFileSync(join(evidence, "scratch.json"), "utf8")).toBe(
+        sdlc.serialiseMaintenanceReceipt(scratchReceipt!),
+      );
+
+      const currentKey = "releases/current/dependencies/darwin-arm64";
+      const expiredKey = "releases/expired/dependencies/darwin-arm64";
+      const current = bootstrapState(stateRoot, currentKey);
+      const expired = bootstrapState(stateRoot, expiredKey);
+      mkdirSync(join(stateRoot, "references"));
+      writeFileSync(
+        join(
+          stateRoot,
+          "references",
+          `${sdlc.digest({ consumer: "fixture", consumerRoot: "/fixture" }).slice("sha256:".length)}.json`,
+        ),
+        sdlc.canonicalJson({
+          schema: "tc.sdlc/bootstrap-reference/v1",
+          owner: "@three-cubes/tc-sdlc",
+          consumer: "fixture",
+          consumerRoot: "/fixture",
+          currentStateKey: currentKey,
+          currentStateIdentity: filesystemIdentity(current),
+        }),
+      );
+      const stateParent = join(stateRoot, "releases", "expired", "dependencies");
+      chmodSync(stateParent, 0o500);
+      let stateReceipt: sdlc.MaintenanceReceipt | undefined;
+      try {
+        stateReceipt = await sdlc.maintain({
+          stateRoot,
+          temporaryRoot: temporary("tc-sdlc-maintenance-unwritable-empty-"),
+          receiptPath: join(evidence, "bootstrap-state.json"),
+          mode: "apply",
+        });
+      } finally {
+        chmodSync(stateParent, 0o700);
+      }
+      expect(stateReceipt).toMatchObject({
+        status: "failed",
+        reason: "temporary_cleanup_failed",
+        removedCount: 0,
+        cleanupFailures: 1,
+        retained: expect.arrayContaining([
+          { path: expiredKey, reason: "inspection_failed" },
+        ]),
+      });
+      expect(existsSync(expired)).toBe(true);
+      expect(readFileSync(join(evidence, "bootstrap-state.json"), "utf8")).toBe(
+        sdlc.serialiseMaintenanceReceipt(stateReceipt!),
+      );
+    },
+  );
+
   test("retains dirty tracked and untracked work in an evaluation workspace", async () => {
     const parent = temporary("tc-sdlc-maintenance-nested-worktree-");
     const stateRoot = temporary("tc-sdlc-maintenance-state-");
@@ -695,7 +789,9 @@ describe("tc-sdlc managed lifecycle", () => {
         consumer: "fixture",
         consumerRoot: "/fixture",
         currentStateKey: currentKey,
+        currentStateIdentity: filesystemIdentity(current),
         predecessorStateKey: predecessorKey,
+        predecessorStateIdentity: filesystemIdentity(predecessor),
       }),
     );
 
@@ -739,6 +835,117 @@ describe("tc-sdlc managed lifecycle", () => {
     expect(existsSync(unreferencedMetadataAbsent)).toBe(true);
   });
 
+  test("restores an identity-bound state referenced after quarantine", async () => {
+    const parent = temporary("tc-sdlc-maintenance-reference-race-temp-");
+    const stateRoot = temporary("tc-sdlc-maintenance-reference-race-state-");
+    const evidence = temporary("tc-sdlc-maintenance-reference-race-evidence-");
+    ownedState(stateRoot);
+    const currentKey = "releases/current/dependencies/darwin-arm64";
+    const expiredKey = "releases/expired/dependencies/darwin-arm64";
+    const current = bootstrapState(stateRoot, currentKey);
+    const expired = bootstrapState(stateRoot, expiredKey);
+    const expiredIdentity = filesystemIdentity(expired);
+    const references = join(stateRoot, "references");
+    mkdirSync(references);
+    let greatestName = "";
+    for (let index = 0; index < 5_000; index += 1) {
+      const consumer = `existing-${index}`;
+      const consumerRoot = `/fixture/existing-${index}`;
+      const name = `${sdlc.digest({ consumer, consumerRoot }).slice("sha256:".length)}.json`;
+      greatestName = name > greatestName ? name : greatestName;
+      writeFileSync(
+        join(references, name),
+        sdlc.canonicalJson({
+          schema: "tc.sdlc/bootstrap-reference/v1",
+          owner: "@three-cubes/tc-sdlc",
+          consumer,
+          consumerRoot,
+          currentStateKey: currentKey,
+          currentStateIdentity: filesystemIdentity(current),
+        }),
+      );
+    }
+    let targetIndex = 0;
+    let targetConsumer = "";
+    let targetRoot = "";
+    let targetName = "";
+    while (targetName <= greatestName) {
+      targetConsumer = `late-reference-${targetIndex}`;
+      targetRoot = `/fixture/late-reference-${targetIndex}`;
+      targetName = `${sdlc.digest({ consumer: targetConsumer, consumerRoot: targetRoot }).slice("sha256:".length)}.json`;
+      targetIndex += 1;
+    }
+    const targetPath = join(references, targetName);
+    const targetReference = (identity: ReturnType<typeof filesystemIdentity>) =>
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/bootstrap-reference/v1",
+        owner: "@three-cubes/tc-sdlc",
+        consumer: targetConsumer,
+        consumerRoot: targetRoot,
+        currentStateKey: expiredKey,
+        currentStateIdentity: identity,
+      });
+    writeFileSync(targetPath, targetReference(filesystemIdentity(current)));
+
+    const receiptPath = join(evidence, "reference-race.json");
+    const child = spawn(
+      process.execPath,
+      [
+        CLI,
+        "maintain",
+        "--state-root", stateRoot,
+        "--temporary-root", parent,
+        "--receipt", receiptPath,
+        "--mode", "apply",
+      ],
+      { stdio: "ignore" },
+    );
+    const exited = new Promise<number | null>((resolve) => {
+      child.once("exit", resolve);
+    });
+    let resumed = false;
+    try {
+      const quarantineParent = join(stateRoot, "releases", "expired", "dependencies");
+      let quarantine: string | undefined;
+      const deadline = Date.now() + 30_000;
+      while (quarantine === undefined && Date.now() < deadline) {
+        quarantine = readdirSync(quarantineParent)
+          .map((name) => join(quarantineParent, name))
+          .find((path) =>
+            path.includes(".tc-sdlc-quarantine-") &&
+            existsSync(join(path, "candidate"))
+          );
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      expect(quarantine).toBeDefined();
+      expect(child.kill("SIGSTOP")).toBe(true);
+      expect(existsSync(join(quarantine!, "candidate"))).toBe(true);
+      writeFileSync(targetPath, targetReference(expiredIdentity));
+      expect(child.kill("SIGCONT")).toBe(true);
+      resumed = true;
+      expect(await exited).toBe(0);
+    } finally {
+      if (!resumed && child.exitCode === null) {
+        child.kill("SIGCONT");
+        child.kill("SIGKILL");
+      }
+    }
+
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+    expect(receipt).toMatchObject({
+      schema: "tc.sdlc/maintenance-receipt/v1",
+      status: "succeeded",
+      removedCount: 0,
+      retained: expect.arrayContaining([
+        { path: expiredKey, reason: "referenced" },
+      ]),
+    });
+    expect(existsSync(expired)).toBe(true);
+    expect(filesystemIdentity(expired)).toEqual(
+      JSON.parse(readFileSync(targetPath, "utf8")).currentStateIdentity,
+    );
+  }, 60_000);
+
   test("recovers a bootstrap-state quarantine killed in the deleting phase", async () => {
     const parent = temporary("tc-sdlc-maintenance-bootstrap-killed-temp-");
     const stateRoot = temporary("tc-sdlc-maintenance-bootstrap-killed-state-");
@@ -746,7 +953,7 @@ describe("tc-sdlc managed lifecycle", () => {
     ownedState(stateRoot);
     const currentKey = "releases/current/dependencies/darwin-arm64";
     const expiredKey = "releases/expired/dependencies/darwin-arm64";
-    bootstrapState(stateRoot, currentKey);
+    const current = bootstrapState(stateRoot, currentKey);
     const expired = bootstrapState(stateRoot, expiredKey);
     for (let index = 0; index < 20_000; index += 1) {
       writeFileSync(join(expired, `entry-${index}.txt`), "owned\n");
@@ -766,6 +973,7 @@ describe("tc-sdlc managed lifecycle", () => {
         consumer: "fixture",
         consumerRoot: "/fixture",
         currentStateKey: currentKey,
+        currentStateIdentity: filesystemIdentity(current),
       }),
     );
 

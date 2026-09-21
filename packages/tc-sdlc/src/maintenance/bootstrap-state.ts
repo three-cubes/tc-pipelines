@@ -19,6 +19,7 @@ import {
   sameIdentity,
 } from "./quarantine.js";
 import type {
+  FilesystemIdentity,
   MaintenanceEntry,
   MaintenanceRetainedEntry,
 } from "./types.js";
@@ -31,8 +32,16 @@ type BootstrapReference = Readonly<{
   consumer: string;
   consumerRoot: string;
   currentStateKey: string;
+  currentStateIdentity: FilesystemIdentity;
   predecessorStateKey?: string;
+  predecessorStateIdentity?: FilesystemIdentity;
 }>;
+
+type BootstrapReferences = ReadonlyMap<string, ReadonlySet<string>>;
+
+function stableIdentityKey(identity: FilesystemIdentity): string {
+  return canonicalJson({ device: identity.device, inode: identity.inode });
+}
 
 function directoryBytes(path: string): number {
   let total = 0;
@@ -127,12 +136,38 @@ function stateKeyIsValid(value: string): boolean {
   return /^releases\/[^/]+\/[^/]+\/(darwin|linux)-[^/]+$/.test(value);
 }
 
-function bootstrapReferences(stateRoot: string): ReadonlySet<string> | undefined {
+function identityIsValid(value: unknown): value is FilesystemIdentity {
+  if (typeof value !== "object" || value === null) return false;
+  const identity = value as Record<string, unknown>;
+  return ["device", "inode", "birthtimeNanoseconds"].every(
+    (key) => typeof identity[key] === "string" && identity[key] !== "",
+  );
+}
+
+function bindReference(
+  referenced: Map<string, Set<string>>,
+  stateKey: string,
+  identity: FilesystemIdentity,
+): void {
+  const identities = referenced.get(stateKey) ?? new Set<string>();
+  identities.add(stableIdentityKey(identity));
+  referenced.set(stateKey, identities);
+}
+
+function referenceMatches(
+  references: BootstrapReferences | undefined,
+  stateKey: string,
+  identity: FilesystemIdentity,
+): boolean {
+  return references?.get(stateKey)?.has(stableIdentityKey(identity)) === true;
+}
+
+function bootstrapReferences(stateRoot: string): BootstrapReferences | undefined {
   const directory = join(stateRoot, "references");
   try {
     const root = lstatSync(directory);
     if (!root.isDirectory() || root.isSymbolicLink()) return undefined;
-    const referenced = new Set<string>();
+    const referenced = new Map<string, Set<string>>();
     const files = readdirSync(directory).sort();
     if (files.length === 0) return undefined;
     for (const name of files) {
@@ -145,10 +180,21 @@ function bootstrapReferences(stateRoot: string): ReadonlySet<string> | undefined
       if (bytes !== canonicalJson(value) || !referencePathIsValid(name, value)) {
         return undefined;
       }
-      for (const key of [value.currentStateKey, value.predecessorStateKey]) {
-        if (key === undefined) continue;
-        if (!stateKeyIsValid(key)) return undefined;
-        referenced.add(key);
+      if (
+        !stateKeyIsValid(value.currentStateKey) ||
+        !identityIsValid(value.currentStateIdentity)
+      ) return undefined;
+      bindReference(referenced, value.currentStateKey, value.currentStateIdentity);
+      if (value.predecessorStateKey !== undefined) {
+        if (
+          !stateKeyIsValid(value.predecessorStateKey) ||
+          !identityIsValid(value.predecessorStateIdentity)
+        ) return undefined;
+        bindReference(
+          referenced,
+          value.predecessorStateKey,
+          value.predecessorStateIdentity,
+        );
       }
     }
     return referenced;
@@ -171,9 +217,10 @@ export function inspectBootstrapStates(
   }
   for (const path of bootstrapStatePaths(stateRoot)) {
     const absolute = join(stateRoot, path);
+    const identity = filesystemIdentity(absolute);
     if (references === undefined) {
       retained.push({ path, reason: "reference_metadata_absent" });
-    } else if (references.has(path)) {
+    } else if (referenceMatches(references, path, identity)) {
       retained.push({ path, reason: "referenced" });
     } else if (lstatSync(absolute).mtimeMs > cutoff) {
       retained.push({ path, reason: "retention_window" });
@@ -182,7 +229,7 @@ export function inspectBootstrapStates(
         kind: "bootstrap-state",
         path,
         bytes: directoryBytes(absolute),
-        identity: filesystemIdentity(absolute),
+        identity,
       });
     }
   }
@@ -198,10 +245,95 @@ type RemovalResult = Readonly<{
 }>;
 
 function retainedReason(
-  references: ReadonlySet<string> | undefined,
+  references: BootstrapReferences | undefined,
   path: string,
+  identity: FilesystemIdentity,
 ): MaintenanceRetainedEntry["reason"] {
-  return references?.has(path) === true ? "referenced" : "changed_during_apply";
+  return referenceMatches(references, path, identity)
+    ? "referenced"
+    : "changed_during_apply";
+}
+
+type BootstrapDeletionPreparation =
+  | Readonly<{ kind: "retained"; retained: MaintenanceRetainedEntry; failed: boolean }>
+  | Readonly<{ kind: "quarantined"; root: string; payload: string }>;
+
+function prepareBootstrapDeletion(
+  stateRoot: string,
+  candidate: MaintenanceEntry,
+  cutoff: number,
+): BootstrapDeletionPreparation {
+  const path = join(stateRoot, candidate.path);
+  const references = bootstrapReferences(stateRoot);
+  try {
+    if (
+      references === undefined ||
+      referenceMatches(references, candidate.path, candidate.identity) ||
+      !sameIdentity(path, candidate.identity) ||
+      lstatSync(path).mtimeMs > cutoff
+    ) {
+      return {
+        kind: "retained",
+        retained: {
+          path: candidate.path,
+          reason: references === undefined
+            ? "reference_metadata_absent"
+            : retainedReason(references, candidate.path, candidate.identity),
+        },
+        failed: false,
+      };
+    }
+    const created = createQuarantine(
+      dirname(path),
+      path,
+      "bootstrap-state",
+      candidate.identity,
+    );
+    renameSync(path, created.payload);
+    if (!sameIdentity(created.payload, candidate.identity)) {
+      if (!existsSync(path)) {
+        renameSync(created.payload, path);
+        finishQuarantine(created.root);
+      }
+      return {
+        kind: "retained",
+        retained: { path: candidate.path, reason: "changed_during_apply" },
+        failed: existsSync(created.payload),
+      };
+    }
+    const refreshedReferences = bootstrapReferences(stateRoot);
+    if (
+      refreshedReferences === undefined ||
+      referenceMatches(refreshedReferences, candidate.path, candidate.identity)
+    ) {
+      if (existsSync(path)) {
+        return {
+          kind: "retained",
+          retained: { path: candidate.path, reason: "inspection_failed" },
+          failed: true,
+        };
+      }
+      renameSync(created.payload, path);
+      finishQuarantine(created.root);
+      return {
+        kind: "retained",
+        retained: {
+          path: candidate.path,
+          reason: refreshedReferences === undefined
+            ? "reference_metadata_absent"
+            : "referenced",
+        },
+        failed: false,
+      };
+    }
+    return { kind: "quarantined", root: created.root, payload: created.payload };
+  } catch {
+    return {
+      kind: "retained",
+      retained: { path: candidate.path, reason: "inspection_failed" },
+      failed: true,
+    };
+  }
 }
 
 export async function removeBootstrapStates(
@@ -249,52 +381,28 @@ export async function removeBootstrapStates(
             };
         continue;
       }
-      const references = bootstrapReferences(stateRoot);
-      if (
-        references === undefined ||
-        references.has(candidate.path) ||
-        !sameIdentity(path, candidate.identity) ||
-        lstatSync(path).mtimeMs > cutoff
-      ) {
+      let prepared: BootstrapDeletionPreparation;
+      try {
+        prepared = prepareBootstrapDeletion(stateRoot, candidate, cutoff);
+      } catch {
         results[index] = {
           removed: false,
-          retained: { path: candidate.path, reason: retainedReason(references, candidate.path) },
-          failed: false,
+          retained: { path: candidate.path, reason: "inspection_failed" },
+          failed: true,
         };
         continue;
       }
-      const created = createQuarantine(
-        dirname(path),
-        path,
-        "bootstrap-state",
-        candidate.identity,
-      );
-      const quarantineRoot = created.root;
-      const quarantine = created.payload;
+      if (prepared.kind === "retained") {
+        results[index] = {
+          removed: false,
+          retained: prepared.retained,
+          failed: prepared.failed,
+        };
+        continue;
+      }
+      const quarantineRoot = prepared.root;
+      const quarantine = prepared.payload;
       try {
-        renameSync(path, quarantine);
-        const refreshed = bootstrapReferences(stateRoot);
-        if (
-          !sameIdentity(quarantine, candidate.identity) ||
-          refreshed === undefined ||
-          refreshed.has(candidate.path)
-        ) {
-          if (!existsSync(path)) {
-            renameSync(quarantine, path);
-            finishQuarantine(quarantineRoot);
-          }
-          results[index] = {
-            removed: false,
-            retained: {
-              path: candidate.path,
-              reason: existsSync(quarantine)
-                ? "inspection_failed"
-                : retainedReason(refreshed, candidate.path),
-            },
-            failed: existsSync(quarantine),
-          };
-          continue;
-        }
         activeWorkers += 1;
         peakWorkers = Math.max(peakWorkers, activeWorkers);
         try {

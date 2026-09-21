@@ -1,5 +1,5 @@
 import * as sdlc from "../dist/index.js";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   cpSync,
@@ -29,8 +29,18 @@ const workspaceConsumer = fileURLToPath(
   new URL("./fixtures/bootstrap-workspace", import.meta.url),
 );
 const CLI = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+const PUBLIC_PACKAGE = new URL("../dist/index.js", import.meta.url).href;
 const imageDigest =
   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+function filesystemIdentity(path: string) {
+  const details = statSync(path, { bigint: true });
+  return {
+    device: details.dev.toString(),
+    inode: details.ino.toString(),
+    birthtimeNanoseconds: details.birthtimeNs.toString(),
+  };
+}
 
 function homebrewPrerequisitesAvailable(architecture: "arm64" | "x64"): boolean {
   const prefix = architecture === "arm64" ? "/opt/homebrew" : "/usr/local";
@@ -80,6 +90,145 @@ function input(
 }
 
 describe("reviewed macOS bootstrap host and dependency boundary", () => {
+  test("never leaves a reference to state quarantined by concurrent maintenance", async () => {
+    expect(process.platform).toBe("darwin");
+    const raceRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-bootstrap-race-consumer-"));
+    const sentinelRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-bootstrap-race-sentinel-"));
+    const stateRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-bootstrap-race-state-"));
+    const evidence = mkdtempSync(join(tmpdir(), "tc-sdlc-bootstrap-race-evidence-"));
+    const temporaryRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-bootstrap-race-temp-"));
+    for (const root of [raceRoot, sentinelRoot]) writeFileSync(join(root, "input.txt"), "input\n");
+    const values = input(raceRoot, ["input.txt"]);
+    const declarationFor = (command: string) =>
+      sdlc.validateDeclaration({
+        ...values.declaration,
+        targets: { check: { ...values.declaration.targets.check, command } },
+      });
+    const raceDeclaration = declarationFor("node -e 'process.stdout.write(\"race\")'");
+    const sentinelDeclaration = declarationFor("node -e 'process.stdout.write(\"sentinel\")'");
+    const bootstrapFor = (
+      root: string,
+      declaration: ReturnType<typeof sdlc.validateDeclaration>,
+      receiptPath: string,
+    ) => ({
+      root,
+      declaration,
+      catalogue: values.catalogue,
+      lock: sdlc.resolveLock(declaration, values.catalogue),
+      stateRoot,
+      receiptPath,
+      host: { platform: "darwin" as const, architecture: process.arch, offline: false },
+    });
+    const raceOptions = bootstrapFor(
+      raceRoot,
+      raceDeclaration,
+      join(evidence, "initial-race.json"),
+    );
+    const sentinelOptions = bootstrapFor(
+      sentinelRoot,
+      sentinelDeclaration,
+      join(evidence, "initial-sentinel.json"),
+    );
+    const initialRace = await sdlc.bootstrap(raceOptions);
+    const initialSentinel = await sdlc.bootstrap(sentinelOptions);
+    expect(initialRace.status).toBe("succeeded");
+    expect(initialSentinel.status).toBe("succeeded");
+    expect(initialRace.stateKey).not.toBe(initialSentinel.stateKey);
+
+    const runner = join(evidence, "bootstrap-child.mjs");
+    writeFileSync(
+      runner,
+      `import {readFileSync} from "node:fs"; import * as sdlc from ${JSON.stringify(PUBLIC_PACKAGE)}; const options=JSON.parse(readFileSync(process.argv[2], "utf8")); const receipt=await sdlc.bootstrap(options); process.stdout.write(JSON.stringify({status:receipt.status,stateKey:receipt.stateKey}));\n`,
+    );
+    const referencePath = join(
+      stateRoot,
+      "references",
+      `${sdlc.digest({ consumer: raceDeclaration.project, consumerRoot: realpathSync(raceRoot) }).slice("sha256:".length)}.json`,
+    );
+    const waitFor = (child: ReturnType<typeof spawn>) =>
+      new Promise<Readonly<{ status: number | null; stderr: string }>>((resolve) => {
+        let stderr = "";
+        child.stderr?.setEncoding("utf8");
+        child.stderr?.on("data", (value) => { stderr += value; });
+        child.once("exit", (status) => resolve({ status, stderr }));
+      });
+    const references = join(stateRoot, "references");
+    const sentinelIdentity = filesystemIdentity(join(stateRoot, initialSentinel.stateKey));
+    for (let index = 0; index < 5_000; index += 1) {
+      const value = {
+        schema: "tc.sdlc/bootstrap-reference/v1",
+        owner: "@three-cubes/tc-sdlc",
+        consumer: `lock-holder-${index}`,
+        consumerRoot: `/private/tmp/tc-sdlc-lock-holder-${index}`,
+        currentStateKey: initialSentinel.stateKey,
+        currentStateIdentity: sentinelIdentity,
+      };
+      const name = `${sdlc.digest({ consumer: value.consumer, consumerRoot: value.consumerRoot }).slice("sha256:".length)}.json`;
+      writeFileSync(join(references, name), sdlc.canonicalJson(value));
+    }
+    rmSync(referencePath, { force: true });
+    const statePath = join(stateRoot, initialRace.stateKey);
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(statePath, old, old);
+
+    const bootstrapReceipt = join(evidence, "race-bootstrap.json");
+    const optionsPath = join(evidence, "race-options.json");
+    writeFileSync(
+      optionsPath,
+      JSON.stringify({ ...raceOptions, receiptPath: bootstrapReceipt }),
+    );
+    const maintenanceReceipt = join(evidence, "race-maintenance.json");
+    const maintenanceChild = spawn(
+      process.execPath,
+      [
+        CLI,
+        "maintain",
+        "--state-root", stateRoot,
+        "--temporary-root", temporaryRoot,
+        "--receipt", maintenanceReceipt,
+        "--mode", "apply",
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    const maintenanceExitPromise = waitFor(maintenanceChild);
+    const stateParent = dirname(statePath);
+    let quarantinePath: string | undefined;
+    const deadline = Date.now() + 30_000;
+    while (quarantinePath === undefined && Date.now() < deadline) {
+      quarantinePath = readdirSync(stateParent)
+        .find((name) => name.startsWith(".tc-sdlc-quarantine-"));
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    expect(quarantinePath).toBeDefined();
+    expect(maintenanceChild.kill("SIGSTOP")).toBe(true);
+    expect(existsSync(join(stateParent, quarantinePath!))).toBe(true);
+
+    const bootstrapChild = spawn(process.execPath, [runner, optionsPath], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    const bootstrapExit = await waitFor(bootstrapChild);
+    expect(bootstrapExit.stderr).toBe("");
+    expect(bootstrapExit.status).toBe(0);
+    expect(JSON.parse(readFileSync(bootstrapReceipt, "utf8"))).toMatchObject({
+      schema: "tc.sdlc/bootstrap-receipt/v1",
+      status: "succeeded",
+      stateKey: initialRace.stateKey,
+    });
+    expect(maintenanceChild.kill("SIGCONT")).toBe(true);
+    const maintenanceExit = await maintenanceExitPromise;
+    expect(maintenanceExit.stderr).toBe("");
+    expect(maintenanceExit.status).toBe(0);
+    expect(JSON.parse(readFileSync(maintenanceReceipt, "utf8"))).toMatchObject({
+      schema: "tc.sdlc/maintenance-receipt/v1",
+      status: "succeeded",
+    });
+    const reference = JSON.parse(readFileSync(referencePath, "utf8"));
+    expect(existsSync(join(stateRoot, reference.currentStateKey, "state.json"))).toBe(true);
+    expect(reference.currentStateIdentity).toEqual(
+      filesystemIdentity(join(stateRoot, reference.currentStateKey)),
+    );
+  }, 180_000);
+
   test("producer advances A to B to C and maintenance expires only unreferenced A", async () => {
     expect(process.platform).toBe("darwin");
     const root = mkdtempSync(join(tmpdir(), "tc-sdlc-reference-journey-"));
@@ -113,12 +262,19 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(new Set(states).size).toBe(3);
     const referenceFiles = readdirSync(join(stateRoot, "references"));
     expect(referenceFiles).toHaveLength(1);
-    expect(
-      JSON.parse(readFileSync(join(stateRoot, "references", referenceFiles[0]!), "utf8")),
-    ).toMatchObject({
+    const finalReference = JSON.parse(
+      readFileSync(join(stateRoot, "references", referenceFiles[0]!), "utf8"),
+    );
+    expect(finalReference).toMatchObject({
       currentStateKey: states[2],
       predecessorStateKey: states[1],
     });
+    expect(finalReference.currentStateIdentity).toEqual(
+      filesystemIdentity(join(stateRoot, states[2]!)),
+    );
+    expect(finalReference.predecessorStateIdentity).toEqual(
+      filesystemIdentity(join(stateRoot, states[1]!)),
+    );
     const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
     for (const state of states) utimesSync(join(stateRoot, state), old, old);
     const maintained = await sdlc.maintain({
@@ -130,6 +286,10 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(maintained.candidates).toContainEqual(
       expect.objectContaining({ kind: "bootstrap-state", path: states[0] }),
     );
+    expect(maintained.retained).toEqual(expect.arrayContaining([
+      { path: states[1], reason: "referenced" },
+      { path: states[2], reason: "referenced" },
+    ]));
     expect(existsSync(join(stateRoot, states[0]!))).toBe(false);
     expect(existsSync(join(stateRoot, states[1]!))).toBe(true);
     expect(existsSync(join(stateRoot, states[2]!))).toBe(true);
