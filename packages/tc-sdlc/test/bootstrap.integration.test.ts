@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { expect, test } from "vitest";
@@ -21,6 +21,33 @@ function canonical(value: unknown): string {
   const keys = new Set<string>();
   JSON.stringify(value, (key, child: unknown) => { keys.add(key); return child; });
   return `${JSON.stringify(value, [...keys].sort(), 2)}\n`;
+}
+
+function directoryArtifactDigest(root: string): string {
+  const rootMetadata = lstatSync(root);
+  expect(rootMetadata.isDirectory()).toBe(true);
+  expect(rootMetadata.isSymbolicLink()).toBe(false);
+  const entries: Record<string, unknown>[] = [
+    { path: ".", type: "directory", mode: rootMetadata.mode & 0o7777 },
+  ];
+  const visit = (directory: string, prefix: string): void => {
+    for (const name of readdirSync(directory).sort()) {
+      const path = join(directory, name);
+      const relativePath = prefix === "" ? name : posix.join(prefix, name);
+      const metadata = lstatSync(path);
+      if (metadata.isSymbolicLink()) {
+        entries.push({ path: relativePath, type: "symlink", target: readlinkSync(path) });
+      } else if (metadata.isDirectory()) {
+        entries.push({ path: relativePath, type: "directory", mode: metadata.mode & 0o7777 });
+        visit(path, relativePath);
+      } else {
+        expect(metadata.isFile()).toBe(true);
+        entries.push({ path: relativePath, type: "file", mode: metadata.mode & 0o7777, digest: hash(readFileSync(path)) });
+      }
+    }
+  };
+  visit(root, "");
+  return hash(canonical(entries));
 }
 
 function inventory(root: string): unknown[] {
@@ -208,6 +235,17 @@ test("the packed bootstrap command owns reproducible state and terminal receipts
     expect(lstatSync(launcher).isSymbolicLink()).toBe(false);
     expect(hash(readFileSync(launcher))).toBe(adapter.launcherDigest);
     expect(existsSync(adapter.executable)).toBe(true);
+    const independentlyObservedExecutableDigest = adapter.name === "pnpm" && adapter.provider === "catalogue-distribution"
+      ? directoryArtifactDigest(dirname(dirname(adapter.executable)))
+      : hash(readFileSync(adapter.executable));
+    expect(adapter.executableDigest).toBe(independentlyObservedExecutableDigest);
+    expect(adapter.adapterDigest).toBe(hash(canonical({
+      name: adapter.name,
+      version: adapter.version,
+      provider: adapter.provider,
+      executableDigest: independentlyObservedExecutableDigest,
+      launcherDigest: hash(readFileSync(launcher)),
+    })));
   }
   expect(JSON.parse(readFileSync(join(stateRoot, ".tc-sdlc-owner.json"), "utf8"))).toEqual({
     owner: "@three-cubes/tc-sdlc",
