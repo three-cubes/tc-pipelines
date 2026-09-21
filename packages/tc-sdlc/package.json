@@ -4,7 +4,7 @@
   "description": "The shared Three Cubes AI SDLC execution package.",
   "type": "module",
   "bin": {
-    "tc-sdlc": "dist/cli.js"
+    "tc-sdlc": "bin/tc-sdlc"
   },
   "exports": {
     ".": {
@@ -13,6 +13,7 @@
     }
   },
   "files": [
+    "bin",
     "dist"
   ],
   "scripts": {

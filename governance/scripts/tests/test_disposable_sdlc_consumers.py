@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -16,8 +17,8 @@ CONSUMERS = yaml.safe_load((ROOT / "assurance/fixtures/sdlc/consumers.yaml").rea
 PACKAGE_VERSION = json.loads((ROOT / "packages/tc-sdlc/package.json").read_text())["version"]
 
 
-def command(argv: list[str], cwd: Path, *, timeout: int = 300) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, cwd=cwd, text=True, capture_output=True, check=False, timeout=timeout)
+def command(argv: list[str], cwd: Path, *, env: dict[str, str] | None = None, timeout: int = 300) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(argv, cwd=cwd, env=env, text=True, capture_output=True, check=False, timeout=timeout)
 
 
 @pytest.fixture(scope="session")
@@ -37,18 +38,35 @@ def installed_cli(tarball: Path, root: Path) -> Path:
     runner = root / "runner"
     runner.mkdir()
     (runner / "package.json").write_text('{"private":true,"packageManager":"pnpm@11.22.0"}\n')
-    installed = command(["pnpm", "add", f"file:{tarball}"], runner)
+    store = root / "runner-pnpm-store"
+    runner_home = root / "runner-home"
+    environment = {
+        **os.environ,
+        "HOME": str(runner_home),
+        "XDG_CONFIG_HOME": str(runner_home / "config"),
+        "XDG_CACHE_HOME": str(runner_home / "cache"),
+        "XDG_DATA_HOME": str(runner_home / "data"),
+        "XDG_STATE_HOME": str(runner_home / "state"),
+        "PNPM_HOME": str(runner_home / "pnpm"),
+    }
+    installed = command(["pnpm", "add", "--store-dir", str(store), f"file:{tarball}"], runner, env=environment)
     assert installed.returncode == 0, installed.stdout + installed.stderr
     runner_lock = (runner / "pnpm-lock.yaml").read_text()
     assert "@three-cubes/tc-sdlc" in runner_lock
     assert tarball.name in runner_lock
+    assert "ajv@8.20.0" in runner_lock
+    assert "yaml@2.9.1" in runner_lock
+    assert store.is_dir()
+    shutil.rmtree(runner / "node_modules")
+    replayed = command(["pnpm", "install", "--offline", "--frozen-lockfile", "--store-dir", str(store)], runner, env=environment)
+    assert replayed.returncode == 0, replayed.stdout + replayed.stderr
     cli = runner / "node_modules/.bin/tc-sdlc"
     assert cli.is_file()
     return cli
 
 
-def invoke(cli: Path, consumer: Path, *arguments: str, timeout: int = 300) -> subprocess.CompletedProcess[str]:
-    return command([str(cli), *arguments], consumer, timeout=timeout)
+def invoke(cli: Path, consumer: Path, *arguments: str, env: dict[str, str] | None = None, timeout: int = 300) -> subprocess.CompletedProcess[str]:
+    return command([str(cli), *arguments], consumer, env=env, timeout=timeout)
 
 
 def exercise(tmp_path: Path, packed_cli: Path, spec: dict[str, object], *, shadow: bool = False) -> tuple[Path, dict[str, object]]:
@@ -105,3 +123,16 @@ def test_packed_cli_executes_locked_disposable_consumers(tmp_path: Path, packed_
 def test_packed_cli_prefers_locked_state_over_local_node_shadowing(tmp_path: Path, packed_cli: Path) -> None:
     spec = next(spec for spec in CONSUMERS if spec["id"] == "pnpm")
     exercise(tmp_path, packed_cli, spec, shadow=True)
+
+
+def test_packed_cli_clears_hostile_outer_node_preload(tmp_path: Path, packed_cli: Path) -> None:
+    cli = installed_cli(packed_cli, tmp_path)
+    marker = tmp_path / "hostile-preload-ran"
+    preload = tmp_path / "hostile-preload.cjs"
+    preload.write_text(f"require('node:fs').writeFileSync({marker.as_posix()!r}, 'executed');\n")
+    catalogue = tmp_path / "release-catalogue.json"
+    environment = {**os.environ, "NODE_OPTIONS": f"--require={preload}"}
+    result = invoke(cli, tmp_path, "catalogue", "--version", PACKAGE_VERSION, "--workflow-commit", "0" * 40, "--image-digest", "sha256:" + "0" * 64, "--output", str(catalogue), env=environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert catalogue.is_file()
+    assert not marker.exists(), "ambient NODE_OPTIONS preload executed before the public CLI"

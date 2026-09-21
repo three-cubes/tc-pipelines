@@ -1,0 +1,5 @@
+#!/bin/sh
+unset NODE_OPTIONS NODE_PATH
+unset TC_SDLC_NODE_LAUNCHER TC_SDLC_NODE_LOADER TC_SDLC_NODE_MODULES
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec node "$script_dir/../dist/cli.js" "$@"
