@@ -381,6 +381,129 @@ image end-to-end execution and amd64 image runtime/tool smoke pass. This report
 does not misrepresent the failed QEMU-only full bootstrap as amd64 hardware
 qualification; hosted amd64 execution remains Task 6 evidence.
 
+## Developer-environment lifecycle follow-up
+
+Commit `4b93868d8bd60be1419dc7c140db27dbd8d27e69` adds the
+developer-side lifecycle boundary without taking ownership of deployment
+cleanup. The public `maintain` API and built `tc-sdlc maintain` command require
+the exact bootstrap state-owner marker and emit an atomic canonical
+`tc.sdlc/maintenance-receipt/v1`. The caller must explicitly select the
+non-mutating dry-run or apply mode; apply uses the same plan. The default
+retention window is 48 hours.
+
+Temporary cleanup considers only direct children with the `tc-sdlc-` prefix,
+an exact temporary-owner marker and a recognised lifecycle kind. It retains
+recent, live-PID, dirty-worktree, linked, foreign and inspection-failed paths.
+Eligibility is checked again immediately before removal. Independent eligible
+roots are removed by a bounded asynchronous pool (default four, maximum
+sixteen); the receipt records `cleanupWorkers`, `cleanupFailures`, bounded
+entries and truncation. It does not recursively chmod files. A behavioural
+fixture proves six independent roots containing read-only files are removed
+with two workers, while seventeen workers reject before mutation.
+
+Evaluation workspaces now carry the same owner marker and retain their existing
+deterministic disposal. Vitest uses one owner-marked run root, isolated worker
+roots and an asynchronous `afterEach`/`afterAll` teardown, so complete copied
+fixtures do not accumulate into later generations. The outer marker remains a
+crash-recovery boundary for `maintain`. Post-suite probes repeatedly observed
+zero `tc-sdlc-test-run-*` or `tc-sdlc-worker-*` roots.
+
+uv maintenance invokes the caller-supplied immutable executable through
+`uv cache prune --cache-dir` with config disabled and rejects linked managed
+cache paths. BuildKit maintenance invokes a caller-supplied `docker-buildx`
+executable only for a `tc-sdlc-*` builder stored in the owned state root's
+`DOCKER_CONFIG`; it uses the 48-hour filter and measures disk use before and
+after. It never invokes Docker volume or image pruning and never selects the
+ambient/default builder. These contracts are the same on Darwin and Linux;
+the platform is explicit in the receipt and `/usr/bin/git` is the fixed
+worktree inspection prerequisite.
+
+### Lifecycle RED and GREEN evidence
+
+Initial built-public RED:
+
+```text
+Test Files  1 failed (1)
+Tests       4 failed (4)
+- maintain is not a function (three public API cases)
+- built CLI rejects maintain as an unknown command
+```
+
+The operational cleanup finding then produced a second explicit RED after the
+serial implementation:
+
+```text
+Test Files  1 failed (1)
+Tests       1 failed | 6 passed (7)
+- six owned roots were removed, but the receipt lacked cleanupWorkers: 2
+```
+
+Final focused evidence:
+
+```text
+pnpm --filter @three-cubes/tc-sdlc build
+pnpm --filter @three-cubes/tc-sdlc exec vitest run \
+  test/maintenance.test.ts test/maintenance-docker.integration.test.ts
+
+Test Files  2 passed (2)
+Tests       8 passed (8)
+```
+
+The seven portable tests exercise dry-run non-mutation, 48-hour expiry,
+bounded receipts, active/dirty/recent/foreign/symlink/wrong-kind retention,
+foreign and linked state, unowned builders, worker-limit rejection, read-only
+fixture cleanup, real uv prune plus linked-cache sabotage, failing-task
+workspace disposal, and the built CLI. The integration test creates and boots
+a real dedicated Buildx builder in managed `DOCKER_CONFIG`, prunes it through
+the public API and removes it in `finally`.
+
+Final broad evidence:
+
+```text
+pnpm --filter @three-cubes/tc-sdlc test
+7 files, 119 tests passed
+
+pnpm --filter @three-cubes/tc-sdlc test:integration:darwin
+1 file, 6 tests passed
+
+docker buildx build --platform linux/arm64 --target package-tests \
+  --file images/sdlc/Dockerfile .
+7 files, 119 tests passed, including real uv prune; exit 0
+
+uv run --no-sync pytest -q --basetemp <isolated-owned-root>
+1974 passed; exit 0
+
+TMPDIR=<isolated-owned-root> uv run --no-sync tc-fitness run
+1974 passed; contract-tests, actionlint, yamllint, licence and branch naming
+all PASS; 5 ran, 0 skipped; exit 0
+
+pnpm install --frozen-lockfile
+Already up to date; exit 0
+```
+
+The first Python invocation reached 100% but did not reach a terminal result:
+pytest was deleting historical numbered temp generations during
+`pytest_sessionfinish`. It was interrupted and is not counted as passing
+evidence. The isolated-basetemp rerun above reached exit 0 and its explicit
+root was then removed. This matches the lifecycle defect rather than hiding it.
+
+Packing and cleanup evidence:
+
+```text
+pnpm --filter @three-cubes/tc-sdlc pack --pack-destination <isolated-root>
+npm install --ignore-scripts --prefix <empty-consumer> <tarball>
+public probe: {"maintain":1,"serialiseMaintenanceReceipt":1}
+git diff --check: exit 0
+```
+
+All pack, pytest and fitness scratch roots were removed. The three explicit
+dangling package-test images created during Linux verification were deleted and
+can be reproduced from the Dockerfile. No maintenance Buildx container or
+owned test root remained. The existing immutable release catalogue still binds
+the previously published `0ae8c5e` source and `edd6` image; this follow-up did
+not fabricate a replacement release. A future release must rebuild the image
+and render a new catalogue entry before distributing this command.
+
 ## Commits
 
 - `3774e78` — explicit host/canonical-image bootstrap, dependencies, image and
@@ -400,6 +523,8 @@ qualification; hosted amd64 execution remains Task 6 evidence.
   installed execution modes;
 - `3798bdd` — regenerate the immutable catalogue and Dev Container for source
   `0ae8c5e` and the verified `edd6` OCI index.
+- `4b93868` — add owner-scoped developer maintenance, bounded cleanup and
+  deterministic test lifecycle.
 
 Earlier Task 5 coordination commits remain in history. All Task 5 commits are
 authored by `three-cubes-agent[bot]`. `docs/IMPLEMENTATION.md` was not edited.
@@ -410,7 +535,7 @@ All findings from the independent reviews are addressed in production
 behavior and built-public tests. Task 1-4 package behavior and the exact
 two-argument `buildGraph` API remain intact. The worktree contains no
 package-local lock, untracked release placeholder or simulated toolchain. No
-known implementation blocker remains; the explicit remaining evidence
-limitation is amd64 hosted hardware qualification, which belongs to Task 6
-rather than this local arm64
-workstation.
+known implementation blocker remains. The explicit remaining evidence
+limitations are amd64 hosted hardware qualification, which belongs to Task 6,
+and the next-release rebuild/catalogue binding for the lifecycle follow-up;
+the immutable published Task 5 catalogue was deliberately not rewritten.
