@@ -4,35 +4,37 @@ Date: 2026-09-21
 
 ## Outcome
 
-Implemented the native-bootstrap and immutable-catalogue-generation first slice
-of Tranche 2 Task 5 on the independently approved Task 4 foundation at
-`6bff6ae`.
+Task 5 is implemented from approved Task 4 foundation `6bff6ae`. The previous
+PATH-discovery/copied-executable design was removed after independent review.
+The implemented boundary is now:
 
-The slice adds:
+- macOS uses explicit architecture-specific Homebrew prerequisites from the
+  fixed Homebrew prefix and formula Cellars. Node 24, Python 3.13 and pnpm
+  11.22.0 are probed from those fixed locations. Homebrew uv is only the
+  installer for the complete catalogue-hashed uv 0.12.5 wheel environment;
+- Linux bootstrap is accepted only inside the catalogue-selected canonical
+  image, proven by `/etc/tc-sdlc-release.json` plus fixed `/usr/local/bin`
+  executables. An arbitrary host `PATH` is never capability authority;
+- the release-owned environment is materialised below an explicit state root
+  outside the checkout. pnpm and uv install from the checked-in frozen locks,
+  and neither `node_modules` nor `.venv` is written into the checkout;
+- `images/sdlc/Dockerfile` builds the non-root canonical image for both
+  `linux/amd64` and `linux/arm64`; package compilation runs on `BUILDPLATFORM`
+  while the final toolchains are built for each target architecture;
+- generated `.devcontainer/devcontainer.json` and `release/catalogue.json`
+  select a real immutable multi-platform image digest; and
+- native macOS and native arm64 canonical-image execution report the same
+  release, lock digest, task identity, dependency-lock identities and exact
+  toolchain versions.
 
-- a public `bootstrap(options)` library API and `tc-sdlc bootstrap` CLI command;
-- explicit caller-owned state roots, with no implicit `HOME` state;
-- normal public host capability input for deterministic platform, architecture,
-  `PATH` and offline behaviour;
-- macOS and Linux capability discovery for catalogue-declared Node, pnpm,
-  Python and uv versions;
-- owned, verified executable copies and launchers that continue to work after
-  the discovery `PATH` and original host executables disappear;
-- canonical graph planning from a recomputed lock-bound filesystem inventory;
-- bounded canonical atomic bootstrap receipts;
-- canonical atomic release-catalogue generation from immutable workflow commit
-  and OCI digest inputs; and
-- coordinated `three-cubes-fitness` 0.17.0 authority at immutable commit
-  `73d7ffc4b563849edcd607b377fbb3ee4ba6da32`.
+The coordinated release is `3.0.0`. It binds source commit
+`4078c28d5680eff3c8fd2264256ad91c1ec28fea` and OCI index digest
+`sha256:73decf541ad1a15dda01b451b64c6da5b0d58b666898fdf3b7052f187141bb93`.
+Nothing was pushed or published.
 
-No final `release/catalogue.json`, release number, image digest or published
-artefact was invented. The existing package metadata version remains a build
-input only; the generator requires an explicit release candidate version and
-the behavioural fixtures use `3.0.0` rather than silently reusing `2.2.0`.
-Canonical OCI/Dev Container construction and publication remain outside this
-first slice.
+## Public contracts and authorities
 
-## Public contracts
+The built package exports:
 
 ```ts
 bootstrap(options: BootstrapOptions): Promise<BootstrapReceipt>
@@ -41,203 +43,217 @@ generateReleaseCatalogue(input: ReleaseCatalogueGeneration): ReleaseCatalogue
 writeReleaseCatalogue(path: string, catalogue: ReleaseCatalogue): void
 ```
 
-`BootstrapOptions.stateRoot` is required and must be an absolute path outside
-the checkout. `BootstrapOptions.host` is the ordinary injectable environment
-adapter; production defaults use `process.platform`, `process.arch` and
-`process.env.PATH`. No test-only seam or hidden home-directory default exists.
+`BootstrapHost` contains only `platform`, `architecture` and `offline`; it has
+no injectable PATH. `BootstrapOptions.stateRoot` is an explicit absolute path
+outside the checkout. `BootstrapDependencyEvidence` binds manager, lock digest,
+manifest digest and the state-owned environment path.
 
-`CANONICAL_SDLC_TOOLCHAINS` exports Node `24`, pnpm `11.22.0`, Python `3.13`
-and uv `0.12.5`. `CANONICAL_SDLC_FITNESS` exports the coordinated
-`three-cubes-fitness` version `0.17.0`.
+Canonical versions are Node 24 (image patch 24.21.0), pnpm 11.22.0, Python
+3.13 (image patch 3.13.15), uv 0.12.5 and `three-cubes-fitness` 0.17.0 at
+immutable commit `73d7ffc4b563849edcd607b377fbb3ee4ba6da32`.
 
-## Design decisions
+## Review finding remediation
 
-### State ownership and integrity
+### 1. No trust learned from arbitrary PATH
 
-The caller selects a dedicated state root. Bootstrap rejects relative roots,
-roots inside the checkout, root or nested state symlinks, non-directory roots,
-foreign non-empty roots and mismatched ownership markers. It does not read or
-derive state from `HOME`.
+macOS capability locations are fixed by architecture (`/opt/homebrew` on
+arm64, `/usr/local` on x64), resolved through the `node@24`, `python@3.13` and
+`uv` formula Cellars, probed for declared versions and content-digested into
+the state receipt. Linux accepts only the canonical image marker and fixed
+image paths. The former `host.path` contract was deleted.
 
-Each lock/platform/architecture state is materialised into a unique staging
-directory and atomically renamed into its final immutable key. Existing partial
-state is rejected without repair. Warm-state validation recomputes canonical
-manifest, executable, launcher and adapter digests and rejects corruption.
+### 2. No copied lone executables
 
-Discovered host executables are copied into the owned release state, reprobed
-there and executed only through launchers that bind the owned tool directory.
-Warm offline bootstrap therefore does not trust a second read from the original
-host path and remains usable when that path is empty or the original tools have
-been deleted.
+Bootstrap does not copy Node, pnpm, Python or uv binaries. State launchers bind
+the validated complete Homebrew/image installations. On macOS the complete uv
+0.12.5 wheel is fetched from the catalogue URL, SHA-256 checked, installed into
+a state-owned virtual environment and reprobed. The catalogue has a separate
+real PyPI wheel URL and digest for darwin/linux x arm64/x64.
 
-### Planning and evidence
+### 3. Canonical image, Dev Container and catalogue
 
-Every bootstrap invocation calls `assertCurrentLock`, resolves the canonical
-content inventory, calls `bindGraphLock` and then the exact two-argument
-`buildGraph`. Task identities therefore bind the same canonical content inputs
-as preparation and evaluation. Checkout location, platform and architecture do
-not enter task identity; one-byte input changes do.
+The image uses digest-pinned Python 3.13.15 and uv 0.12.5 bases, SHA-256-pinned
+official Node 24.21.0 archives for both architectures and exact pnpm 11.22.0.
+It installs the packed `@three-cubes/tc-sdlc` 3.0.0 package and runs as UID
+1000. `generate-release.mjs` rejects unresolved refs, moving image refs,
+nonexistent commits and the old 2.2.0 version before atomically rendering both
+release files.
 
-Receipts contain release, lock digest, platform, architecture, state key,
-adapter digests, task identities and bounded diagnostics. They contain neither
-absolute state paths nor discovery paths and are written through the existing
-fsync-and-rename canonical evidence writer.
+The real two-architecture OCI build produced:
 
-### Catalogue generation
+```text
+linux/amd64 manifest sha256:d991e0480a18221dd21e31308fdc16b2a50fb243896f5498ed250a0c0d0b737f
+linux/arm64 manifest sha256:a4b127fb12c2bdc5f765a32ae59de2a7fa3b8c7ea98855f8a41b4a61ad3f21f7
+manifest list sha256:73decf541ad1a15dda01b451b64c6da5b0d58b666898fdf3b7052f187141bb93
+```
 
-`generateReleaseCatalogue` takes an explicit semantic release version, exact
-40-character workflow commit and exact `sha256:` OCI digest. Schema validation
-rejects branch names, tags used as workflow refs, mutable image tags,
-placeholders and incomplete entries. Package, schema, fitness and toolchain
-authorities are emitted together, then `writeReleaseCatalogue` validates again
-before an atomic canonical write.
+The Dev Container and release catalogue both contain the manifest-list digest.
+The release catalogue also binds package, workflow commit, schemas, fitness,
+toolchains and bootstrap distribution provenance as one entry.
 
-This generator is available through `tc-sdlc catalogue`; the implementation and
-tests write only temporary catalogues and do not fabricate the repository's
-final release catalogue.
+### 4. Frozen dependency materialisation
+
+Bootstrap discovers `pnpm-lock.yaml`/`package.json` and
+`uv.lock`/`pyproject.toml` pairs. It binds both lock and manifest digests into
+the state key, copies the pnpm manifest and lock into managed state before a
+frozen install, and directs uv's project environment into managed state.
+Installed `yaml==2.9.1` and `attrs==26.1.0` are executed in both native and
+canonical-image verification. Warm offline reuse validates the state and a
+manifest-only change cannot reuse the old environment.
+
+### 5. One executable remediation command
+
+Every missing-prerequisite failure contains exactly one diagnostic and one
+command:
+
+- macOS: one `/bin/bash -lc` command installs the three Homebrew formulae and
+  exact pnpm 11.22.0;
+- Linux: one `docker pull ghcr.io/three-cubes/tc-sdlc@sha256:...` command uses
+  the catalogue digest.
+
+The macOS command is shell-syntax checked and the Linux executable is proven
+available in the behavioural suite.
+
+## State, evidence and planning invariants
+
+- State roots must be absolute, outside the checkout, non-symlinked and either
+  empty or marked by the canonical ownership record. Foreign and partial state
+  fail closed.
+- Nested symlink traversal is rejected. Completion `state.json` is the last
+  materialisation write; receipt writes use the existing canonical fsync and
+  rename path.
+- Warm reuse reprobes host prerequisites, checks launcher, executable and
+  adapter digests, exact state bindings and dependency environment presence.
+- Bootstrap calls `assertCurrentLock`, the canonical input resolver,
+  `bindGraphLock`, and the exact two-argument `buildGraph`. There is no second
+  lock, input or graph implementation.
+- Receipts are canonical, bounded and omit HOME, absolute state paths, process
+  output and discovered host paths.
 
 ## TDD evidence
 
-All tests import the built `dist/index.js` package or execute the built CLI and
-use real executable files, process boundaries and filesystem state. No mock,
-monkeypatch, source-form assertion, test-only seam, baseline, suppression or
-threshold reduction was introduced.
-
-Initial bootstrap RED:
+Initial review RED against the built package:
 
 ```text
-pnpm --filter @three-cubes/tc-sdlc build
-pnpm --filter @three-cubes/tc-sdlc exec vitest run test/bootstrap.test.ts
+test/bootstrap-review.test.ts: 0/2 passed
+- arbitrary Linux PATH produced PATH-derived capability failures instead of
+  the canonical-image remediation;
+- real Homebrew bootstrap observed host uv 0.12.15 rather than materialising
+  the exact catalogue-owned uv 0.12.5 environment.
 ```
 
-Exit 1: 0/5 passed. The public `bootstrap` export did not exist and the built
-CLI rejected `bootstrap` as an unknown command.
+The first GREEN was 4/4 against real Homebrew and the built CLI. Dependency
+isolation sabotage then exposed a real defect: pnpm installed the dependency
+but also wrote workspace metadata in the checkout, and a later container run
+mistook that metadata for completed state. A new public regression asserted no
+checkout `node_modules`/`.venv`, actual dependency execution and manifest-bound
+state. It failed before the state-owned-manifest change and now passes. A fifth
+test covers schema-level version sabotage and the macOS remediation command.
 
-Incremental bootstrap GREEN reached 5/5. Additional sabotage then produced a
-focused 3/5 RED: warm state failed after original host tools were removed and a
-nested `releases` symlink was followed. Managed executable copies and
-component-wise symlink rejection returned the suite to 5/5.
-
-Catalogue-generation RED:
+Final built-public focused result:
 
 ```text
-pnpm --filter @three-cubes/tc-sdlc exec vitest run \
-  test/catalogue-generation.test.ts
+Test Files  1 passed (1)
+Tests       5 passed (5)
 ```
 
-Exit 1: generation and CLI boundaries were absent. GREEN: 5/5, including
-moving workflow ref, moving image tag and unresolved-ref rejection before any
-output write.
-
-The built-public sabotage suite covers:
-
-- trap `HOME` with a real file;
-- missing and wrong `PATH` capabilities;
-- warm offline and cold offline behaviour;
-- removal of all originally discovered host executables;
-- exact version mismatch;
-- foreign, symlinked, nested-symlinked and in-checkout state;
-- corrupted launcher and missing state manifest without automatic repair;
-- stale lock rejection;
-- bounded diagnostic count and truncation evidence;
-- deterministic task identity across checkout, host platform and architecture;
-- task-identity change on content change;
-- canonical receipt bytes and runnable managed launchers; and
-- unresolved or moving release catalogue inputs.
+The suite covers arbitrary PATH, trap HOME, real Homebrew provenance, exact
+catalogue uv, cold/warm offline behaviour, dependency execution, launcher
+corruption, manifest drift, foreign/symlink/in-checkout state, stale lock,
+canonical receipt bytes, exact version constraints and both remediation
+commands. Catalogue tests cover moving/unresolved refs and atomic output.
 
 ## Verification
 
-Focused and complete package:
+Package build, complete tests and frozen pnpm lock:
 
 ```text
 pnpm --filter @three-cubes/tc-sdlc build
 pnpm --filter @three-cubes/tc-sdlc test
+pnpm install --frozen-lockfile
+
+6 files passed; 112 tests passed; lock already up to date; exit 0.
 ```
 
-Exit 0: 6 files and 112 tests passed, preserving every Task 1–4 contract.
-
-Frozen locks:
+Canonical image:
 
 ```text
-corepack pnpm install --frozen-lockfile
-git diff --exit-code -- pnpm-lock.yaml uv.lock
+docker buildx build --platform linux/amd64,linux/arm64 --output type=oci,...
+exit 0; real manifest list digest recorded above.
+
+arm64 image smoke: UID 1000, Node 24.21.0, pnpm 11.22.0,
+Python 3.13.15 and uv 0.12.5; exit 0.
+amd64 image smoke under QEMU: the same versions and built CLI; exit 0.
 ```
 
-Exit 0. The workspace was already current and both locks remained unchanged.
+`images/sdlc/verify.mjs` executed a fresh native macOS bootstrap and a fresh
+arm64 canonical-image bootstrap, ran installed Node and Python dependencies,
+then repeated the image bootstrap with networking disabled. Exit 0 with:
 
-Python suite:
+```text
+release 3.0.0
+lockDigest sha256:60cffc4857582a899250d151151ddbc50a2206b57769294eb928326677ef583b
+taskIdentity sha256:491f46293fa05e044a70337fb791e102336420dd6a076e51895ecde6896b94c1
+nativePlatform darwin
+imagePlatform linux
+```
+
+Python and repository fitness:
 
 ```text
 uv sync --frozen
 uv run --no-sync pytest -q
-```
+1974 passed, 9 pre-existing temporary-cleanup warnings, exit 0.
 
-The isolated worktree initially had no environment, so the first no-sync
-attempt terminated before collection because `pytest` was absent. After exact
-frozen hydration, the first full run exposed the stale direct-CI fitness-ref
-assertion: 1 failed and 1,973 passed. The focused parity regression then passed
-6/6 after requiring the approved immutable commit in both `pyproject.toml` and
-CI. Final result: exit 0, 1,974 passed in 81.25 seconds.
-
-Full repository fitness gate:
-
-```text
 uv run --no-sync tc-fitness run
+1974 passed; contract-tests, actionlint, yamllint, licence and branch naming
+all PASS; 5 ran, 0 skipped; exit 0.
 ```
 
-Exit 0: 1,974 tests passed in 109.88 seconds, followed by PASS for actionlint,
-yamllint, licence and branch naming; 5 ran and 0 skipped.
-
-Packed clean consumer:
+Packed consumer:
 
 ```text
-corepack pnpm --filter @three-cubes/tc-sdlc pack --pack-destination <temp>
-corepack pnpm --dir <empty-consumer> add <tarball>
+pnpm --filter @three-cubes/tc-sdlc pack --pack-destination <temp>
+npm install --ignore-scripts --prefix <empty-consumer> <tarball>
 node --input-type=module <public export probe>
 ```
 
-Exit 0. The tarball contains bootstrap declarations and JavaScript. A clean
-consumer imported all bootstrap/catalogue exports, generated a 0.17.0-bound
-catalogue, and confirmed `bootstrap/1`, preserved `buildGraph/2` and preserved
-`runGraph/3`.
+Exit 0. The clean consumer imported bootstrap and catalogue generation,
+confirmed `bootstrap/1`, preserved `buildGraph/2` and `runGraph/3`, and observed
+the coordinated fitness and package-manager versions.
 
-Diff and packaging audit:
+Release rendering was repeated with the exact source commit and image digest;
+the canonical files were unchanged. Public catalogue loading then proved the
+Dev Container image and environment values exactly match the release entry.
 
-```text
-git diff --check 6bff6ae..HEAD
-find packages -name pnpm-lock.yaml -print
-```
+## Emulation limitation
 
-Exit 0 without diff errors and no package-local lock exists.
+The complete amd64 bootstrap was additionally attempted under arm64 Docker
+QEMU. pnpm completed and materialised the requested dependency, then emulated
+Node 24 aborted in libuv with `uv__io_poll: Assertion errno == EEXIST` and left
+a QEMU core file. The same failure reproduced when the Docker build compiled
+the package under target-architecture emulation; moving architecture-neutral
+compilation to `BUILDPLATFORM` fixed the two-architecture build. Native arm64
+image end-to-end execution and amd64 image runtime/tool smoke pass. This report
+does not misrepresent the failed QEMU-only full bootstrap as amd64 hardware
+qualification; hosted amd64 execution remains Task 6 evidence.
 
 ## Commits
 
-- `dcf31b3c79b45341e17288d510e2ba3511a6b522` — coordinate Python 3.13 and
-  immutable fitness 0.17.0 authorities;
-- `04cea980a443aec27f42e062d92502277b373aa2` — public native bootstrap and CLI;
-- `deedb62e0eb79642745ddfea95898949ae0c5879` — immutable catalogue generator;
-- `b55e1cdc5b8c883b4300d59309f0568bae8a794d` — owned executable snapshots and
-  nested symlink defence; and
-- `8174ddd2aa8a0a535a30b232d9865e92e99d4ace` — direct-CI fitness authority
-  parity.
+- `3774e78` — explicit host/canonical-image bootstrap, dependencies, image and
+  generators;
+- `4078c28` — native build-platform packaging for the multiarchitecture image;
+- `19842e9` — generated immutable release catalogue and Dev Container.
 
-All commits are authored by `three-cubes-agent[bot]`. The approved Task 4 source
-and controller-owned `docs/IMPLEMENTATION.md` were not edited.
+Earlier Task 5 coordination commits remain in history. All Task 5 commits are
+authored by `three-cubes-agent[bot]`. `docs/IMPLEMENTATION.md` was not edited.
 
 ## Self-review
 
-- Bootstrap consumes the current release catalogue and generated lock rather
-  than maintaining another version source.
-- Planner identities use the existing canonical lock/graph/input APIs; there is
-  no parallel graph implementation.
-- Managed launchers use the same owned bytes that warm validation hashes and
-  probes, closing discovery-path substitution and warm-offline drift.
-- State writes are outside the checkout, owned, staged and atomic; existing or
-  suspicious state fails closed.
-- Catalogue generation requires immutable inputs and does not publish or imply
-  a final release.
-- Task 1–4 public arities and behaviour remain unchanged.
-
-No known blocker remains for independent review of this first slice. The
-canonical image, Dev Container digest selection and final release-catalogue
-publication remain explicitly deferred until their real built artefacts exist.
+All five independent-review findings are addressed in production behavior and
+built-public tests. Task 1-4 package behavior and the exact two-argument
+`buildGraph` API remain intact. The worktree contains no package-local lock,
+untracked release placeholder or simulated toolchain. No known implementation
+blocker remains; the explicit remaining evidence limitation is amd64 hosted
+hardware qualification, which belongs to Task 6 rather than this local arm64
+workstation.
