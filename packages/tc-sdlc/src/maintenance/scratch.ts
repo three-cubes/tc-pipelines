@@ -6,9 +6,9 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
-  rmSync,
+  rmdirSync,
 } from "node:fs";
-import { rm } from "node:fs/promises";
+import { rm, rmdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -76,14 +76,31 @@ function gitWorktrees(path: string): readonly string[] | undefined {
   return worktrees;
 }
 
+function isolatedGitEnvironment(): NodeJS.ProcessEnv {
+  return {
+    PATH: "/usr/bin:/bin",
+    HOME: "/nonexistent/tc-sdlc-maintenance",
+    LC_ALL: "C",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_OPTIONAL_LOCKS: "0",
+  };
+}
+
 function dirtyWorktree(path: string): boolean {
   const worktrees = gitWorktrees(path);
   if (worktrees === undefined || !validateExecutable(SYSTEM_GIT)) return true;
   for (const worktree of worktrees) {
-    const result = spawnSync(SYSTEM_GIT, ["status", "--porcelain", "--untracked-files=all"], {
-      cwd: worktree,
+    const result = spawnSync(SYSTEM_GIT, [
+      "-C",
+      worktree,
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+    ], {
       encoding: "utf8",
       timeout: 10_000,
+      env: isolatedGitEnvironment(),
     });
     if (result.status !== 0) return true;
     const dirty = result.stdout
@@ -254,7 +271,7 @@ export async function removeTemporaryCandidates(
         if (!sameIdentity(quarantine, candidate.identity)) {
           if (!existsSync(path)) {
             renameSync(quarantine, path);
-            rmSync(quarantineRoot, { recursive: true, force: true });
+            rmdirSync(quarantineRoot);
           }
           results[index] = {
             removed: false,
@@ -270,7 +287,7 @@ export async function removeTemporaryCandidates(
         peakWorkers = Math.max(peakWorkers, activeWorkers);
         try {
           await rm(quarantine, { recursive: true, force: false });
-          await rm(quarantineRoot, { recursive: true, force: false });
+          await rmdir(quarantineRoot);
         } finally {
           activeWorkers -= 1;
         }
@@ -278,7 +295,7 @@ export async function removeTemporaryCandidates(
       } catch {
         try {
           if (existsSync(quarantine) && !existsSync(path)) renameSync(quarantine, path);
-          if (!existsSync(quarantine)) rmSync(quarantineRoot, { recursive: false, force: true });
+          if (!existsSync(quarantine)) rmdirSync(quarantineRoot);
         } catch {
           // Both paths remain preserved for explicit operator inspection.
         }

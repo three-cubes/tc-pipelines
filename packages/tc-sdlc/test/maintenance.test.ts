@@ -348,16 +348,46 @@ describe("tc-sdlc managed lifecycle", () => {
     );
     writeFileSync(join(workspace, "tracked.txt"), "unsaved tracked bytes\n");
     writeFileSync(join(workspace, "untracked.txt"), "unsaved untracked bytes\n");
+    const decoy = temporary("tc-sdlc-maintenance-clean-decoy-");
+    execFileSync("git", ["init", "--quiet"], { cwd: decoy });
+    writeFileSync(join(decoy, "clean.txt"), "clean\n");
+    execFileSync("git", ["add", "clean.txt"], { cwd: decoy });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=Lifecycle Test",
+        "-c",
+        "user.email=lifecycle@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "clean decoy",
+      ],
+      { cwd: decoy },
+    );
     const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
     utimesSync(join(ownedRoot, ".tc-sdlc-temporary.json"), old, old);
     utimesSync(ownedRoot, old, old);
 
-    const receipt = await sdlc.maintain({
-      stateRoot,
-      temporaryRoot: parent,
-      receiptPath: join(evidence, "nested-worktree.json"),
-      mode: "apply",
-    });
+    const previousGitDirectory = process.env.GIT_DIR;
+    const previousGitWorkTree = process.env.GIT_WORK_TREE;
+    process.env.GIT_DIR = join(decoy, ".git");
+    process.env.GIT_WORK_TREE = decoy;
+    let receipt: sdlc.MaintenanceReceipt;
+    try {
+      receipt = await sdlc.maintain({
+        stateRoot,
+        temporaryRoot: parent,
+        receiptPath: join(evidence, "nested-worktree.json"),
+        mode: "apply",
+      });
+    } finally {
+      if (previousGitDirectory === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = previousGitDirectory;
+      if (previousGitWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+      else process.env.GIT_WORK_TREE = previousGitWorkTree;
+    }
 
     expect(receipt.retained).toContainEqual({
       path: "tc-sdlc-evaluation-dirty-workspace",

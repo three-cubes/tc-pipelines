@@ -5,9 +5,9 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
-  rmSync,
+  rmdirSync,
 } from "node:fs";
-import { rm } from "node:fs/promises";
+import { rm, rmdir } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative } from "node:path";
 
 import { canonicalJson, digest } from "../canonical.js";
@@ -233,7 +233,7 @@ export async function removeBootstrapStates(
         ) {
           if (!existsSync(path)) {
             renameSync(quarantine, path);
-            rmSync(quarantineRoot, { recursive: true, force: true });
+            rmdirSync(quarantineRoot);
           }
           results[index] = {
             removed: false,
@@ -251,7 +251,7 @@ export async function removeBootstrapStates(
         peakWorkers = Math.max(peakWorkers, activeWorkers);
         try {
           await rm(quarantine, { recursive: true, force: false });
-          await rm(quarantineRoot, { recursive: true, force: false });
+          await rmdir(quarantineRoot);
         } finally {
           activeWorkers -= 1;
         }
@@ -259,7 +259,7 @@ export async function removeBootstrapStates(
       } catch {
         try {
           if (existsSync(quarantine) && !existsSync(path)) renameSync(quarantine, path);
-          if (!existsSync(quarantine)) rmSync(quarantineRoot, { recursive: false, force: true });
+          if (!existsSync(quarantine)) rmdirSync(quarantineRoot);
         } catch {
           // Preserve both paths for operator inspection if restoration races.
         }
