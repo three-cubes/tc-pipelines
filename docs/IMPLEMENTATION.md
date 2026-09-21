@@ -45,6 +45,59 @@ legacy apply path.
   use separate PRs because each repository has an independent protected trunk.
 - Deletion follows proven parity and a recorded consumer inventory.
 
+## Definition of done and evidence status
+
+This ledger is the canonical progress view for the AI SDLC delivery. A row is
+`VERIFIED` only when its implementation is committed and its behavioural tests
+have passed against that commit. Work in another worktree, a successful probe,
+or a structural assertion does not complete a row.
+
+States:
+
+- `VERIFIED` — committed implementation plus terminal behavioural evidence;
+- `IN PROGRESS` — implementation or evidence is incomplete or not integrated;
+- `NOT STARTED` — depends on an earlier release boundary.
+
+### Foundation PR acceptance
+
+| ID | Acceptance criterion | State | Verified evidence | Remaining work |
+|---|---|---|---|---|
+| F1 | One versioned declaration, catalogue and generated lock reject stale or partial upgrades. | VERIFIED | Task 1 independently reviewed at `a64ddea`; public CLI and schema tests exercise validation and lock generation. | None. |
+| F2 | One deterministic graph computes dependency-closed affected work and stable task identities. | VERIFIED | Task 2 independently reviewed at `5029696`; graph tests cover downstream closure and identity invariants. | None. |
+| F3 | Resource-aware execution runs independent tasks concurrently and retains terminal diagnostics for failure, stall and cancellation. | VERIFIED | Task 3 independently reviewed at `227a7bb`; runtime tests exercise resource admission, process termination and terminal receipts. | None. |
+| F4 | Preparation is deterministic and reaches a fixed point; evaluation is read-only; reusable evidence is identity-bound. | VERIFIED | Task 4 independently reviewed at `ea61ca0`, `8aad84b` and `631422e`; preparation, evaluation, cache and sabotage tests pass. | None. |
+| F5 | Native macOS/Linux bootstrap owns exact Node, pnpm, Python and uv execution state without ambient user configuration. | VERIFIED | Bootstrap and lifecycle implementation through `896bd4c`; package suite 131/131, Darwin integration 19/19 and Docker lifecycle probes 2/2 passed. Independent review reproduced both final recovery regressions against the parent and passed the fixes. | None for the native bootstrap boundary. |
+| F6 | Concurrent bootstrap, state invalidation and maintenance preserve one valid current/predecessor state across crash, alias and replacement races. | IN PROGRESS | Reference publication and recovery are verified through `896bd4c`. | Integrate the shared kernel-held boundary for state materialisation; prove concurrent rebuild, crash recovery, path aliases, port collision and maintenance overlap without a durable check-then-unlink lock. |
+| F7 | Python-only, pnpm-only and mixed consumers use real locked dependencies through the packed public CLI. | IN PROGRESS | Fixture harness and execution-context binding exist on the Task 6 branch. | Replace dependency-free fixtures; install and invoke the packed CLI; generate an isolated catalogue; prove exact Python/pnpm dependency use and mixed downstream closure. |
+| F8 | `tc-fitness` `0.17.0` runs as a first-class graph task and a version mismatch is rejected. | IN PROGRESS | The coordinated version is declared in the implementation contract. | Add the real fixture target, retained receipt and version-sabotage journey. |
+| F9 | Native, canonical-image and hosted runs bind the same source, lock, input and task identities. | IN PROGRESS | The exact multi-platform image producer completed one local-registry qualification; that image-only proof is retained but is not release admission. | Run every disposable consumer on native and exact-image boundaries; add hosted identity evidence; parse terminal receipts and compare recomputed identities. |
+| F10 | Warm affected feedback is under 60 seconds and concurrency honours detected CPU and declared resources. | IN PROGRESS | Scheduler resource semantics are verified by Task 3. | Measure the retained consumer result rather than a self-reported value; prove one-core/multi-core determinism, maximum safe workers, observed peak concurrency and the hard warm-loop budget. |
+| F11 | The immutable amd64/arm64 image is published by digest with provenance, SBOM and installed-tool verification. | IN PROGRESS | The image-only producer published and re-used an exact local-registry index with both platform probes passing. | Integrate the reviewed producer; rerun the exact image proof after Task 6 and release-transport changes; retain cleanup results. |
+| F12 | The public `tc-sdlc qualify` command runs functional qualification and derives every claim from tracked fixtures and retained terminal evidence. | IN PROGRESS | Qualification requirements and receipt fields are defined below. | Implement the package-owned command and schema; recompute the fixture inventory; parse success, environment, producer and identity fields; bind named evidence files and derive timings; sabotage every boundary. |
+| F13 | Only a successful image plus functional qualification may generate the catalogue and Dev Container files. | IN PROGRESS | Unqualified tracked catalogue and Dev Container authority was removed at `318656a`; generation now requires both receipt inputs on the release branch. | Complete validator integration and prove failed, stale or altered inputs cannot create either output. |
+| F14 | A trusted bot writes exactly the two generated outputs to the unchanged PR head with an exact Git lease. | IN PROGRESS | Event selection, output allowlist, bot identity and lease-safe transport have focused tests on the release branch. | Integrate the workflow; verify immutable credential code, normal Git hooks, post-hook byte checks, early-failure evidence and real hosted writeback. |
+| F15 | All commands clean owned scratch and containers while retaining required release and failure evidence. | IN PROGRESS | Native lifecycle cleanup and recovery are verified through Task 5; image producer cleanup passed its local-registry run. | Assert registry, builder, container, image and state cleanup in the final exact-image journey and preserve referenced release artefacts. |
+| F16 | The consolidated branch passes the repository's complete local admission path with a clean worktree. | IN PROGRESS | Tasks 1–5 native slices have passing focused and package evidence. | Integrate Task 6 and release branches, then pass build, package tests, Darwin integration, Docker/image qualification, Python assurance, actionlint, diff check, `make check` and `make assurance all` on the exact head. |
+| F17 | PR CI evaluates that exact head once, retains terminal evidence and has no unresolved review conversations. | IN PROGRESS | PR #157 exists as the single foundation PR. Its remote head predates the accepted Task 5 work. | Push once after F6–F16 pass locally; resolve review findings; obtain green required checks and review. |
+
+The foundation PR is usable when F1–F17 are `VERIFIED`. A generated catalogue
+or Dev Container file by itself is not completion; both must be the output of
+the same successful image and functional qualification chain.
+
+### End-to-end adoption and production acceptance
+
+These rows start after the foundation release is published. They track the
+program outcome and are not hidden inside the foundation PR's completion claim.
+
+| ID | Acceptance criterion | State | Dependency |
+|---|---|---|---|
+| A1 | Publish the coordinated `tc-pipelines` release: package, immutable workflow commit, image digest, schemas and compatible `tc-fitness` version. | NOT STARTED | F1–F17. |
+| A2 | Adopt the released product in `tc-agent-zone` with one `sdlc.yaml`, one generated lock and stable Make entrypoints. | NOT STARTED | A1. |
+| A3 | Represent Python, pnpm, Go, generators, fitness and qualification journeys in the consumer graph; remove duplicate orchestration and duplicate post-merge evaluation after parity. | NOT STARTED | A2. |
+| A4 | Build a Hermes candidate once, harvest and bind current learning artefacts, and qualify the candidate before production mutation. | NOT STARTED | A3. |
+| A5 | Deploy the qualified digest, run product PVT, cut over, retain rollback authority and restore successor learning/state. | NOT STARTED | A4. |
+| A6 | Finish with terminal `KNOWN_GOOD` evidence, automated cleanup and a repeatable second release without tactical VM patches. | NOT STARTED | A5. |
+
 ## Tranche 1 — Product contract
 
 **Status:** in progress
@@ -331,12 +384,34 @@ canonical reference inventory exists, successful artefacts are retained.
 
 **Files**
 
+- `packages/tc-sdlc/src/qualification/` owns the versioned qualification
+  command, receipt schema and validation.
 - `assurance/fixtures/sdlc/` contains Python-only, pnpm-only and mixed-language
-  consumers.
-- `assurance/run.py` invokes the released CLI instead of compatibility command
-  arrays for these cases.
+  consumers used to exercise the public command.
+- `assurance/run.py` independently verifies the released command and retained
+  evidence; release code does not import or invoke the assurance harness.
 - `.github/workflows/hosted-assurance.yml` provides runner allocation and hosted
   identity while executing the same CLI contract.
+
+The components remain independently executable:
+
+1. `tc-sdlc qualify` accepts a fixture manifest, exact image receipt and output
+   directory, executes the real disposable consumers, and emits
+   `tc.sdlc/functional-qualification/v1`.
+2. The image producer emits `tc.sdlc/image-release/v1` without requiring a
+   functional receipt.
+3. Release admission accepts the two versioned receipts and recomputes their
+   bindings. It does not call either producer.
+4. Release generation emits the catalogue and Dev Container files only after
+   admission.
+5. Writeback accepts the generation receipt and uses real Git transport. It has
+   no dependency on fixture execution or image construction.
+6. The hosted workflow composes these public interfaces and adds one complete
+   integration journey.
+
+Component tests use real disposable inputs and retained receipts produced by
+the owning component. Hand-written passing receipts, mocked producers and
+repository-private script calls cannot satisfy acceptance.
 
 Each fixture proves clean bootstrap, preparation fixed point, affected closure,
 full graph execution, stable identity across worker counts, and retained failure
