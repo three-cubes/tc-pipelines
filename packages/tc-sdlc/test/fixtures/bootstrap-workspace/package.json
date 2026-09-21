@@ -1,0 +1,10 @@
+{
+  "name": "tc-sdlc-bootstrap-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.22.0",
+  "dependencies": {
+    "is-number": "7.0.0",
+    "workspace-a": "workspace:*"
+  }
+}

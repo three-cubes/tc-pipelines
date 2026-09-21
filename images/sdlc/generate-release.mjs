@@ -69,6 +69,8 @@ atomicWrite(join(repository, ".devcontainer", "devcontainer.json"), {
   image: `ghcr.io/three-cubes/tc-sdlc@${imageDigest}`,
   remoteUser: "sdlc",
   workspaceFolder: "/workspace",
+  workspaceMount:
+    "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
   mounts: ["source=tc-sdlc-state,target=/state,type=volume"],
   containerEnv: {
     TC_SDLC_IMAGE_DIGEST: imageDigest,

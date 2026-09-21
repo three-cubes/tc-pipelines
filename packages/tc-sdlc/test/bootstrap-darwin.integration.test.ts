@@ -1,6 +1,7 @@
 import * as sdlc from "../dist/index.js";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -16,11 +17,17 @@ import { describe, expect, test } from "vitest";
 const consumer = fileURLToPath(
   new URL("./fixtures/bootstrap-consumer", import.meta.url),
 );
+const workspaceConsumer = fileURLToPath(
+  new URL("./fixtures/bootstrap-workspace", import.meta.url),
+);
 const CLI = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 const imageDigest =
   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-function input(root: string) {
+function input(
+  root: string,
+  inputs = ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"],
+) {
   const declaration = sdlc.validateDeclaration({
     schema: "tc.sdlc/v1",
     project: "bootstrap-real-consumer",
@@ -32,7 +39,7 @@ function input(root: string) {
         command: "node --version",
         mode: "evaluate",
         trustBoundary: "portable",
-        inputs: ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"],
+        inputs,
       },
     },
   });
@@ -49,7 +56,7 @@ function input(root: string) {
   };
 }
 
-describe("reviewed bootstrap host and dependency boundary", () => {
+describe("reviewed macOS bootstrap host and dependency boundary", () => {
   test("does not trust an arbitrary PATH and emits one executable Linux remediation command", async () => {
     const root = mkdtempSync(join(tmpdir(), "tc-sdlc-untrusted-path-"));
     for (const name of ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"]) {
@@ -155,7 +162,31 @@ describe("reviewed bootstrap host and dependency boundary", () => {
     expect(existsSync(join(stateRoot, receipt.stateKey, "dependencies", "node", "node_modules", "yaml"))).toBe(true);
     const python = join(stateRoot, receipt.stateKey, "dependencies", "python", "bin", "python");
     expect(execFileSync(python, ["-c", "import attrs; print(attrs.__version__)"], { encoding: "utf8" }).trim()).toBe("26.1.0");
+    const pnpmLauncher = join(
+      stateRoot,
+      receipt.adapters.find((adapter) => adapter.name === "pnpm")!.launcher,
+    );
+    const emptyHome = join(dirname(stateRoot), "empty-home-is-a-file");
+    writeFileSync(emptyHome, "unchanged");
+    expect(execFileSync(pnpmLauncher, ["--version"], {
+      encoding: "utf8",
+      env: { HOME: emptyHome, PATH: "/usr/bin:/bin", COREPACK_ENABLE_NETWORK: "0" },
+    }).trim()).toBe("11.22.0");
     expect(readFileSync(receiptPath, "utf8")).toBe(sdlc.serialiseBootstrapReceipt(receipt));
+
+    const relocatedRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-relocated-consumer-"));
+    for (const name of ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"]) {
+      writeFileSync(join(relocatedRoot, name), readFileSync(join(consumer, name)));
+    }
+    const relocatedOptions = input(relocatedRoot);
+    const relocated = await sdlc.bootstrap({
+      ...relocatedOptions,
+      stateRoot,
+      receiptPath: `${receiptPath}.relocated`,
+      host: { platform: "darwin", architecture: process.arch, offline: true },
+    });
+    expect(relocated).toMatchObject({ status: "succeeded", reused: true });
+    expect(relocated.dependencies).toEqual(receipt.dependencies);
 
     const warm = await sdlc.bootstrap({
       ...options,
@@ -193,6 +224,72 @@ describe("reviewed bootstrap host and dependency boundary", () => {
     });
     expect(corrupt).toMatchObject({ status: "failed", reason: "state_corrupt" });
     expect(readFileSync(launcher, "utf8")).toBe("corrupt");
+  }, 30_000);
+
+  test("materialises and identity-binds the complete pnpm workspace graph", async () => {
+    expect(process.platform).toBe("darwin");
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-workspace-consumer-"));
+    cpSync(workspaceConsumer, root, { recursive: true });
+    const stateRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-workspace-state-"));
+    const options = input(root, [
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "packages/**/*.json",
+    ]);
+    const receipt = await sdlc.bootstrap({
+      ...options,
+      stateRoot,
+      receiptPath: join(dirname(stateRoot), "workspace-receipt.json"),
+      host: { platform: "darwin", architecture: process.arch, offline: false },
+    });
+
+    expect(receipt).toMatchObject({ status: "succeeded", dependencies: [{ manager: "pnpm" }] });
+    expect(receipt.dependencies[0]?.inputs.map((input) => input.path)).toEqual([
+      "package.json",
+      "packages/a/package.json",
+      "packages/b/package.json",
+      "patches/is-number@7.0.0.patch",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+    ]);
+    const environment = join(stateRoot, receipt.stateKey, receipt.dependencies[0]!.environment);
+    expect(existsSync(join(environment, "packages", "a", "node_modules", "yaml"))).toBe(true);
+    expect(existsSync(join(environment, "packages", "a", "node_modules", "workspace-b"))).toBe(true);
+    const nodeLauncher = join(
+      stateRoot,
+      receipt.adapters.find((adapter) => adapter.name === "node")!.launcher,
+    );
+    expect(execFileSync(nodeLauncher, [
+      "-e",
+      `if (!require(${JSON.stringify(join(environment, "node_modules", "is-number"))}).tcSdlcPatched) process.exit(1)`,
+    ], { encoding: "utf8" })).toBe("");
+
+    const memberManifest = join(root, "packages", "b", "package.json");
+    const changed = JSON.parse(readFileSync(memberManifest, "utf8"));
+    changed.description = "workspace identity sabotage";
+    writeFileSync(memberManifest, `${JSON.stringify(changed, null, 2)}\n`);
+    const stale = await sdlc.bootstrap({
+      ...options,
+      stateRoot,
+      receiptPath: join(dirname(stateRoot), "workspace-stale.json"),
+      host: { platform: "darwin", architecture: process.arch, offline: true },
+    });
+    expect(stale).toMatchObject({ status: "failed", reason: "offline_cold" });
+    expect(stale.stateKey).not.toBe(receipt.stateKey);
+    delete changed.description;
+    writeFileSync(memberManifest, `${JSON.stringify(changed, null, 2)}\n`);
+
+    const patch = join(root, "patches", "is-number@7.0.0.patch");
+    writeFileSync(patch, `${readFileSync(patch, "utf8")}\n`);
+    const stalePatch = await sdlc.bootstrap({
+      ...options,
+      stateRoot,
+      receiptPath: join(dirname(stateRoot), "workspace-stale-patch.json"),
+      host: { platform: "darwin", architecture: process.arch, offline: true },
+    });
+    expect(stalePatch).toMatchObject({ status: "failed", reason: "offline_cold" });
+    expect(stalePatch.stateKey).not.toBe(receipt.stateKey);
   }, 30_000);
 
   test("rejects foreign, symlinked, in-checkout and stale state before host use", async () => {

@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { posix } from "node:path";
+import { parse } from "yaml";
 
 import { bytesDigest, canonicalJson, digest } from "../canonical.js";
 import { SdlcError } from "../errors.js";
@@ -54,11 +55,17 @@ export type BootstrapAdapterEvidence = Readonly<{
   launcher: string;
 }>;
 
+export type BootstrapDependencyInput = Readonly<{
+  path: string;
+  digest: string;
+}>;
+
 export type BootstrapDependencyEvidence = Readonly<{
   manager: "pnpm" | "uv";
   lockDigest: string;
   manifestDigest: string;
   environment: string;
+  inputs: readonly BootstrapDependencyInput[];
 }>;
 
 export type BootstrapReceipt = Readonly<{
@@ -107,13 +114,14 @@ type HostCapability = Readonly<{
 
 type ResolvedAdapter = BootstrapAdapterEvidence & Readonly<{ executable: string }>;
 
+type DependencyInput = BootstrapDependencyInput & Readonly<{ sourcePath: string }>;
+
 type DependencyLock = BootstrapDependencyEvidence & Readonly<{
-  lockPath: string;
-  manifestPath: string;
+  inputs: readonly DependencyInput[];
 }>;
 
 type BootstrapState = Readonly<{
-  schema: "tc.sdlc/bootstrap-state/v3";
+  schema: "tc.sdlc/bootstrap-state/v4";
   release: string;
   lockDigest: string;
   dependencyDigest: string;
@@ -339,10 +347,14 @@ function normalHost(value: BootstrapOptions["host"]): BootstrapHost {
   };
 }
 
-function probeOutput(executable: string, pathValue: string): string {
+function probeOutput(
+  executable: string,
+  pathValue: string,
+  environment: NodeJS.ProcessEnv = {},
+): string {
   return execFileSync(executable, ["--version"], {
     encoding: "utf8",
-    env: { PATH: pathValue },
+    env: { ...environment, PATH: pathValue },
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
 }
@@ -491,13 +503,50 @@ function dependencyLocks(root: string): readonly DependencyLock[] {
         },
       ]);
     }
+    const lock = parse(readFileSync(pnpmLock, "utf8")) as {
+      importers?: Record<string, unknown>;
+    };
+    if (lock.importers === undefined || typeof lock.importers !== "object") {
+      throw new BootstrapFailure("dependency_lock_invalid", [
+        {
+          code: "PNPM_IMPORTERS_MISSING",
+          message: "pnpm-lock.yaml must declare its complete importer graph",
+          action: "regenerate pnpm-lock.yaml with the declared pnpm version",
+        },
+      ]);
+    }
+    const inputPaths = new Set(["package.json", "pnpm-lock.yaml"]);
+    const workspacePath = join(root, "pnpm-workspace.yaml");
+    let workspace: Record<string, unknown> | undefined;
+    if (existsSync(workspacePath)) {
+      inputPaths.add("pnpm-workspace.yaml");
+      workspace = parse(readFileSync(workspacePath, "utf8")) as Record<string, unknown>;
+    }
+    for (const importer of Object.keys(lock.importers)) {
+      inputPaths.add(importer === "." ? "package.json" : posix.join(importer, "package.json"));
+    }
+    const rootManifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      pnpm?: { patchedDependencies?: Record<string, string> };
+    };
+    const patchMaps = [
+      rootManifest.pnpm?.patchedDependencies,
+      workspace?.patchedDependencies as Record<string, string> | undefined,
+    ];
+    for (const patchMap of patchMaps) {
+      for (const path of Object.values(patchMap ?? {})) inputPaths.add(path);
+    }
+    if (existsSync(join(root, ".npmrc"))) inputPaths.add(".npmrc");
+    const inputs = dependencyInputs(root, inputPaths);
     dependencies.push({
       manager: "pnpm",
-      lockPath: pnpmLock,
       lockDigest: fileDigest(pnpmLock),
-      manifestPath: join(root, "package.json"),
-      manifestDigest: fileDigest(join(root, "package.json")),
-      environment: "dependencies/node/node_modules",
+      manifestDigest: digest(
+        inputs
+          .filter((input) => input.path !== "pnpm-lock.yaml")
+          .map(({ path, digest: value }) => ({ path, digest: value })),
+      ),
+      environment: "dependencies/node",
+      inputs,
     });
   }
   const uvLock = join(root, "uv.lock");
@@ -511,19 +560,65 @@ function dependencyLocks(root: string): readonly DependencyLock[] {
         },
       ]);
     }
+    const inputs = dependencyInputs(root, ["pyproject.toml", "uv.lock"]);
     dependencies.push({
       manager: "uv",
-      lockPath: uvLock,
       lockDigest: fileDigest(uvLock),
-      manifestPath: join(root, "pyproject.toml"),
-      manifestDigest: fileDigest(join(root, "pyproject.toml")),
+      manifestDigest: digest(
+        inputs
+          .filter((input) => input.path !== "uv.lock")
+          .map(({ path, digest: value }) => ({ path, digest: value })),
+      ),
       environment: "dependencies/python",
+      inputs,
     });
   }
   return dependencies;
 }
 
-function managedEnvironment(stateRoot: string, stateDirectory: string, pathValue: string): NodeJS.ProcessEnv {
+function dependencyInputs(
+  root: string,
+  paths: Iterable<string>,
+): readonly DependencyInput[] {
+  const rootPath = realpathSync(root);
+  return [...new Set(paths)]
+    .map((path) => path.replaceAll("\\", "/"))
+    .sort()
+    .map((path) => {
+      if (path === "" || isAbsolute(path) || path === ".." || path.startsWith("../")) {
+        throw new BootstrapFailure("dependency_lock_invalid", [
+          {
+            code: "DEPENDENCY_INPUT_INVALID",
+            message: "dependency metadata must remain inside the checkout",
+            action: "remove traversal paths and regenerate the dependency lock",
+          },
+        ]);
+      }
+      const sourcePath = resolve(rootPath, path);
+      if (
+        !resolvesInside(rootPath, sourcePath) ||
+        !existsSync(sourcePath) ||
+        lstatSync(sourcePath).isSymbolicLink() ||
+        !lstatSync(sourcePath).isFile()
+      ) {
+        throw new BootstrapFailure("dependency_lock_invalid", [
+          {
+            code: "DEPENDENCY_INPUT_INVALID",
+            message: `dependency metadata is missing or unsafe: ${path}`,
+            action: "restore dependency metadata and regenerate the dependency lock",
+          },
+        ]);
+      }
+      return { path, digest: fileDigest(sourcePath), sourcePath };
+    });
+}
+
+function managedEnvironment(
+  stateRoot: string,
+  stateDirectory: string,
+  pathValue: string,
+  offline = false,
+): NodeJS.ProcessEnv {
   const home = join(stateDirectory, "home");
   const cache = join(stateRoot, "cache");
   mkdirSync(home, { recursive: true, mode: 0o700 });
@@ -533,6 +628,8 @@ function managedEnvironment(stateRoot: string, stateDirectory: string, pathValue
     PATH: pathValue,
     XDG_CACHE_HOME: cache,
     UV_CACHE_DIR: join(cache, "uv"),
+    COREPACK_HOME: join(stateDirectory, "corepack"),
+    COREPACK_ENABLE_NETWORK: offline ? "0" : "1",
   };
 }
 
@@ -644,10 +741,14 @@ function resolvedAdapter(
   stateRoot: string,
   stateKey: string,
   value: HostCapability,
+  capabilities: readonly HostCapability[],
 ): ResolvedAdapter {
   const launcher = posix.join(stateKey, "bin", value.name);
   const launcherPath = resolve(stateRoot, launcher);
-  const bytes = `#!/bin/sh\nset -eu\nexec ${shellQuote(value.executable)} "$@"\n`;
+  const node = capabilities.find((capability) => capability.name === "node");
+  const bytes = value.name === "pnpm"
+    ? `#!/bin/sh\nset -eu\nSCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexport HOME="$SCRIPT_DIR/../home"\nexport XDG_CONFIG_HOME="$SCRIPT_DIR/../home/config"\nexport COREPACK_HOME="$SCRIPT_DIR/../corepack"\nexec ${shellQuote(node!.executable)} ${shellQuote(value.executable)} "$@"\n`
+    : `#!/bin/sh\nset -eu\nexec ${shellQuote(value.executable)} "$@"\n`;
   writeAtomicExecutable(launcherPath, bytes);
   const launcherDigest = bytesDigest(bytes);
   return {
@@ -680,29 +781,25 @@ function materializeDependencies(
     "/usr/bin",
     "/bin",
   ].join(":");
-  const env = managedEnvironment(stateRoot, stateDirectory, pathValue);
+  const env = managedEnvironment(stateRoot, stateDirectory, pathValue, options.host?.offline ?? false);
   for (const dependency of dependencies) {
     const destination = resolve(stateDirectory, dependency.environment);
     mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
     if (dependency.manager === "pnpm") {
       const project = join(stateDirectory, "dependencies", "node");
       mkdirSync(project, { recursive: true, mode: 0o700 });
-      writeFileSync(join(project, "package.json"), readFileSync(dependency.manifestPath), {
-        flag: "wx",
-        mode: 0o600,
-      });
-      writeFileSync(join(project, "pnpm-lock.yaml"), readFileSync(dependency.lockPath), {
-        flag: "wx",
-        mode: 0o600,
-      });
+      for (const input of dependency.inputs) {
+        const target = resolve(project, input.path);
+        mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+        writeFileSync(target, readFileSync(input.sourcePath), { flag: "wx", mode: 0o600 });
+      }
       execFileSync(
-        byName.get("pnpm")!.executable,
+        resolve(stateRoot, byName.get("pnpm")!.launcher),
         [
           "--dir",
           project,
           "install",
           "--frozen-lockfile",
-          "--ignore-workspace",
           "--store-dir",
           join(stateRoot, "cache", "pnpm"),
         ],
@@ -757,22 +854,27 @@ async function materializeState(
     );
     capabilities = [...capabilities, { ...uv, provider: "catalogue-distribution" }];
   }
-  const adapters = capabilities.map((value) => resolvedAdapter(stateRoot, stateKey, value));
+  const adapters = capabilities.map((value) =>
+    resolvedAdapter(stateRoot, stateKey, value, capabilities),
+  );
   materializeDependencies(options, stateRoot, directory, dependencies, adapters);
   const state: BootstrapState = {
-    schema: "tc.sdlc/bootstrap-state/v3",
+    schema: "tc.sdlc/bootstrap-state/v4",
     release: options.catalogue.release.version,
     lockDigest,
     dependencyDigest,
     platform: host.platform,
     architecture: host.architecture,
     adapters,
-    dependencies: dependencies.map(({ manager, lockDigest: value, manifestDigest, environment }) => ({
-      manager,
-      lockDigest: value,
-      manifestDigest,
-      environment,
-    })),
+    dependencies: dependencies.map(
+      ({ manager, lockDigest: value, manifestDigest, environment, inputs }) => ({
+        manager,
+        lockDigest: value,
+        manifestDigest,
+        environment,
+        inputs: inputs.map(({ path, digest: value }) => ({ path, digest: value })),
+      }),
+    ),
   };
   writeCanonicalEvidence(join(directory, "state.json"), state);
   return adapters;
@@ -804,14 +906,17 @@ function validateWarmState(
   }
   try {
     const state = readCanonical(statePath) as BootstrapState;
-    const expectedDependencies = dependencies.map(({ manager, lockDigest: value, manifestDigest, environment }) => ({
-      manager,
-      lockDigest: value,
-      manifestDigest,
-      environment,
-    }));
+    const expectedDependencies = dependencies.map(
+      ({ manager, lockDigest: value, manifestDigest, environment, inputs }) => ({
+        manager,
+        lockDigest: value,
+        manifestDigest,
+        environment,
+        inputs: inputs.map(({ path, digest: value }) => ({ path, digest: value })),
+      }),
+    );
     if (
-      state.schema !== "tc.sdlc/bootstrap-state/v3" ||
+      state.schema !== "tc.sdlc/bootstrap-state/v4" ||
       state.release !== options.catalogue.release.version ||
       state.lockDigest !== lockDigest ||
       state.dependencyDigest !== dependencyDigest ||
@@ -862,7 +967,18 @@ function validateWarmState(
         throw new Error("host prerequisite changed");
       }
       const observed = contract.observed(
-        probeOutput(adapter.executable, adapterPath),
+        adapter.name === "pnpm"
+          ? probeOutput(
+              launcher,
+              adapterPath,
+              managedEnvironment(
+                stateRoot,
+                resolve(stateRoot, stateKey),
+                adapterPath,
+                host.offline,
+              ),
+            )
+          : probeOutput(adapter.executable, adapterPath),
       );
       if (observed === null || !contract.matches(observed, adapter.version)) {
         throw new Error("adapter version changed");
@@ -985,12 +1101,15 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
     const bound = bindGraphLock(options.declaration, options.lock, options.catalogue, inventory);
     taskIdentities = buildGraph(options.declaration, bound).tasks.map((task) => task.identity);
     const dependencies = dependencyLocks(options.root);
-    dependencyEvidence = dependencies.map(({ manager, lockDigest: value, manifestDigest, environment }) => ({
-      manager,
-      lockDigest: value,
-      manifestDigest,
-      environment,
-    }));
+    dependencyEvidence = dependencies.map(
+      ({ manager, lockDigest: value, manifestDigest, environment, inputs }) => ({
+        manager,
+        lockDigest: value,
+        manifestDigest,
+        environment,
+        inputs: inputs.map(({ path, digest: value }) => ({ path, digest: value })),
+      }),
+    );
     const dependencyDigest = digest(dependencyEvidence);
     stateKey = posix.join(
       "releases",

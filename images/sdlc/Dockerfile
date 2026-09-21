@@ -10,7 +10,7 @@ ARG NODE_SHA256_AMD64=fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f5
 ARG NODE_SHA256_ARM64=6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates curl xz-utils \
+    && apt-get install --yes --no-install-recommends ca-certificates curl git make xz-utils \
     && case "$TARGETARCH" in \
          amd64) node_arch=x64; node_sha="$NODE_SHA256_AMD64" ;; \
          arm64) node_arch=arm64; node_sha="$NODE_SHA256_ARM64" ;; \
@@ -37,7 +37,7 @@ ARG NODE_VERSION=24.21.0
 ARG NODE_SHA256_AMD64=fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6
 ARG NODE_SHA256_ARM64=6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates curl xz-utils \
+    && apt-get install --yes --no-install-recommends ca-certificates curl git procps xz-utils \
     && case "$BUILDARCH" in \
          amd64) node_arch=x64; node_sha="$NODE_SHA256_AMD64" ;; \
          arm64) node_arch=arm64; node_sha="$NODE_SHA256_ARM64" ;; \
@@ -60,6 +60,9 @@ RUN pnpm install --frozen-lockfile \
     && pnpm --filter @three-cubes/tc-sdlc build \
     && pnpm --filter @three-cubes/tc-sdlc pack --pack-destination /tmp/package \
     && npm install --global /tmp/package/three-cubes-tc-sdlc-3.0.0.tgz
+
+FROM builder AS package-tests
+RUN pnpm --filter @three-cubes/tc-sdlc test
 
 FROM toolchain
 LABEL org.opencontainers.image.source="https://github.com/three-cubes/tc-pipelines" \
