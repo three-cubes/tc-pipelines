@@ -24,6 +24,7 @@
     "test:integration:consumers": "vitest run test/consumer-qualification.integration.test.ts",
     "test:integration:fitness": "pnpm build && vitest run test/fitness.integration.test.ts",
     "test:integration:evaluation": "pnpm build && vitest run test/evaluation.integration.test.ts",
+    "test:integration:image-producer": "pnpm build && vitest run test/image-producer.integration.test.ts",
     "test:integration:darwin": "vitest run test/bootstrap-darwin.integration.test.ts",
     "verify:image": "pnpm build && node ../../images/sdlc/verify.mjs"
   },

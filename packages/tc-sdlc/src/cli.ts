@@ -18,6 +18,7 @@ import {
 } from "./executors/fitness.js";
 import { assertCurrentLock, loadLock, resolveLock, writeLock } from "./lock/index.js";
 import { maintain } from "./maintenance/index.js";
+import { produceImage } from "./image/producer.js";
 import { loadDeclaration } from "./schema/declaration.js";
 import { qualifyConsumers } from "./qualification/index.js";
 import { detectedHostCapacity } from "./runtime/index.js";
@@ -35,6 +36,7 @@ type Command =
   | "check"
   | "check-all"
   | "fitness"
+  | "produce-image"
   | "qualify-consumers";
 
 function parseOptions(
@@ -80,6 +82,29 @@ function requestedReceipt(args: readonly string[]): string | undefined {
 }
 
 async function run(command: Command, args: readonly string[]): Promise<void> {
+  if (command === "produce-image") {
+    const options = parseOptions(args, [
+      "source-root", "source-commit", "dockerfile", "registry-candidate", "docker-endpoint",
+      "buildx-executable", "state-root", "output", "receipt",
+    ]);
+    const receipt = await produceImage({
+      sourceRoot: options["source-root"]!,
+      sourceCommit: options["source-commit"]!,
+      dockerfile: options.dockerfile!,
+      registryCandidate: options["registry-candidate"]!,
+      dockerEndpoint: options["docker-endpoint"]!,
+      buildxExecutable: options["buildx-executable"]!,
+      stateRoot: options["state-root"]!,
+      outputDirectory: options.output!,
+      receiptPath: options.receipt!,
+    });
+    if (receipt.status !== "succeeded") {
+      throw new SdlcError("IMAGE_PRODUCTION_FAILED", receipt.reason ?? "image production failed");
+    }
+    success(command, { receipt: options.receipt, receiptSchema: receipt.schema });
+    return;
+  }
+
   if (command === "qualify-consumers") {
     const options = parseOptions(args, ["manifest", "catalogue", "output", "receipt"]);
     const receipt = await qualifyConsumers({
@@ -429,6 +454,7 @@ const commands: readonly Command[] = [
   "check",
   "check-all",
   "fitness",
+  "produce-image",
   "qualify-consumers",
 ];
 const envelopeCommand = commands.includes(rawCommand as Command) ? rawCommand : "unknown";
@@ -437,7 +463,7 @@ try {
   if (!commands.includes(rawCommand as Command)) {
     throw new SdlcError(
       "USAGE",
-      "command must be catalogue, lock, validate, bootstrap, maintain, prepare, check, check-all, fitness or qualify-consumers",
+      "command must be catalogue, lock, validate, bootstrap, maintain, prepare, check, check-all, fitness, produce-image or qualify-consumers",
     );
   }
   await run(rawCommand as Command, process.argv.slice(3));

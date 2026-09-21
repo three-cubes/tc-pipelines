@@ -90,6 +90,8 @@ export { fitness } from "./tasks/fitness.js";
 export type { FitnessOptions } from "./tasks/fitness.js";
 export { parseFitnessReceipt } from "./executors/fitness.js";
 export type { FitnessReceipt } from "./executors/fitness.js";
+export { parseImageReleaseReceipt, produceImage, validateImageReleaseReceipt } from "./image/producer.js";
+export type { ImageReleaseReceipt, ProduceImageOptions } from "./image/producer.js";
 export { loadDeclaration, validateDeclaration } from "./schema/declaration.js";
 export type {
   GraphProject,
