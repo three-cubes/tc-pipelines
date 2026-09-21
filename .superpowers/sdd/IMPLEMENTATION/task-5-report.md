@@ -27,9 +27,9 @@ The implemented boundary is now:
   release, lock digest, task identity, dependency-lock identities and exact
   toolchain versions.
 
-The coordinated release is `3.0.0`. After the second final review remediation
-it binds source commit `f78e72f1fa3a37beb63ce579ed42b0154c554754` and OCI index digest
-`sha256:1d5d444285271c0e840bf009349fc2f8125103e50366875ff3816df88e6c1f19`.
+The coordinated release is `3.0.0`. After the third final review remediation
+it binds source commit `0ae8c5ec01ca33f4db497b60c5d3159263a36828` and OCI index digest
+`sha256:edd6cff09e62212679c4afb2186a77fed7aca026b182c363d72b8c8d34eac122`.
 Nothing was pushed or published. In particular, no claim is made that the
 catalogue's GHCR reference is remotely available: no authenticated registry
 read was performed.
@@ -85,11 +85,11 @@ release files.
 The final real two-architecture OCI build produced:
 
 ```text
-manifest list sha256:1d5d444285271c0e840bf009349fc2f8125103e50366875ff3816df88e6c1f19
-source commit f78e72f1fa3a37beb63ce579ed42b0154c554754
-artifact artifacts/task5-release-f78e72f/image.oci.tar
-build evidence artifacts/task5-release-f78e72f/build-receipt.json
-verification evidence artifacts/task5-release-f78e72f/verification.json
+manifest list sha256:edd6cff09e62212679c4afb2186a77fed7aca026b182c363d72b8c8d34eac122
+source commit 0ae8c5ec01ca33f4db497b60c5d3159263a36828
+artifact artifacts/task5-release-0ae8c5e/image.oci.tar
+build evidence artifacts/task5-release-0ae8c5e/build-receipt.json
+verification evidence artifacts/task5-release-0ae8c5e/verification.json
 ```
 
 The Dev Container and release catalogue both contain the manifest-list digest.
@@ -176,9 +176,9 @@ package or executable boundary:
    `dependency_lock_invalid` and `PNPM_WORKSPACE_LOCK_MISMATCH`.
 3. The prior receipt had no installed-tree content binding, and deleting
    `dependencies/node/node_modules` still returned `reused: true`. State schema
-   v5 records `installedDigest` for the complete pnpm materialisation. Any byte
-   change or deletion now returns `state_corrupt`; valid unchanged warm state
-   still reuses offline.
+   v6 records `installedDigest` for every complete dependency materialisation.
+   Any execution-relevant byte or mode change or deletion now returns
+   `state_corrupt`; valid unchanged warm state still reuses offline.
 4. Release building previously left a 677 MiB directory in the account home
    and only a `/private/tmp` pointer. `release:image` now requires a new,
    caller-selected direct child of repository-owned `artifacts/`, stages and
@@ -198,6 +198,41 @@ context and two tests failed with `MODULE_NOT_FOUND`. The Dockerfile now copies
 both release boundary scripts into the builder; the Linux stage passes all 112
 portable tests.
 
+## Third final-review remediation
+
+The three rereview findings were reproduced through the built public bootstrap
+API before implementation:
+
+1. The uv evidence had no `installedDigest`; deleting or renaming an installed
+   Python module was therefore accepted as warm reuse. State schema v6 now
+   content- and mode-digests the complete Python environment. Only runtime
+   `__pycache__`, `.pyc` and `.pyo` churn is excluded. Public tests execute
+   `attrs`, prove cache creation does not break reuse, then independently rename
+   its package and delete an imported `attr._make` module. Both import failures
+   are rejected as `state_corrupt`, and exact restoration re-enables offline
+   reuse.
+2. Workspace staging previously copied only member manifests, leaving pnpm's
+   workspace links pointed at packages without runnable exports. Every workspace
+   member must now declare a non-empty, explicit, non-glob `files` inventory.
+   Bootstrap rejects traversal, missing paths, symlinks and unsupported entries,
+   binds each declared file into dependency identity and stages only that
+   inventory. The checkout source export and installed workspace export both
+   execute; a source-byte change produces a distinct offline-cold state key;
+   an undeclared `.cache` file is neither bound nor copied.
+3. Installed-tree digests previously omitted permission modes. They now bind
+   root, directory and regular-file modes as well as bytes, link targets and
+   traversal shape. Changing an installed `node_modules/.bin/yaml` launcher
+   from executable to `0644` is rejected as `state_corrupt`.
+
+The controller-provided rereview confirmed that five older artifacts totalling
+approximately 1.35 GiB had already been permanently removed and their absence
+verified. This report does not attribute that cleanup to this implementation
+run. After the new `edd6` artifact passed end-to-end verification, this run also
+removed the superseded `f78e72f` repository artifact and the old 4 KiB rereview
+evidence directory. Only `artifacts/task5-release-0ae8c5e` remains, and both the
+image verifier and Dev Container verifier left their caller-selected scratch
+root absent.
+
 ## State, evidence and planning invariants
 
 - State roots must be absolute, outside the checkout, non-symlinked and either
@@ -208,7 +243,8 @@ portable tests.
   rename path.
 - Warm reuse reprobes host prerequisites inside the managed probe environment,
   checks launcher, executable and adapter digests, exact state bindings and the
-  content digest of the complete installed pnpm tree.
+  content and mode digest of every installed dependency tree. Python runtime
+  bytecode caches are the only excluded installed-tree paths.
 - Bootstrap calls `assertCurrentLock`, the canonical input resolver,
   `bindGraphLock`, and the exact two-argument `buildGraph`. There is no second
   lock, input or graph implementation.
@@ -285,11 +321,17 @@ with networking disabled. Exit 0 with:
 
 ```text
 release 3.0.0
-lockDigest sha256:d63b2bf6986f40f99a569f80695e28e680549589b5b1ae57340651baa94eaeed
-taskIdentity sha256:15ce654d6e25f03bc830bc9803946834d696a4ff5aa1f5d9bf9c06430aef09b2
+lockDigest sha256:f9a8c2eacfcbb193c962154134d27b475e6d0f54c1a191b43afacd1c457f1915
+taskIdentity sha256:9defe947ef9a47082cc615368e3641907a5df88aa5a53ba65aea1a265f36f208
 nativePlatform darwin
 imagePlatform linux
 ```
+
+Both native and image receipts contain uv and pnpm `installedDigest` values.
+The repository pnpm evidence additionally inventories the complete declared
+`packages/tc-sdlc/dist` workspace export before executing `nx`; the repository
+uv environment executes `three-cubes-fitness==0.17.0`. Both image bootstraps
+then reuse the exact verified trees with networking disabled.
 
 The Linux/amd64 image separately reported Node 24.21.0, pnpm 11.22.0, Python
 3.13.15, uv 0.12.5, git 2.39.5 and GNU make 4.3, then executed the public
@@ -353,14 +395,18 @@ qualification; hosted amd64 execution remains Task 6 evidence.
   installed-tree binding and explicit artifact/evidence retention contract;
 - `f78e72f` — include release-boundary executables in Linux package tests;
 - `b0f9621` — regenerate the immutable catalogue and Dev Container for source
-  `f78e72f` and the verified `1d5d` OCI index.
+  `f78e72f` and the verified `1d5d` OCI index;
+- `0ae8c5e` — bind Python environments, explicit workspace source exports and
+  installed execution modes;
+- `3798bdd` — regenerate the immutable catalogue and Dev Container for source
+  `0ae8c5e` and the verified `edd6` OCI index.
 
 Earlier Task 5 coordination commits remain in history. All Task 5 commits are
 authored by `three-cubes-agent[bot]`. `docs/IMPLEMENTATION.md` was not edited.
 
 ## Self-review
 
-All findings from both independent reviews are addressed in production
+All findings from the independent reviews are addressed in production
 behavior and built-public tests. Task 1-4 package behavior and the exact
 two-argument `buildGraph` API remain intact. The worktree contains no
 package-local lock, untracked release placeholder or simulated toolchain. No
