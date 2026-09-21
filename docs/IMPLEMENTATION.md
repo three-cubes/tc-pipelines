@@ -69,15 +69,15 @@ States:
 | F5 | Native macOS/Linux bootstrap owns exact Node, pnpm, Python and uv execution state without ambient user configuration. | VERIFIED | Bootstrap and lifecycle implementation through `896bd4c`; package suite 131/131, Darwin integration 19/19 and Docker lifecycle probes 2/2 passed. Independent review reproduced both final recovery regressions against the parent and passed the fixes. | None for the native bootstrap boundary. |
 | F6 | Concurrent bootstrap, state invalidation and maintenance preserve one valid current/predecessor state across crash, alias and replacement races. | VERIFIED | Bootstrap lifecycle implementation through `8e0bc391`; build, package suite 151/151, focused public recovery 3/3, Darwin integration 25/25 and Docker lifecycle 2/2 passed. Independent review reproduced referenced and pre-reference corruption, invalid authority and live-lease cases through the public CLI and found no material issue. | None. |
 | F7 | Python-only, pnpm-only and mixed consumers use real locked dependencies through the packed public CLI. | VERIFIED | Disposable-consumer implementation through `4eaa0234`; build, package suite 151/151 and packed public journeys 5/5 passed. Independent review verified exact Python and Node dependencies, mixed downstream closure, local dependency-shadow resistance, hostile launcher-environment isolation, executable packaging from paths containing spaces and zero-download offline frozen replay from an isolated seeded store. | None. |
-| F8 | `tc-fitness` `0.17.1` runs once as an independently executable, repository-scoped graph task and a version mismatch is rejected. | IN PROGRESS | Fitness implementation at `062e16e` passed its package, consumer and full repository gates, and independent review exercised its terminal receipt handling. The successful public command is still covered through consumer composition rather than a dedicated packed component suite. | Add direct packed `tc-sdlc fitness` acceptance with genuine bootstrap state, verify complete retained evidence, and prove preparation and ordinary checks are not run. |
+| F8 | `tc-fitness` `0.17.1` runs once as an independently executable, repository-scoped graph task and a version mismatch is rejected. | VERIFIED | Implementation at `062e16e`; direct packed acceptance at `03e136a` and `dcf742f` uses genuine bootstrap state, validates owned and nested evidence, proves exactly one fitness task, preserves the checkout and verifies scratch removal. The exact-head fast suite passed 153/153 and the full repository gate passed 1,991/1,991. | None. |
 | F9 | Native, canonical-image and hosted runs bind the same source, lock, input and task identities. | IN PROGRESS | The exact multi-platform image producer completed one local-registry qualification; that image-only proof is retained but is not release admission. | Run every disposable consumer on native and exact-image boundaries; add hosted identity evidence; parse terminal receipts and compare recomputed identities. |
 | F10 | Warm affected feedback is under 60 seconds and concurrency honours detected CPU and declared resources. | IN PROGRESS | Scheduler resource semantics are verified by Task 3. | Measure the retained consumer result rather than a self-reported value; prove one-core/multi-core determinism, maximum safe workers, observed peak concurrency and the hard warm-loop budget. |
 | F11 | The immutable amd64/arm64 image is published by digest with provenance, SBOM and installed-tool verification. | IN PROGRESS | The image-only producer published and re-used an exact local-registry index with both platform probes passing. | Integrate the reviewed producer; rerun the exact image proof after Task 6 and release-transport changes; retain cleanup results. |
-| F12 | Public components are accepted at their own command and receipt boundaries; native, image and hosted composers then prove handoffs; release admission derives every claim from retained qualification evidence. | IN PROGRESS | The capability model now separates atomic components from composers and records implementation status. | Add missing packed acceptance for preparation, evaluation and fitness; remove race-based composer sabotage; then prove native, image and hosted composition before release admission. |
+| F12 | Public components are accepted at their own command and receipt boundaries; native, image and hosted composers then prove handoffs; release admission derives every claim from retained qualification evidence. | IN PROGRESS | Native preparation, `check`, `check-all` and fitness have direct packed acceptance at `1a164d7`, `ef2cbd9`, `03e136a` and `dcf742f`. Native consumer composition passes 17/17 without detached receipt races. | Add direct packed bootstrap receipt acceptance; implement and accept image production, image qualification and hosted composition; then prove their receipt handoffs through release admission. |
 | F13 | Only a successful image plus functional qualification may generate the catalogue and Dev Container files. | IN PROGRESS | Unqualified tracked catalogue and Dev Container authority was removed at `318656a`; generation now requires both receipt inputs on the release branch. | Complete validator integration and prove failed, stale or altered inputs cannot create either output. |
 | F14 | A trusted bot writes exactly the two generated outputs to the unchanged PR head with an exact Git lease. | IN PROGRESS | Event selection, output allowlist, bot identity and lease-safe transport have focused tests on the release branch. | Integrate the workflow; verify immutable credential code, normal Git hooks, post-hook byte checks, early-failure evidence and real hosted writeback. |
 | F15 | All commands clean owned scratch and containers while retaining required release and failure evidence. | IN PROGRESS | Native lifecycle cleanup and recovery are verified through Task 5; image producer cleanup passed its local-registry run. | Assert registry, builder, container, image and state cleanup in the final exact-image journey and preserve referenced release artefacts. |
-| F16 | The consolidated branch passes the repository's complete local admission path with a clean worktree. | IN PROGRESS | F1–F7 have passing behavioural evidence on independently reviewed component commits; F8 needs its direct packed regression suite. | Complete F8–F15, then pass build, package tests, component integrations, Darwin integration, Docker/image qualification, Python assurance, actionlint, diff check, `make check` and `make assurance all` on the exact head. |
+| F16 | The consolidated branch passes the repository's complete local admission path with a clean worktree. | IN PROGRESS | F1–F8 have passing behavioural evidence on independently reviewed component commits. The exact head passes 153 package tests, direct evaluation and fitness acceptance, the 1,991-test repository gate and the Docker builder. | Complete F9–F15, then pass Darwin integration, exact-image qualification, Python assurance and the complete local admission path on the exact head. |
 | F17 | PR CI evaluates that exact head once, retains terminal evidence and has no unresolved review conversations. | IN PROGRESS | PR #157 exists as the single foundation PR. Its remote head predates the accepted Task 5 work. | Push once after F6–F16 pass locally; resolve review findings; obtain green required checks and review. |
 
 The foundation PR is usable when F1–F17 are `VERIFIED`. A generated catalogue
@@ -102,11 +102,11 @@ program outcome and are not hidden inside the foundation PR's completion claim.
 
 **Status:** in progress
 
-The bootstrap lifecycle and consumer graph are independently executable and
-verified through F7. The repository-scoped fitness target is implemented and
-needs direct packed acceptance. Consumer qualification, image production, image
-qualification, release admission, release generation, writeback and hosted
-composition remain incomplete.
+The bootstrap lifecycle, consumer graph and repository-scoped fitness target
+are independently executable and verified through F8. Native consumer
+qualification is implemented and accepted as a separate composition journey.
+Image production, image qualification, release admission, release generation,
+writeback and hosted composition remain incomplete.
 
 **Deliverables**
 
@@ -387,6 +387,11 @@ canonical reference inventory exists, successful artefacts are retained.
 ### Task 6 — Component acceptance and qualification composition
 
 **Status:** in progress
+
+Native preparation, evaluation and fitness acceptance plus native consumer
+composition are complete at `03e136a`, `1a164d7`, `dcf742f` and `ef2cbd9`.
+Packed bootstrap receipt acceptance, image and hosted composition, release
+admission, generation and writeback remain open.
 
 **Files**
 

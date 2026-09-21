@@ -80,12 +80,12 @@ receipt.
 |---|---|---|---|---|---|
 | Utility | Catalogue generation | `tc-sdlc catalogue` | release coordinates | `tc.sdlc/release-catalogue/v1` | implemented |
 | Utility | Lock generation | `tc-sdlc lock` | declaration and catalogue | `tc.sdlc/lock/v1` | implemented |
-| Component | Bootstrap lifecycle | `tc-sdlc bootstrap` | declaration, catalogue, generated lock and checkout | `tc.sdlc/bootstrap-receipt/v1` | implemented; packed-install acceptance incomplete |
+| Component | Bootstrap lifecycle | `tc-sdlc bootstrap` | declaration, catalogue, generated lock and checkout | `tc.sdlc/bootstrap-receipt/v1` | implemented; direct built-CLI acceptance present; packed receipt acceptance missing |
 | Component | State maintenance | `tc-sdlc maintain` | owned state root and retention policy | `tc.sdlc/maintenance-receipt/v1` | implemented; direct acceptance present |
-| Component | Preparation | `tc-sdlc prepare` | bootstrapped state and consumer checkout | `tc.sdlc/preparation-receipt/v1` | implemented; direct packed acceptance missing |
-| Component | Graph evaluation | `tc-sdlc check-all` and `tc-sdlc check` | bootstrapped, prepared state and consumer checkout | `tc.sdlc/evaluation-receipt/v1` | implemented; direct packed acceptance missing |
-| Component | Fitness target | `tc-sdlc fitness` | repository-scoped fitness declaration, generated lock and bootstrapped state | `tc.sdlc/fitness-receipt/v1` | implemented; successful direct packed acceptance missing |
-| Composer | Native consumer journey | `tc-sdlc qualify-consumers` | fixture manifest, candidate catalogue and packed CLI | `tc.sdlc/consumer-qualification/v1` | implemented; deterministic acceptance incomplete |
+| Component | Preparation | `tc-sdlc prepare` | bootstrapped state and consumer checkout | `tc.sdlc/preparation-receipt/v1` | implemented; direct packed acceptance present |
+| Component | Graph evaluation | `tc-sdlc check-all` and `tc-sdlc check` | bootstrapped, prepared state and consumer checkout | `tc.sdlc/evaluation-receipt/v1` | implemented; direct packed acceptance present |
+| Component | Fitness target | `tc-sdlc fitness` | repository-scoped fitness declaration, generated lock and bootstrapped state | `tc.sdlc/fitness-receipt/v1` | implemented; direct packed acceptance present |
+| Composer | Native consumer journey | `tc-sdlc qualify-consumers` | fixture manifest, candidate catalogue and packed CLI | `tc.sdlc/consumer-qualification/v1` | implemented; deterministic acceptance present |
 | Component | Image producer | `tc-sdlc produce-image` | source identity and image definition | `tc.sdlc/image-release/v1` | planned |
 | Composer | Image qualification journey | `tc-sdlc qualify-image` | image-release receipt and fixture manifest | `tc.sdlc/image-qualification/v1` | planned |
 | Attestor | Release admission | `tc-sdlc admit-release` | consumer-, image-release and image-qualification receipts | `tc.sdlc/release-admission/v1` | planned |
