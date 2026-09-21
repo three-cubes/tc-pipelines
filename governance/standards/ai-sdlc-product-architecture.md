@@ -80,7 +80,7 @@ receipt.
 |---|---|---|---|---|---|
 | Utility | Catalogue generation | `tc-sdlc catalogue` | release coordinates | `tc.sdlc/release-catalogue/v1` | implemented |
 | Utility | Lock generation | `tc-sdlc lock` | declaration and catalogue | `tc.sdlc/lock/v1` | implemented |
-| Component | Bootstrap lifecycle | `tc-sdlc bootstrap` | declaration, catalogue, generated lock and checkout | `tc.sdlc/bootstrap-receipt/v1` | implemented; direct built-CLI acceptance present; packed receipt acceptance missing |
+| Component | Bootstrap lifecycle | `tc-sdlc bootstrap` | declaration, catalogue, generated lock and checkout | `tc.sdlc/bootstrap-receipt/v1` | implemented; direct packed acceptance present |
 | Component | State maintenance | `tc-sdlc maintain` | owned state root and retention policy | `tc.sdlc/maintenance-receipt/v1` | implemented; direct acceptance present |
 | Component | Preparation | `tc-sdlc prepare` | bootstrapped state and consumer checkout | `tc.sdlc/preparation-receipt/v1` | implemented; direct packed acceptance present |
 | Component | Graph evaluation | `tc-sdlc check-all` and `tc-sdlc check` | bootstrapped, prepared state and consumer checkout | `tc.sdlc/evaluation-receipt/v1` | implemented; direct packed acceptance present |

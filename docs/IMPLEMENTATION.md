@@ -73,7 +73,7 @@ States:
 | F9 | Native, canonical-image and hosted runs bind the same source, lock, input and task identities. | IN PROGRESS | The exact multi-platform image producer completed one local-registry qualification; that image-only proof is retained but is not release admission. | Run every disposable consumer on native and exact-image boundaries; add hosted identity evidence; parse terminal receipts and compare recomputed identities. |
 | F10 | Warm affected feedback is under 60 seconds and concurrency honours detected CPU and declared resources. | IN PROGRESS | Scheduler resource semantics are verified by Task 3. | Measure the retained consumer result rather than a self-reported value; prove one-core/multi-core determinism, maximum safe workers, observed peak concurrency and the hard warm-loop budget. |
 | F11 | The immutable amd64/arm64 image is published by digest with provenance, SBOM and installed-tool verification. | IN PROGRESS | The image-only producer published and re-used an exact local-registry index with both platform probes passing. | Integrate the reviewed producer; rerun the exact image proof after Task 6 and release-transport changes; retain cleanup results. |
-| F12 | Public components are accepted at their own command and receipt boundaries; native, image and hosted composers then prove handoffs; release admission derives every claim from retained qualification evidence. | IN PROGRESS | Native preparation, `check`, `check-all` and fitness have direct packed acceptance at `1a164d7`, `ef2cbd9`, `03e136a` and `dcf742f`. Native consumer composition passes 17/17 without detached receipt races. | Add direct packed bootstrap receipt acceptance; implement and accept image production, image qualification and hosted composition; then prove their receipt handoffs through release admission. |
+| F12 | Public components are accepted at their own command and receipt boundaries; native, image and hosted composers then prove handoffs; release admission derives every claim from retained qualification evidence. | IN PROGRESS | Bootstrap, preparation, `check`, `check-all` and fitness have direct packed acceptance through `769042d`. Native consumer composition passes 17/17 without detached receipt races. | Implement and accept image production, image qualification and hosted composition; then prove their receipt handoffs through release admission. |
 | F13 | Only a successful image plus functional qualification may generate the catalogue and Dev Container files. | IN PROGRESS | Unqualified tracked catalogue and Dev Container authority was removed at `318656a`; generation now requires both receipt inputs on the release branch. | Complete validator integration and prove failed, stale or altered inputs cannot create either output. |
 | F14 | A trusted bot writes exactly the two generated outputs to the unchanged PR head with an exact Git lease. | IN PROGRESS | Event selection, output allowlist, bot identity and lease-safe transport have focused tests on the release branch. | Integrate the workflow; verify immutable credential code, normal Git hooks, post-hook byte checks, early-failure evidence and real hosted writeback. |
 | F15 | All commands clean owned scratch and containers while retaining required release and failure evidence. | IN PROGRESS | Native lifecycle cleanup and recovery are verified through Task 5; image producer cleanup passed its local-registry run. | Assert registry, builder, container, image and state cleanup in the final exact-image journey and preserve referenced release artefacts. |
@@ -388,10 +388,10 @@ canonical reference inventory exists, successful artefacts are retained.
 
 **Status:** in progress
 
-Native preparation, evaluation and fitness acceptance plus native consumer
-composition are complete at `03e136a`, `1a164d7`, `dcf742f` and `ef2cbd9`.
-Packed bootstrap receipt acceptance, image and hosted composition, release
-admission, generation and writeback remain open.
+Native bootstrap, preparation, evaluation and fitness acceptance plus native
+consumer composition are complete through `769042d`. Image production, image
+and hosted composition, release admission, generation and writeback remain
+open.
 
 **Files**
 
@@ -409,8 +409,8 @@ admission, generation and writeback remain open.
 The canonical component interfaces, receipt ownership and dependency graph are
 defined in
 [`ai-sdlc-product-architecture.md`](../governance/standards/ai-sdlc-product-architecture.md#capability-and-composition-model).
-Task 6 completes the direct acceptance gap for `prepare`, `check`, `check-all`
-and `fitness` before accepting their native consumer composition. Each component
+Task 6 accepts `bootstrap`, `prepare`, `check`, `check-all` and `fitness`
+directly before accepting their native consumer composition. Each component
 test invokes its packed public command with genuine upstream evidence and stops
 at the receipt owned by that component. Malformed receipt tests supply the bad
 receipt directly to its consumer. They never use a detached process to alter an
