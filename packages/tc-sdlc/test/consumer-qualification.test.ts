@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -42,17 +43,22 @@ function copiedManifest(rewrite: (manifest: string) => string): string {
   return manifest;
 }
 
-function qualification(cli: string, manifest: string) {
+function qualification(
+  cli: string,
+  manifest: string,
+  receiptRelative = "consumer-qualification.json",
+  environment: NodeJS.ProcessEnv = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "tc-sdlc-consumer-qualification-"));
   const output = join(root, "qualification");
-  const receipt = join(output, "consumer-qualification.json");
+  const receipt = join(output, receiptRelative);
   return {
     output,
     receipt,
     result: spawnSync(
       cli,
       ["qualify-consumers", "--manifest", manifest, "--output", output, "--receipt", receipt],
-      { encoding: "utf8" },
+      { encoding: "utf8", env: { ...process.env, ...environment } },
     ),
   };
 }
@@ -69,6 +75,14 @@ function failedQualification(cli: string, manifest: string) {
     error: { code: "CONSUMER_QUALIFICATION_FAILED" },
   });
   return { ...run, receipt: JSON.parse(readFileSync(run.receipt, "utf8")) };
+}
+
+function sha256(path: string): string {
+  return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
+}
+
+function evaluationIdentities(receipt: { tasks: readonly { identity: string }[] }): readonly string[] {
+  return receipt.tasks.map((task) => task.identity).sort();
 }
 
 describe("tc-sdlc qualify-consumers", () => {
@@ -102,6 +116,29 @@ describe("tc-sdlc qualify-consumers", () => {
         expect.objectContaining({ id: "mixed", status: "succeeded" }),
       ]),
     });
+    expect(receiptValue.manifestDigest).toBe(sha256(fixtureManifest));
+    for (const fixture of receiptValue.fixtures) {
+      expect(fixture.fixtureDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+      expect(fixture.preparation.firstPassTaskIdentities.length).toBeGreaterThan(0);
+      expect(fixture.preparation.secondPassTaskIdentities.length).toBeGreaterThan(0);
+      for (const [name, schema] of [
+        ["bootstrap", "tc.sdlc/bootstrap-receipt/v1"],
+        ["preparation", "tc.sdlc/preparation-receipt/v1"],
+        ["complete", "tc.sdlc/evaluation-receipt/v1"],
+        ["affected", "tc.sdlc/evaluation-receipt/v1"],
+      ] as const) {
+        const reference = fixture[name];
+        const nestedPath = join(output, reference.path);
+        expect(reference.digest).toBe(sha256(nestedPath));
+        expect(JSON.parse(readFileSync(nestedPath, "utf8"))).toMatchObject({ schema, status: "succeeded" });
+      }
+      for (const name of ["complete", "affected"] as const) {
+        const receiptPath = join(output, fixture[name].path);
+        const oneSlot = JSON.parse(readFileSync(`${receiptPath}.single`, "utf8"));
+        const detected = JSON.parse(readFileSync(receiptPath, "utf8"));
+        expect(evaluationIdentities(oneSlot)).toEqual(evaluationIdentities(detected));
+      }
+    }
   }, 180_000);
 
   test("rejects an unknown manifest field while retaining a terminal outer receipt", () => {
@@ -140,11 +177,71 @@ describe("tc-sdlc qualify-consumers", () => {
     }
   });
 
+  test("rejects fixture Git metadata before it can route Git outside the disposable checkout", () => {
+    const manifest = copiedManifest((value) => value);
+    const external = mkdtempSync(join(tmpdir(), "tc-sdlc-external-git-"));
+    writeFileSync(join(dirname(manifest), "python", ".git"), `gitdir: ${external}\n`);
+    const run = qualification(cli, manifest);
+    expect(run.result.status).toBe(1);
+    expect(run.result.stderr).toContain("fixture may not contain Git metadata");
+    expect(readFileSync(join(dirname(manifest), "python", ".git"), "utf8")).toBe(`gitdir: ${external}\n`);
+    expect(existsSync(join(external, "HEAD"))).toBe(false);
+  });
+
+  test("does not honour hostile inherited Git routing when creating a checkout", () => {
+    const external = mkdtempSync(join(tmpdir(), "tc-sdlc-external-git-routing-"));
+    const run = qualification(cli, fixtureManifest, "consumer-qualification.json", { GIT_DIR: external });
+    expect(run.result.status).toBe(0);
+    expect(existsSync(join(external, "HEAD"))).toBe(false);
+  }, 180_000);
+
   test("rejects a missing dependency lock before bootstrap", () => {
     const manifest = copiedManifest((value) => value);
     unlinkSync(join(dirname(manifest), "python", "uv.lock"));
     const run = failedQualification(cli, manifest);
     expect(run.receipt.reason).toContain("missing uv.lock");
+  });
+
+  test("retains the actual failed nested preparation receipt", () => {
+    const manifest = copiedManifest((value) => value);
+    const preparation = join(dirname(manifest), "python", "scripts", "prepare.py");
+    writeFileSync(preparation, `${readFileSync(preparation, "utf8")}\nraise SystemExit(1)\n`);
+    const run = failedQualification(cli, manifest);
+    const python = run.receipt.fixtures.find((fixture: { id: string }) => fixture.id === "python");
+    expect(python).toMatchObject({
+      status: "failed",
+      preparation: { path: "python/evidence/preparation.json", status: "failed" },
+    });
+    expect(sha256(join(run.output, python.preparation.path))).toBe(python.preparation.digest);
+    expect(JSON.parse(readFileSync(join(run.output, python.preparation.path), "utf8"))).toMatchObject({
+      schema: "tc.sdlc/preparation-receipt/v1",
+      status: "failed",
+    });
+  }, 180_000);
+
+  test("reserves the outer receipt path from nested qualification evidence", () => {
+    const run = qualification(cli, fixtureManifest, "python/evidence/complete.json");
+    expect(run.result.status).toBe(1);
+    expect(run.result.stderr).toContain("outer receipt path collides");
+  });
+
+  test("reserves consumer directories from an outer receipt collision", () => {
+    const run = qualification(cli, fixtureManifest, "python");
+    expect(run.result.status).toBe(1);
+    expect(run.result.stderr).toContain("outer receipt path collides");
+  });
+
+  test("rejects an outside receipt before creating an owned output directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-consumer-output-boundary-"));
+    const output = join(root, "qualification");
+    const result = spawnSync(
+      cli,
+      ["qualify-consumers", "--manifest", fixtureManifest, "--output", output, "--receipt", join(root, "outside.json")],
+      { encoding: "utf8" },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("receipt must be below the owned output directory");
+    expect(existsSync(output)).toBe(false);
   });
 
   test("rejects a complete task-set mismatch after retaining nested receipts", () => {

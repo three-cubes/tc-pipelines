@@ -1371,7 +1371,9 @@ function materializeDependencies(
           project,
           "install",
           "--frozen-lockfile",
-          "--ignore-workspace",
+          ...(existsSync(join(project, "pnpm-workspace.yaml"))
+            ? []
+            : ["--ignore-workspace"]),
           "--store-dir",
           join(stateRoot, "cache", "pnpm"),
         ],

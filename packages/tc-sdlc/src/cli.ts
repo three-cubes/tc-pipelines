@@ -160,6 +160,17 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
   }
 
   if (command === "catalogue") {
+    if (args.includes("--input")) {
+      const options = parseOptions(args, ["input", "output"]);
+      const catalogue = loadCatalogue(options.input!);
+      writeReleaseCatalogue(options.output!, catalogue);
+      success(command, {
+        release: catalogue.release.version,
+        catalogueDigest: bytesDigest(canonicalJson(catalogue)),
+        output: options.output,
+      });
+      return;
+    }
     const options = parseOptions(args, [
       "version",
       "fitness-version",

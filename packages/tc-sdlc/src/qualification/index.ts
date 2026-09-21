@@ -13,13 +13,17 @@ import {
 } from "node:fs";
 import { arch, platform } from "node:os";
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { parse } from "yaml";
 
 import { bytesDigest, canonicalJson, digest } from "../canonical.js";
+import { loadCatalogue } from "../catalogue/index.js";
 import { SdlcError } from "../errors.js";
 import { writeCanonicalEvidence } from "../evidence/index.js";
 import { snapshotFiles } from "../inputs/index.js";
+import { loadLock } from "../lock/index.js";
+import { loadDeclaration } from "../schema/declaration.js";
 import { assertSchema } from "../schema/validation.js";
 
 type Consumer = Readonly<{
@@ -43,6 +47,11 @@ type ReceiptReference = Readonly<{
   taskIdentities: readonly string[];
 }>;
 
+type PreparationReference = ReceiptReference & Readonly<{
+  firstPassTaskIdentities: readonly string[];
+  secondPassTaskIdentities: readonly string[];
+}>;
+
 type FixtureQualification = {
   id: string;
   fixtureDigest: string | null;
@@ -50,7 +59,7 @@ type FixtureQualification = {
   status: "succeeded" | "failed";
   reason: string | null;
   bootstrap: ReceiptReference;
-  preparation: ReceiptReference;
+  preparation: PreparationReference;
   complete: ReceiptReference;
   affected: ReceiptReference;
   identityStable: boolean | null;
@@ -73,12 +82,6 @@ export type QualifyConsumersOptions = Readonly<{
   receiptPath: string;
   executablePath: string;
 }>;
-
-const release = {
-  fitnessVersion: "0.17.1",
-  workflowCommit: "1234567890abcdef1234567890abcdef12345678",
-  imageDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-} as const;
 
 function sha256File(path: string): string {
   return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
@@ -127,6 +130,9 @@ function assertRealFixture(manifestDirectory: string, fixture: string): string {
   while (stack.length > 0) {
     const current = stack.pop()!;
     for (const name of readdirSync(current).sort()) {
+      if (name === ".git") {
+        throw new SdlcError("CONSUMER_FIXTURE_INVALID", "fixture may not contain Git metadata");
+      }
       const child = join(current, name);
       const metadata = lstatSync(child);
       if (metadata.isSymbolicLink()) {
@@ -193,13 +199,86 @@ function packageVersion(): string {
   return packageJson.version;
 }
 
+function packagedCataloguePath(): string {
+  return fileURLToPath(new URL("../release/catalogue.json", import.meta.url));
+}
+
+function validateOutputDestination(output: string, receipt: string): void {
+  if (existsSync(output)) {
+    throw new SdlcError("CONSUMER_OUTPUT_EXISTS", "consumer qualification output directory must not already exist");
+  }
+  const parent = dirname(output);
+  if (!existsSync(parent) || !lstatSync(parent).isDirectory() || lstatSync(parent).isSymbolicLink()) {
+    throw new SdlcError("CONSUMER_QUALIFICATION_PATH_INVALID", "output parent must be an existing real directory");
+  }
+  const relativeReceipt = ownRelative(output, receipt);
+  if (posix.dirname(relativeReceipt) !== "." || relativeReceipt === "." || relativeReceipt.startsWith(".")) {
+    throw new SdlcError("CONSUMER_QUALIFICATION_PATH_INVALID", "outer receipt path collides with reserved qualification namespace");
+  }
+}
+
+function reserveOuterReceipt(output: string, receipt: string, consumerIds: readonly string[]): void {
+  const relativeReceipt = ownRelative(output, receipt);
+  if (consumerIds.includes(relativeReceipt) || relativeReceipt === ".state") {
+    throw new SdlcError("CONSUMER_QUALIFICATION_PATH_INVALID", "outer receipt path collides with reserved qualification namespace");
+  }
+}
+
 function emptyReference(): ReceiptReference {
   return { path: null, digest: null, status: null, taskIdentities: [] };
 }
 
+function emptyPreparationReference(): PreparationReference {
+  return { ...emptyReference(), firstPassTaskIdentities: [], secondPassTaskIdentities: [] };
+}
+
+function receiptValue(path: string, schema: string): Record<string, unknown> {
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new SdlcError("CONSUMER_RECEIPT_INVALID", `nested ${schema} receipt is unreadable`);
+  }
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    (value as Record<string, unknown>).schema !== schema
+  ) {
+    throw new SdlcError("CONSUMER_RECEIPT_INVALID", `nested receipt does not have schema ${schema}`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireSucceededReceipt(path: string, schema: string): Record<string, unknown> {
+  const value = receiptValue(path, schema);
+  if (value.status !== "succeeded") {
+    throw new SdlcError("CONSUMER_RECEIPT_INVALID", `nested ${schema} receipt is not succeeded`);
+  }
+  return value;
+}
+
+function assertBoundReceipt(
+  receipt: Record<string, unknown>,
+  expected: Readonly<{ declarationDigest: string; catalogueDigest: string; lockDigest: string }>,
+): void {
+  if (
+    receipt.declarationDigest !== expected.declarationDigest ||
+    receipt.catalogueDigest !== expected.catalogueDigest ||
+    receipt.lockDigest !== expected.lockDigest
+  ) {
+    throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested receipt is not bound to the copied consumer declaration, catalogue and lock");
+  }
+}
+
 function receiptReference(output: string, path: string, taskIdentities: readonly string[] = []): ReceiptReference {
   if (!existsSync(path)) return emptyReference();
-  const value = JSON.parse(readFileSync(path, "utf8")) as { status?: unknown; taskIdentities?: unknown; tasks?: unknown; scheduler?: { selection?: unknown } };
+  let value: { status?: unknown; taskIdentities?: unknown; tasks?: unknown; scheduler?: { selection?: unknown } };
+  try {
+    value = JSON.parse(readFileSync(path, "utf8")) as typeof value;
+  } catch {
+    return { path: ownRelative(output, path), digest: sha256File(path), status: null, taskIdentities: [] };
+  }
   const identities = taskIdentities.length > 0
     ? [...taskIdentities].sort()
     : Array.isArray(value.taskIdentities)
@@ -210,6 +289,28 @@ function receiptReference(output: string, path: string, taskIdentities: readonly
           ? value.scheduler.selection.filter((entry): entry is string => typeof entry === "string").sort()
           : [];
   return { path: ownRelative(output, path), digest: sha256File(path), status: typeof value.status === "string" ? value.status : null, taskIdentities: identities };
+}
+
+function preparationReference(output: string, path: string): PreparationReference {
+  const reference = receiptReference(output, path);
+  if (!existsSync(path)) return emptyPreparationReference();
+  try {
+    const value = receiptValue(path, "tc.sdlc/preparation-receipt/v1") as {
+      firstPass?: { scheduler?: { selection?: unknown } };
+      secondPass?: { scheduler?: { selection?: unknown } };
+    };
+    const identities = (selection: unknown): readonly string[] =>
+      Array.isArray(selection)
+        ? selection.filter((entry): entry is string => typeof entry === "string").sort()
+        : [];
+    return {
+      ...reference,
+      firstPassTaskIdentities: identities(value.firstPass?.scheduler?.selection),
+      secondPassTaskIdentities: identities(value.secondPass?.scheduler?.selection),
+    };
+  } catch {
+    return { ...reference, firstPassTaskIdentities: [], secondPassTaskIdentities: [] };
+  }
 }
 
 function receiptTaskKeys(path: string): readonly string[] {
@@ -223,7 +324,10 @@ function receiptTaskKeys(path: string): readonly string[] {
 }
 
 function runPublic(executable: string, args: readonly string[]): void {
-  const result = spawnSync(process.execPath, [executable, ...args], { encoding: "utf8" });
+  const environment = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")),
+  );
+  const result = spawnSync(process.execPath, [executable, ...args], { encoding: "utf8", env: environment });
   if (result.status !== 0) {
     const diagnostic = typeof result.stderr === "string" ? result.stderr.trim() : "";
     throw new SdlcError("CONSUMER_COMMAND_FAILED", diagnostic || `tc-sdlc ${args[0]} failed`);
@@ -231,8 +335,17 @@ function runPublic(executable: string, args: readonly string[]): void {
 }
 
 function initialiseCheckout(root: string): void {
+  const gitHome = join(dirname(root), "git-home");
+  mkdirSync(gitHome, { recursive: true, mode: 0o700 });
+  const environment = {
+    PATH: "/usr/bin:/bin",
+    HOME: gitHome,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_TERMINAL_PROMPT: "0",
+  };
   for (const args of [["init", "-q"], ["config", "user.name", "tc-sdlc qualification"], ["config", "user.email", "qualification@three-cubes.invalid"], ["add", "."], ["commit", "-qm", "fixture"]] as const) {
-    const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+    const result = spawnSync("git", args, { cwd: root, env: environment, encoding: "utf8" });
     if (result.status !== 0) throw new SdlcError("CONSUMER_CHECKOUT_FAILED", `could not initialise disposable Git checkout: ${result.stderr}`);
   }
 }
@@ -240,6 +353,8 @@ function initialiseCheckout(root: string): void {
 function capacityIdentities(output: string, executable: string, base: readonly string[], singleReceipt: string, detectedReceipt: string): boolean {
   runPublic(executable, [...base, "--receipt", singleReceipt, "--capacity", "1"]);
   runPublic(executable, [...base, "--receipt", detectedReceipt]);
+  requireSucceededReceipt(singleReceipt, "tc.sdlc/evaluation-receipt/v1");
+  requireSucceededReceipt(detectedReceipt, "tc.sdlc/evaluation-receipt/v1");
   const single = receiptReference(output, singleReceipt).taskIdentities;
   const detected = receiptReference(output, detectedReceipt).taskIdentities;
   return canonicalJson(single) === canonicalJson(detected);
@@ -259,17 +374,26 @@ function appendChange(root: string, changed: string): void {
 
 export async function qualifyConsumers(options: QualifyConsumersOptions): Promise<ConsumerQualificationReceipt> {
   const output = resolve(options.outputDirectory);
-  if (existsSync(output)) throw new SdlcError("CONSUMER_OUTPUT_EXISTS", "consumer qualification output directory must not already exist");
-  mkdirSync(output, { recursive: true, mode: 0o700 });
   const receipt = resolve(options.receiptPath);
-  ownRelative(output, receipt);
-  const packageInfo = { name: "@three-cubes/tc-sdlc" as const, version: packageVersion() };
+  validateOutputDestination(output, receipt);
+  mkdirSync(output, { mode: 0o700 });
+  let packageInfo: Readonly<{ name: "@three-cubes/tc-sdlc"; version: string }> = {
+    name: "@three-cubes/tc-sdlc",
+    version: packageVersion(),
+  };
   const environment = { class: `native-${platform()}`, platform: platform(), architecture: arch() };
   const fixtures: FixtureQualification[] = [];
   let manifestDigest: string | null = null;
   let reason: string | null = null;
   try {
+    const authorityPath = packagedCataloguePath();
+    const authority = loadCatalogue(authorityPath);
+    if (authority.release.package.version !== packageInfo.version) {
+      throw new SdlcError("CONSUMER_QUALIFICATION_INTERNAL", "packed package version does not match its release catalogue authority");
+    }
+    packageInfo = authority.release.package;
     const manifest = loadManifest(options.manifestPath);
+    reserveOuterReceipt(output, receipt, manifest.consumers.map((consumer) => consumer.id));
     manifestDigest = sha256File(options.manifestPath);
     for (const consumer of manifest.consumers) {
       const bootstrap = join(output, consumer.id, "evidence", "bootstrap.json");
@@ -285,7 +409,7 @@ export async function qualifyConsumers(options: QualifyConsumersOptions): Promis
         status: "failed",
         reason: null as string | null,
         bootstrap: emptyReference(),
-        preparation: emptyReference(),
+        preparation: emptyPreparationReference(),
         complete: emptyReference(),
         affected: emptyReference(),
         identityStable: null as boolean | null,
@@ -302,29 +426,61 @@ export async function qualifyConsumers(options: QualifyConsumersOptions): Promis
         const catalogue = join(output, consumer.id, "catalogue.json");
         const lock = join(checkout, "tc-sdlc.lock");
         const state = join(output, ".state", consumer.id);
-        runPublic(options.executablePath, ["catalogue", "--version", packageInfo.version, "--fitness-version", release.fitnessVersion, "--workflow-commit", release.workflowCommit, "--image-digest", release.imageDigest, "--output", catalogue]);
+        runPublic(options.executablePath, ["catalogue", "--input", authorityPath, "--output", catalogue]);
         runPublic(options.executablePath, ["lock", "--declaration", join(checkout, "sdlc.yaml"), "--catalogue", catalogue, "--output", lock]);
+        const declaration = loadDeclaration(join(checkout, "sdlc.yaml"));
+        const copiedCatalogue = loadCatalogue(catalogue);
+        const copiedLock = loadLock(lock).lock;
+        const bindings = {
+          declarationDigest: digest(declaration),
+          catalogueDigest: digest(copiedCatalogue),
+          lockDigest: digest(copiedLock),
+        };
         runPublic(options.executablePath, ["bootstrap", "--declaration", join(checkout, "sdlc.yaml"), "--catalogue", catalogue, "--lock", lock, "--root", checkout, "--state-root", state, "--receipt", bootstrap]);
+        const bootstrapReceipt = requireSucceededReceipt(bootstrap, "tc.sdlc/bootstrap-receipt/v1");
+        if (bootstrapReceipt.lockDigest !== bindings.lockDigest || bootstrapReceipt.release !== copiedCatalogue.release.version) {
+          throw new SdlcError("CONSUMER_RECEIPT_INVALID", "bootstrap receipt is not bound to the copied consumer lock and release");
+        }
         appendChange(checkout, consumer.changed);
         runPublic(options.executablePath, ["prepare", "--declaration", join(checkout, "sdlc.yaml"), "--catalogue", catalogue, "--lock", lock, "--root", checkout, "--state-root", state, "--bootstrap-receipt", bootstrap, "--receipt", preparation]);
+        const preparationReceipt = requireSucceededReceipt(preparation, "tc.sdlc/preparation-receipt/v1");
+        assertBoundReceipt(preparationReceipt, bindings);
+        if (
+          preparationReceipt.bootstrapContext === null ||
+          typeof preparationReceipt.bootstrapContext !== "object" ||
+          canonicalJson(preparationReceipt.firstPass) === canonicalJson(undefined) ||
+          canonicalJson(preparationReceipt.secondPass) === canonicalJson(undefined)
+        ) {
+          throw new SdlcError("CONSUMER_RECEIPT_INVALID", "preparation receipt does not retain both fixed-point passes and bootstrap binding");
+        }
         const common = ["--declaration", join(checkout, "sdlc.yaml"), "--catalogue", catalogue, "--lock", lock, "--root", checkout, "--state-root", state, "--bootstrap-receipt", bootstrap, "--preparation-receipt", preparation, "--environment", environment.class, "--producer", "tc-sdlc qualify-consumers"];
         const completeStable = capacityIdentities(output, options.executablePath, ["check-all", ...common], completeSingle, complete);
         const affectedStable = capacityIdentities(output, options.executablePath, ["check", ...common, "--changed", consumer.changed], affectedSingle, affected);
         const completeReference = receiptReference(output, complete);
         const affectedReference = receiptReference(output, affected);
+        const completeReceipt = requireSucceededReceipt(complete, "tc.sdlc/evaluation-receipt/v1");
+        const affectedReceipt = requireSucceededReceipt(affected, "tc.sdlc/evaluation-receipt/v1");
+        assertBoundReceipt(completeReceipt, bindings);
+        assertBoundReceipt(affectedReceipt, bindings);
+        if (
+          canonicalJson(completeReceipt.bootstrapContext) !== canonicalJson(preparationReceipt.bootstrapContext) ||
+          canonicalJson(affectedReceipt.bootstrapContext) !== canonicalJson(preparationReceipt.bootstrapContext)
+        ) {
+          throw new SdlcError("CONSUMER_RECEIPT_INVALID", "evaluation receipt bootstrap binding does not match preparation");
+        }
         if (canonicalJson(receiptTaskKeys(complete)) !== canonicalJson([...consumer.complete_tasks].sort())) throw new SdlcError("CONSUMER_TASK_SET_MISMATCH", `complete task set does not match fixture declaration: ${consumer.id}`);
         if (canonicalJson(receiptTaskKeys(affected)) !== canonicalJson([...consumer.affected_tasks].sort())) throw new SdlcError("CONSUMER_AFFECTED_CLOSURE_MISMATCH", `affected task set does not match fixture declaration: ${consumer.id}`);
         if (!completeStable || !affectedStable) throw new SdlcError("CONSUMER_IDENTITY_UNSTABLE", `task identities changed with capacity: ${consumer.id}`);
         fixtureResult.status = "succeeded";
         fixtureResult.bootstrap = receiptReference(output, bootstrap);
-        fixtureResult.preparation = receiptReference(output, preparation);
+        fixtureResult.preparation = preparationReference(output, preparation);
         fixtureResult.complete = completeReference;
         fixtureResult.affected = affectedReference;
         fixtureResult.identityStable = true;
       } catch (error) {
         fixtureResult.reason = error instanceof Error ? error.message : String(error);
         fixtureResult.bootstrap = receiptReference(output, bootstrap);
-        fixtureResult.preparation = receiptReference(output, preparation);
+        fixtureResult.preparation = preparationReference(output, preparation);
         fixtureResult.complete = receiptReference(output, existsSync(complete) ? complete : completeSingle);
         fixtureResult.affected = receiptReference(output, existsSync(affected) ? affected : affectedSingle);
       }
