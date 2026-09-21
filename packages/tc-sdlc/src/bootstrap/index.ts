@@ -5,9 +5,11 @@ import {
   chmodSync,
   constants,
   existsSync,
+  globSync,
   lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   readdirSync,
   renameSync,
@@ -66,6 +68,7 @@ export type BootstrapDependencyEvidence = Readonly<{
   manifestDigest: string;
   environment: string;
   inputs: readonly BootstrapDependencyInput[];
+  installedDigest?: string;
 }>;
 
 export type BootstrapReceipt = Readonly<{
@@ -121,7 +124,7 @@ type DependencyLock = BootstrapDependencyEvidence & Readonly<{
 }>;
 
 type BootstrapState = Readonly<{
-  schema: "tc.sdlc/bootstrap-state/v4";
+  schema: "tc.sdlc/bootstrap-state/v5";
   release: string;
   lockDigest: string;
   dependencyDigest: string;
@@ -173,6 +176,32 @@ class BootstrapFailure extends Error {
 
 function fileDigest(path: string): string {
   return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
+}
+
+function directoryDigest(root: string): string {
+  if (!existsSync(root) || lstatSync(root).isSymbolicLink() || !lstatSync(root).isDirectory()) {
+    throw new Error("dependency environment is not a real directory");
+  }
+  const entries: Record<string, unknown>[] = [];
+  const visit = (directory: string, prefix: string): void => {
+    for (const name of readdirSync(directory).sort()) {
+      const path = join(directory, name);
+      const relativePath = prefix === "" ? name : posix.join(prefix, name);
+      const metadata = lstatSync(path);
+      if (metadata.isSymbolicLink()) {
+        entries.push({ path: relativePath, type: "symlink", target: readlinkSync(path) });
+      } else if (metadata.isDirectory()) {
+        entries.push({ path: relativePath, type: "directory" });
+        visit(path, relativePath);
+      } else if (metadata.isFile()) {
+        entries.push({ path: relativePath, type: "file", digest: fileDigest(path) });
+      } else {
+        throw new Error(`dependency environment contains an unsupported entry: ${relativePath}`);
+      }
+    }
+  };
+  visit(root, "");
+  return digest(entries);
 }
 
 function remediation(host: BootstrapHost, catalogue: ReleaseCatalogue): string {
@@ -365,11 +394,12 @@ function capability(
   expected: string,
   provider: HostCapability["provider"],
   pathValue: string,
+  environment: NodeJS.ProcessEnv = {},
 ): HostCapability {
   accessSync(executable, constants.X_OK);
   const resolved = realpathSync(executable);
   if (!lstatSync(resolved).isFile()) throw new Error("capability is not a regular file");
-  const observed = contract.observed(probeOutput(resolved, pathValue));
+  const observed = contract.observed(probeOutput(resolved, pathValue, environment));
   if (observed === null || !contract.matches(observed, expected)) {
     throw new Error(`${contract.name} expected ${expected}, observed ${observed ?? "unrecognised"}`);
   }
@@ -386,6 +416,7 @@ function homebrewCapabilities(
   host: BootstrapHost,
   declaration: SdlcDeclaration,
   catalogue: ReleaseCatalogue,
+  stateRoot: string,
 ): Readonly<{ adapters: readonly HostCapability[]; installerUv: HostCapability }> {
   const prefix = host.architecture === "arm64" ? "/opt/homebrew" : "/usr/local";
   try {
@@ -404,18 +435,40 @@ function homebrewCapabilities(
     const pnpm = join(prefix, "opt", "node@24", "bin", "pnpm");
     const python = join(prefix, "opt", "python@3.13", "libexec", "bin", "python3");
     const pathValue = [dirname(node), dirname(python), join(prefix, "bin"), "/usr/bin", "/bin"].join(":");
+    const probeEnvironment = managedProbeEnvironment(
+      stateRoot,
+      host,
+      pathValue,
+    );
     const adapters = [
-      capability(contracts[0]!, node, declaration.toolchains.node, "homebrew", pathValue),
+      capability(
+        contracts[0]!,
+        node,
+        declaration.toolchains.node,
+        "homebrew",
+        pathValue,
+        probeEnvironment,
+      ),
       capability(
         contracts[1]!,
         pnpm,
         declaration.toolchains.packageManager.replace(/^pnpm@/, ""),
         "homebrew",
         pathValue,
+        probeEnvironment,
       ),
-      capability(contracts[2]!, python, declaration.toolchains.python, "homebrew", pathValue),
+      capability(
+        contracts[2]!,
+        python,
+        declaration.toolchains.python,
+        "homebrew",
+        pathValue,
+        probeEnvironment,
+      ),
     ];
-    const installerVersion = contracts[3]!.observed(probeOutput(uvExecutable, pathValue));
+    const installerVersion = contracts[3]!.observed(
+      probeOutput(uvExecutable, pathValue, probeEnvironment),
+    );
     if (installerVersion === null) throw new Error("Homebrew uv version was not recognised");
     const [major, minor, patch] = installerVersion.split(".").map(Number);
     if (major !== 0 || minor !== 12 || (patch ?? 0) < 5) {
@@ -443,6 +496,7 @@ function canonicalImageCapabilities(
   host: BootstrapHost,
   declaration: SdlcDeclaration,
   catalogue: ReleaseCatalogue,
+  stateRoot: string,
 ): Readonly<{ adapters: readonly HostCapability[]; installerUv: HostCapability }> {
   try {
     const marker = readCanonical("/etc/tc-sdlc-release.json") as Record<string, unknown>;
@@ -460,6 +514,11 @@ function canonicalImageCapabilities(
       "/usr/local/bin/uv",
     ] as const;
     const pathValue = "/usr/local/bin:/usr/bin:/bin";
+    const probeEnvironment = managedProbeEnvironment(
+      stateRoot,
+      host,
+      pathValue,
+    );
     const adapters = contracts.map((contract, index) =>
       capability(
         contract,
@@ -467,6 +526,7 @@ function canonicalImageCapabilities(
         contract.expected(declaration),
         "canonical-image",
         pathValue,
+        probeEnvironment,
       ),
     );
     return { adapters, installerUv: adapters[3]! };
@@ -484,10 +544,96 @@ function hostCapabilities(
   host: BootstrapHost,
   declaration: SdlcDeclaration,
   catalogue: ReleaseCatalogue,
+  stateRoot: string,
 ): ReturnType<typeof homebrewCapabilities> {
   return host.platform === "darwin"
-    ? homebrewCapabilities(host, declaration, catalogue)
-    : canonicalImageCapabilities(host, declaration, catalogue);
+    ? homebrewCapabilities(host, declaration, catalogue, stateRoot)
+    : canonicalImageCapabilities(host, declaration, catalogue, stateRoot);
+}
+
+function pnpmLockFailure(code: string, message: string): BootstrapFailure {
+  return new BootstrapFailure("dependency_lock_invalid", [
+    {
+      code,
+      message,
+      action: "regenerate pnpm-lock.yaml with the declared pnpm version",
+    },
+  ]);
+}
+
+function workspaceImporterPaths(
+  root: string,
+  workspace: Record<string, unknown>,
+): readonly string[] {
+  const packages = workspace.packages;
+  if (!Array.isArray(packages) || packages.some((pattern) => typeof pattern !== "string")) {
+    throw pnpmLockFailure(
+      "PNPM_WORKSPACE_PACKAGES_INVALID",
+      "pnpm-workspace.yaml must declare package directory globs",
+    );
+  }
+  const included = new Set<string>();
+  const excluded: string[] = [];
+  for (const rawPattern of packages as string[]) {
+    const negated = rawPattern.startsWith("!");
+    const pattern = negated ? rawPattern.slice(1) : rawPattern;
+    if (
+      pattern === "" ||
+      isAbsolute(pattern) ||
+      pattern.split("/").some((segment) => segment === "..")
+    ) {
+      throw pnpmLockFailure(
+        "PNPM_WORKSPACE_PACKAGES_INVALID",
+        "pnpm workspace package globs must remain inside the checkout",
+      );
+    }
+    const manifestPattern = `${pattern.replace(/\/$/, "")}/package.json`;
+    if (negated) {
+      excluded.push(manifestPattern);
+      continue;
+    }
+    for (const match of globSync(manifestPattern, {
+      cwd: root,
+      exclude: ["**/node_modules/**"],
+    })) {
+      included.add(match.replaceAll("\\", "/"));
+    }
+  }
+  for (const pattern of excluded) {
+    for (const match of globSync(pattern, { cwd: root })) {
+      included.delete(match.replaceAll("\\", "/"));
+    }
+  }
+  return [...included]
+    .map((manifest) => posix.dirname(manifest))
+    .map((importer) => importer === "." ? "." : importer)
+    .sort();
+}
+
+function validatedPnpmImporters(
+  root: string,
+  lock: Readonly<{ importers?: Record<string, unknown> }>,
+  workspace: Record<string, unknown> | undefined,
+): readonly string[] {
+  if (lock.importers === undefined || typeof lock.importers !== "object") {
+    throw pnpmLockFailure(
+      "PNPM_IMPORTERS_MISSING",
+      "pnpm-lock.yaml must declare its complete importer graph",
+    );
+  }
+  const importers = Object.keys(lock.importers)
+    .map((importer) => importer === "" || importer === "./" ? "." : posix.normalize(importer))
+    .sort();
+  if (workspace !== undefined) {
+    const workspaceImporters = [...new Set([".", ...workspaceImporterPaths(root, workspace)])].sort();
+    if (canonicalJson(importers) !== canonicalJson(workspaceImporters)) {
+      throw pnpmLockFailure(
+        "PNPM_WORKSPACE_LOCK_MISMATCH",
+        "pnpm-lock.yaml importers do not match every declared workspace package",
+      );
+    }
+  }
+  return importers;
 }
 
 function dependencyLocks(root: string): readonly DependencyLock[] {
@@ -506,15 +652,6 @@ function dependencyLocks(root: string): readonly DependencyLock[] {
     const lock = parse(readFileSync(pnpmLock, "utf8")) as {
       importers?: Record<string, unknown>;
     };
-    if (lock.importers === undefined || typeof lock.importers !== "object") {
-      throw new BootstrapFailure("dependency_lock_invalid", [
-        {
-          code: "PNPM_IMPORTERS_MISSING",
-          message: "pnpm-lock.yaml must declare its complete importer graph",
-          action: "regenerate pnpm-lock.yaml with the declared pnpm version",
-        },
-      ]);
-    }
     const inputPaths = new Set(["package.json", "pnpm-lock.yaml"]);
     const workspacePath = join(root, "pnpm-workspace.yaml");
     let workspace: Record<string, unknown> | undefined;
@@ -522,7 +659,7 @@ function dependencyLocks(root: string): readonly DependencyLock[] {
       inputPaths.add("pnpm-workspace.yaml");
       workspace = parse(readFileSync(workspacePath, "utf8")) as Record<string, unknown>;
     }
-    for (const importer of Object.keys(lock.importers)) {
+    for (const importer of validatedPnpmImporters(root, lock, workspace)) {
       inputPaths.add(importer === "." ? "package.json" : posix.join(importer, "package.json"));
     }
     const rootManifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
@@ -631,6 +768,17 @@ function managedEnvironment(
     COREPACK_HOME: join(stateDirectory, "corepack"),
     COREPACK_ENABLE_NETWORK: offline ? "0" : "1",
   };
+}
+
+function managedProbeEnvironment(
+  stateRoot: string,
+  host: BootstrapHost,
+  pathValue: string,
+): NodeJS.ProcessEnv {
+  const directory = join(stateRoot, "probes", `${host.platform}-${host.architecture}`);
+  rejectSymlinkComponents(stateRoot, directory);
+  rejectSymlinkComponents(stateRoot, join(stateRoot, "cache"));
+  return managedEnvironment(stateRoot, directory, pathValue, host.offline);
 }
 
 function writeAtomicExecutable(path: string, bytes: string): void {
@@ -771,7 +919,7 @@ function materializeDependencies(
   stateDirectory: string,
   dependencies: readonly DependencyLock[],
   adapters: readonly ResolvedAdapter[],
-): void {
+): readonly BootstrapDependencyEvidence[] {
   const byName = new Map(adapters.map((adapter) => [adapter.name, adapter]));
   const pathValue = [
     dirname(byName.get("node")!.executable),
@@ -782,6 +930,7 @@ function materializeDependencies(
     "/bin",
   ].join(":");
   const env = managedEnvironment(stateRoot, stateDirectory, pathValue, options.host?.offline ?? false);
+  const evidence: BootstrapDependencyEvidence[] = [];
   for (const dependency of dependencies) {
     const destination = resolve(stateDirectory, dependency.environment);
     mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
@@ -805,6 +954,10 @@ function materializeDependencies(
         ],
         { cwd: project, env, stdio: "pipe" },
       );
+      evidence.push({
+        ...dependencyBinding(dependency),
+        installedDigest: directoryDigest(project),
+      });
     } else {
       execFileSync(
         byName.get("uv")!.executable,
@@ -815,8 +968,20 @@ function materializeDependencies(
           stdio: "pipe",
         },
       );
+      evidence.push(dependencyBinding(dependency));
     }
   }
+  return evidence;
+}
+
+function dependencyBinding(dependency: DependencyLock): BootstrapDependencyEvidence {
+  return {
+    manager: dependency.manager,
+    lockDigest: dependency.lockDigest,
+    manifestDigest: dependency.manifestDigest,
+    environment: dependency.environment,
+    inputs: dependency.inputs.map(({ path, digest: value }) => ({ path, digest: value })),
+  };
 }
 
 async function materializeState(
@@ -828,7 +993,7 @@ async function materializeState(
   dependencyDigest: string,
   dependencies: readonly DependencyLock[],
   prerequisites: ReturnType<typeof hostCapabilities>,
-): Promise<readonly ResolvedAdapter[]> {
+): Promise<BootstrapState> {
   const directory = resolve(stateRoot, stateKey);
   rejectSymlinkComponents(stateRoot, directory);
   if (existsSync(directory)) {
@@ -857,27 +1022,25 @@ async function materializeState(
   const adapters = capabilities.map((value) =>
     resolvedAdapter(stateRoot, stateKey, value, capabilities),
   );
-  materializeDependencies(options, stateRoot, directory, dependencies, adapters);
+  const dependencyEvidence = materializeDependencies(
+    options,
+    stateRoot,
+    directory,
+    dependencies,
+    adapters,
+  );
   const state: BootstrapState = {
-    schema: "tc.sdlc/bootstrap-state/v4",
+    schema: "tc.sdlc/bootstrap-state/v5",
     release: options.catalogue.release.version,
     lockDigest,
     dependencyDigest,
     platform: host.platform,
     architecture: host.architecture,
     adapters,
-    dependencies: dependencies.map(
-      ({ manager, lockDigest: value, manifestDigest, environment, inputs }) => ({
-        manager,
-        lockDigest: value,
-        manifestDigest,
-        environment,
-        inputs: inputs.map(({ path, digest: value }) => ({ path, digest: value })),
-      }),
-    ),
+    dependencies: dependencyEvidence,
   };
   writeCanonicalEvidence(join(directory, "state.json"), state);
-  return adapters;
+  return state;
 }
 
 function validateWarmState(
@@ -889,7 +1052,7 @@ function validateWarmState(
   dependencyDigest: string,
   dependencies: readonly DependencyLock[],
   prerequisites: ReturnType<typeof hostCapabilities>,
-): readonly ResolvedAdapter[] | null {
+): BootstrapState | null {
   const statePath = resolve(stateRoot, stateKey, "state.json");
   rejectSymlinkComponents(stateRoot, statePath);
   if (!existsSync(statePath)) {
@@ -906,23 +1069,18 @@ function validateWarmState(
   }
   try {
     const state = readCanonical(statePath) as BootstrapState;
-    const expectedDependencies = dependencies.map(
-      ({ manager, lockDigest: value, manifestDigest, environment, inputs }) => ({
-        manager,
-        lockDigest: value,
-        manifestDigest,
-        environment,
-        inputs: inputs.map(({ path, digest: value }) => ({ path, digest: value })),
-      }),
+    const expectedDependencies = dependencies.map(dependencyBinding);
+    const stateDependencyBindings = state.dependencies.map(
+      ({ installedDigest: _installedDigest, ...binding }) => binding,
     );
     if (
-      state.schema !== "tc.sdlc/bootstrap-state/v4" ||
+      state.schema !== "tc.sdlc/bootstrap-state/v5" ||
       state.release !== options.catalogue.release.version ||
       state.lockDigest !== lockDigest ||
       state.dependencyDigest !== dependencyDigest ||
       state.platform !== host.platform ||
       state.architecture !== host.architecture ||
-      canonicalJson(state.dependencies) !== canonicalJson(expectedDependencies) ||
+      canonicalJson(stateDependencyBindings) !== canonicalJson(expectedDependencies) ||
       !Array.isArray(state.adapters) ||
       state.adapters.length !== contracts.length
     ) {
@@ -997,11 +1155,23 @@ function validateWarmState(
       }
     }
     for (const dependency of state.dependencies) {
-      if (!existsSync(resolve(stateRoot, stateKey, dependency.environment))) {
+      const environment = resolve(stateRoot, stateKey, dependency.environment);
+      rejectSymlinkComponents(stateRoot, environment);
+      if (!existsSync(environment)) {
         throw new Error("dependency environment missing");
       }
+      if (
+        dependency.manager === "pnpm" &&
+        (!/^sha256:[0-9a-f]{64}$/.test(dependency.installedDigest ?? "") ||
+          directoryDigest(environment) !== dependency.installedDigest)
+      ) {
+        throw new Error("installed dependency environment changed");
+      }
+      if (dependency.manager === "uv" && dependency.installedDigest !== undefined) {
+        throw new Error("unexpected installed dependency binding");
+      }
     }
-    return state.adapters;
+    return state;
   } catch (error) {
     if (error instanceof BootstrapFailure) throw error;
     throw new BootstrapFailure("state_corrupt", [
@@ -1101,15 +1271,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
     const bound = bindGraphLock(options.declaration, options.lock, options.catalogue, inventory);
     taskIdentities = buildGraph(options.declaration, bound).tasks.map((task) => task.identity);
     const dependencies = dependencyLocks(options.root);
-    dependencyEvidence = dependencies.map(
-      ({ manager, lockDigest: value, manifestDigest, environment, inputs }) => ({
-        manager,
-        lockDigest: value,
-        manifestDigest,
-        environment,
-        inputs: inputs.map(({ path, digest: value }) => ({ path, digest: value })),
-      }),
-    );
+    dependencyEvidence = dependencies.map(dependencyBinding);
     const dependencyDigest = digest(dependencyEvidence);
     stateKey = posix.join(
       "releases",
@@ -1119,7 +1281,17 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
     );
     const stateRoot = validateStateRoot(options.root, options.stateRoot);
     const ownership = inspectOwnership(stateRoot);
-    const prerequisites = hostCapabilities(host, options.declaration, options.catalogue);
+    mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
+    chmodSync(stateRoot, 0o700);
+    if (ownership === "absent") {
+      writeCanonicalEvidence(join(stateRoot, ".tc-sdlc-owner.json"), OWNER);
+    }
+    const prerequisites = hostCapabilities(
+      host,
+      options.declaration,
+      options.catalogue,
+      stateRoot,
+    );
     if (ownership === "owned") {
       const warm = validateWarmState(
         options,
@@ -1133,7 +1305,8 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       );
       if (warm !== null) {
         reused = true;
-        adapters = warm.map(adapterEvidence);
+        adapters = warm.adapters.map(adapterEvidence);
+        dependencyEvidence = warm.dependencies;
       }
     }
     if (!reused) {
@@ -1146,23 +1319,18 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
           },
         ]);
       }
-      mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
-      chmodSync(stateRoot, 0o700);
-      if (ownership === "absent") {
-        writeCanonicalEvidence(join(stateRoot, ".tc-sdlc-owner.json"), OWNER);
-      }
-      adapters = (
-        await materializeState(
-          options,
-          host,
-          stateRoot,
-          stateKey,
-          lockDigest,
-          dependencyDigest,
-          dependencies,
-          prerequisites,
-        )
-      ).map(adapterEvidence);
+      const state = await materializeState(
+        options,
+        host,
+        stateRoot,
+        stateKey,
+        lockDigest,
+        dependencyDigest,
+        dependencies,
+        prerequisites,
+      );
+      adapters = state.adapters.map(adapterEvidence);
+      dependencyEvidence = state.dependencies;
     }
     const receipt: BootstrapReceipt = {
       schema: "tc.sdlc/bootstrap-receipt/v1",

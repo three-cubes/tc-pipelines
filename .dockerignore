@@ -7,3 +7,4 @@ node_modules
 packages/tc-sdlc/dist
 packages/tc-sdlc/node_modules
 assurance
+artifacts

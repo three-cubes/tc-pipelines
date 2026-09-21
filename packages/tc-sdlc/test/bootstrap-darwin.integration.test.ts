@@ -5,10 +5,11 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +24,21 @@ const workspaceConsumer = fileURLToPath(
 const CLI = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 const imageDigest =
   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+function homebrewPrerequisitesAvailable(architecture: "arm64" | "x64"): boolean {
+  const prefix = architecture === "arm64" ? "/opt/homebrew" : "/usr/local";
+  return [
+    "bin/brew",
+    "opt/node@24/bin/node",
+    "opt/node@24/bin/pnpm",
+    "opt/python@3.13/libexec/bin/python3",
+    "bin/uv",
+  ].every((path) => existsSync(join(prefix, path)));
+}
+
+const unavailableDarwinArchitecture = (["arm64", "x64"] as const).find(
+  (architecture) => !homebrewPrerequisitesAvailable(architecture),
+);
 
 function input(
   root: string,
@@ -89,7 +105,7 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(execFileSync("docker", ["--version"], { encoding: "utf8" })).toContain("Docker version");
   });
 
-  test("emits one syntactically executable macOS prerequisite remediation command", async () => {
+  test.skipIf(unavailableDarwinArchitecture === undefined)("emits one syntactically executable macOS prerequisite remediation command", async () => {
     expect(process.platform).toBe("darwin");
     const root = mkdtempSync(join(tmpdir(), "tc-sdlc-mac-remediation-"));
     for (const name of ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"]) {
@@ -104,7 +120,7 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       ...values,
       stateRoot: mkdtempSync(join(tmpdir(), "tc-sdlc-mac-remediation-state-")),
       receiptPath: join(dirname(root), "mac-remediation.json"),
-      host: { platform: "darwin", architecture: "x64", offline: false },
+      host: { platform: "darwin", architecture: unavailableDarwinArchitecture!, offline: false },
     });
 
     expect(receipt).toMatchObject({
@@ -200,6 +216,43 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     });
     expect(warm).toMatchObject({ status: "succeeded", reused: true });
 
+    const declarationPath = join(root, "sdlc.json");
+    const cataloguePath = join(root, "catalogue.json");
+    const lockPath = join(root, "tc-sdlc.lock");
+    writeFileSync(declarationPath, sdlc.canonicalJson(options.declaration));
+    writeFileSync(cataloguePath, sdlc.canonicalJson(options.catalogue));
+    sdlc.writeLock(lockPath, options.lock);
+    const ambientCorepack = join(homedir(), ".cache", "node", "corepack");
+    const sandboxedWarm = spawnSync(
+      "/usr/bin/sandbox-exec",
+      [
+        "-p",
+        `(version 1)(allow default)(deny file-read* file-write* (subpath ${JSON.stringify(ambientCorepack)}))`,
+        process.execPath,
+        CLI,
+        "bootstrap",
+        "--declaration", declarationPath,
+        "--catalogue", cataloguePath,
+        "--lock", lockPath,
+        "--root", root,
+        "--state-root", stateRoot,
+        "--receipt", `${receiptPath}.sandboxed`,
+        "--offline", "true",
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: emptyHome,
+          PATH: "/untrusted",
+          XDG_CACHE_HOME: join(homedir(), ".cache"),
+          COREPACK_HOME: ambientCorepack,
+        },
+      },
+    );
+    expect(sandboxedWarm.status, sandboxedWarm.stderr).toBe(0);
+    expect(JSON.parse(sandboxedWarm.stdout)).toMatchObject({ status: "ok", reused: true });
+
     const originalManifest = readFileSync(join(root, "package.json"), "utf8");
     const changedManifest = JSON.parse(originalManifest);
     changedManifest.description = "identity-affecting manifest change";
@@ -281,7 +334,8 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     writeFileSync(memberManifest, `${JSON.stringify(changed, null, 2)}\n`);
 
     const patch = join(root, "patches", "is-number@7.0.0.patch");
-    writeFileSync(patch, `${readFileSync(patch, "utf8")}\n`);
+    const originalPatch = readFileSync(patch, "utf8");
+    writeFileSync(patch, `${originalPatch}\n`);
     const stalePatch = await sdlc.bootstrap({
       ...options,
       stateRoot,
@@ -290,6 +344,29 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     });
     expect(stalePatch).toMatchObject({ status: "failed", reason: "offline_cold" });
     expect(stalePatch.stateKey).not.toBe(receipt.stateKey);
+    writeFileSync(patch, originalPatch);
+
+    expect(receipt.dependencies[0]?.installedDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    const installedManifest = join(environment, "packages", "a", "node_modules", "yaml", "package.json");
+    const originalInstalledManifest = readFileSync(installedManifest, "utf8");
+    writeFileSync(installedManifest, `${originalInstalledManifest}\n`);
+    const tamperedInstalledTree = await sdlc.bootstrap({
+      ...options,
+      stateRoot,
+      receiptPath: join(dirname(stateRoot), "workspace-tampered-installed-tree.json"),
+      host: { platform: "darwin", architecture: process.arch, offline: true },
+    });
+    expect(tamperedInstalledTree).toMatchObject({ status: "failed", reason: "state_corrupt" });
+    writeFileSync(installedManifest, originalInstalledManifest);
+
+    rmSync(join(environment, "node_modules"), { recursive: true });
+    const missingInstalledTree = await sdlc.bootstrap({
+      ...options,
+      stateRoot,
+      receiptPath: join(dirname(stateRoot), "workspace-missing-installed-tree.json"),
+      host: { platform: "darwin", architecture: process.arch, offline: true },
+    });
+    expect(missingInstalledTree).toMatchObject({ status: "failed", reason: "state_corrupt" });
   }, 30_000);
 
   test("rejects foreign, symlinked, in-checkout and stale state before host use", async () => {

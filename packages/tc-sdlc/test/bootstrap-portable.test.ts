@@ -1,7 +1,9 @@
 import * as sdlc from "../dist/index.js";
 import {
+  cpSync,
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   symlinkSync,
   writeFileSync,
@@ -14,6 +16,9 @@ import { describe, expect, test } from "vitest";
 
 const consumer = fileURLToPath(
   new URL("./fixtures/bootstrap-consumer", import.meta.url),
+);
+const workspaceConsumer = fileURLToPath(
+  new URL("./fixtures/bootstrap-workspace", import.meta.url),
 );
 
 function fixture() {
@@ -105,5 +110,44 @@ describe("portable bootstrap public boundary", () => {
       host,
     });
     expect(receipt).toMatchObject({ status: "failed", reason: "stale_lock" });
+  });
+
+  test("rejects a workspace package omitted from the stale pnpm lock before host discovery", async () => {
+    const root = mkdtempSync(join(tmpdir(), "tc-sdlc-portable-workspace-"));
+    cpSync(workspaceConsumer, root, { recursive: true });
+    mkdirSync(join(root, "packages", "new-member"), { recursive: true });
+    writeFileSync(
+      join(root, "packages", "new-member", "package.json"),
+      `${JSON.stringify({ name: "new-member", version: "1.0.0" }, null, 2)}\n`,
+    );
+    const values = fixture();
+    const declaration = sdlc.validateDeclaration({
+      ...values.declaration,
+      projects: [{ name: "consumer", root: "." }],
+      targets: {
+        check: {
+          command: "node --version",
+          mode: "evaluate",
+          trustBoundary: "portable",
+          inputs: ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "packages/**/*.json"],
+        },
+      },
+    });
+    const lock = sdlc.resolveLock(declaration, values.catalogue);
+    const receipt = await sdlc.bootstrap({
+      root,
+      declaration,
+      catalogue: values.catalogue,
+      lock,
+      stateRoot: mkdtempSync(join(tmpdir(), "tc-sdlc-portable-workspace-state-")),
+      receiptPath: join(dirname(root), "portable-workspace-stale-lock.json"),
+      host,
+    });
+
+    expect(receipt).toMatchObject({
+      status: "failed",
+      reason: "dependency_lock_invalid",
+      diagnostics: [{ code: "PNPM_WORKSPACE_LOCK_MISMATCH" }],
+    });
   });
 });

@@ -1,16 +1,20 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  closeSync,
   cpSync,
   existsSync,
+  fsyncSync,
   mkdtempSync,
   mkdirSync,
+  openSync,
   realpathSync,
   readFileSync,
+  renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -38,16 +42,28 @@ function argument(name) {
 const image = argument("image");
 const imageDigest = argument("image-digest");
 const workflowCommit = argument("workflow-commit");
-const sharedTemporaryRoot =
-  process.platform === "darwin" ? argument("shared-root") : tmpdir();
+const scratchRoot = argument("scratch-root");
+const evidenceOutput = argument("evidence-output");
+if (!isAbsolute(scratchRoot) || !isAbsolute(evidenceOutput)) {
+  throw new Error("scratch and evidence locations must be absolute");
+}
+const resolvedScratchRoot = realpathSync(scratchRoot);
+const artifactsRoot = realpathSync(join(repository, "artifacts"));
+const evidenceParent = realpathSync(dirname(evidenceOutput));
+const evidenceSuffix = relative(artifactsRoot, evidenceParent);
+if (evidenceSuffix === ".." || evidenceSuffix.startsWith(`..${sep}`)) {
+  throw new Error("verification evidence must remain in the repository artifacts directory");
+}
+if (existsSync(evidenceOutput)) throw new Error("verification evidence output already exists");
 
 execFileSync("docker", [
   "run", "--rm", "--network", "none", image, "/bin/sh", "-ec",
   "git --version >/dev/null; make --version >/dev/null",
 ]);
 const temporary = realpathSync(
-  mkdtempSync(join(sharedTemporaryRoot, "tc-sdlc-image-verification-")),
+  mkdtempSync(join(resolvedScratchRoot, "tc-sdlc-image-verification-")),
 );
+try {
 const root = join(temporary, "consumer");
 const nativeState = join(temporary, "native-state");
 const imageState = join(temporary, "image-state");
@@ -135,8 +151,20 @@ if (existsSync(join(root, "node_modules")) || existsSync(join(root, ".venv"))) {
 if (canonicalJson(imageReceipt.taskIdentities) !== canonicalJson(nativeReceipt.taskIdentities)) {
   throw new Error("native and canonical image task identities differ");
 }
-if (canonicalJson(imageReceipt.dependencies) !== canonicalJson(nativeReceipt.dependencies)) {
+const inputDependencies = (dependencies) => dependencies.map(
+  ({ installedDigest: _installedDigest, ...dependency }) => dependency,
+);
+if (
+  canonicalJson(inputDependencies(imageReceipt.dependencies)) !==
+  canonicalJson(inputDependencies(nativeReceipt.dependencies))
+) {
   throw new Error("native and canonical image dependency identities differ");
+}
+for (const receipt of [nativeReceipt, imageReceipt]) {
+  const pnpm = receipt.dependencies.find((dependency) => dependency.manager === "pnpm");
+  if (!/^sha256:[0-9a-f]{64}$/.test(pnpm?.installedDigest ?? "")) {
+    throw new Error("bootstrap receipt does not bind installed pnpm output");
+  }
 }
 if (
   canonicalJson(imageReceipt.adapters.map(({ name, version }) => ({ name, version }))) !==
@@ -258,8 +286,7 @@ if (repositoryWarm.status !== "ok") {
   throw new Error("real repository dependency closure was not reusable offline");
 }
 
-process.stdout.write(
-  `${JSON.stringify({
+const verification = {
     schema: "tc.sdlc/image-verification/v1",
     status: "succeeded",
     release: imageReceipt.release,
@@ -269,5 +296,23 @@ process.stdout.write(
     repositoryDependencyLocks: repositoryReceipt.dependencies,
     nativePlatform: nativeReceipt.platform,
     imagePlatform: imageReceipt.platform,
-  })}\n`,
+};
+const temporaryEvidence = `${evidenceOutput}.tmp-${process.pid}`;
+try {
+  writeFileSync(temporaryEvidence, canonicalJson(verification), { flag: "wx", mode: 0o600 });
+  const evidenceDescriptor = openSync(temporaryEvidence, "r");
+  fsyncSync(evidenceDescriptor);
+  closeSync(evidenceDescriptor);
+  renameSync(temporaryEvidence, evidenceOutput);
+  const evidenceDirectory = openSync(dirname(evidenceOutput), "r");
+  fsyncSync(evidenceDirectory);
+  closeSync(evidenceDirectory);
+} finally {
+  rmSync(temporaryEvidence, { force: true });
+}
+process.stdout.write(
+  `${JSON.stringify({ ...verification, evidenceOutput: resolve(evidenceOutput) })}\n`,
 );
+} finally {
+  rmSync(temporary, { recursive: true, force: true });
+}

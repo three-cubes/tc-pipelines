@@ -1,5 +1,5 @@
 import * as sdlc from "../dist/index.js";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,13 @@ import { spawnSync } from "node:child_process";
 import { describe, expect, test } from "vitest";
 
 const CLI = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+const BUILD_RELEASE = fileURLToPath(
+  new URL("../../../images/sdlc/build-release.mjs", import.meta.url),
+);
+const VERIFY_IMAGE = fileURLToPath(
+  new URL("../../../images/sdlc/verify.mjs", import.meta.url),
+);
+const repository = fileURLToPath(new URL("../../..", import.meta.url));
 const workflowCommit = "1234567890abcdef1234567890abcdef12345678";
 const imageDigest =
   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -106,5 +113,52 @@ describe("tc-sdlc release catalogue generation", () => {
     expect(JSON.parse(readFileSync(output, "utf8"))).toMatchObject({
       release: { version: "3.0.0", workflowCommit, imageDigest },
     });
+  });
+
+  test("requires a new caller-selected repository artifact directory and preserves existing bytes", () => {
+    const outside = join(mkdtempSync(join(tmpdir(), "tc-sdlc-unmanaged-artifact-")), "release");
+    const unmanaged = spawnSync(
+      process.execPath,
+      [BUILD_RELEASE, "--artifact-output", outside],
+      { encoding: "utf8", cwd: repository },
+    );
+    expect(unmanaged.status).not.toBe(0);
+    expect(unmanaged.stderr).toContain("artifact output must be a direct child of the repository artifacts directory");
+    expect(existsSync(outside)).toBe(false);
+
+    const artifacts = join(repository, "artifacts");
+    mkdirSync(artifacts, { recursive: true });
+    const existing = join(artifacts, `preserved-${process.pid}`);
+    mkdirSync(existing);
+    const marker = join(existing, "preserve");
+    writeFileSync(marker, "unchanged");
+    try {
+      const overwrite = spawnSync(
+        process.execPath,
+        [BUILD_RELEASE, "--artifact-output", existing],
+        { encoding: "utf8", cwd: repository },
+      );
+      expect(overwrite.status).not.toBe(0);
+      expect(overwrite.stderr).toContain("artifact output already exists");
+      expect(readFileSync(marker, "utf8")).toBe("unchanged");
+    } finally {
+      rmSync(existing, { recursive: true, force: true });
+    }
+  });
+
+  test("image verification requires explicit scratch and retained evidence locations", () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        VERIFY_IMAGE,
+        "--image", "tc-sdlc:unused",
+        "--image-digest", imageDigest,
+        "--workflow-commit", workflowCommit,
+      ],
+      { encoding: "utf8", cwd: repository },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("missing --scratch-root");
   });
 });
