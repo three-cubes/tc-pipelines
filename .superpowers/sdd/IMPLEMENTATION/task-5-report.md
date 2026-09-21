@@ -698,3 +698,63 @@ after all three state directories are aged, public maintenance deletes only A.
 Per controller direction, no new multiarchitecture image or generated catalogue
 is claimed in this source-remediation commit. Those outputs await a clean
 independent source/sabotage rereview.
+
+### Quarantine phase and ancestor-race follow-up
+
+Commit `74edf2c` still had two related destructive-boundary defects. A process
+killed after `candidate` was renamed to `deleting` left a valid owner quarantine
+that the next run classified as foreign forever. More seriously, recovery
+validated a quarantine root and then awaited path-based recursive removal; a
+synchronous rename and foreign replacement at that pathname could be deleted by
+the outstanding removal.
+
+The built public RED used real processes and filesystem operations:
+
+```text
+test/maintenance.test.ts
+2 failed | 11 passed
+- scratch recovery deleted deleting/foreign.txt from a replacement root
+- bootstrap-state deleting-phase quarantine never became a candidate
+```
+
+Cleanup now accepts exactly one identity-bound payload phase (`candidate` or
+`deleting`), the marker-only completion phase, or an empty unmarked directory
+left between marker removal and `rmdir`. It rejects mixed layouts and mismatched
+payload identity. Before recursive removal, a bounded worker thread revalidates
+the inspected root, atomically moves the complete quarantine below a fresh
+owner-bound envelope, revalidates the moved identity, and performs synchronous
+deletion without yielding. This retains parallel cleanup across independent
+roots while removing the identity-check/async-path gap. If interrupted again,
+the envelope is itself a valid recoverable quarantine.
+
+Both scratch and bootstrap-state journeys kill the built `tc-sdlc maintain`
+process with real `SIGKILL`: scratch observes the first `candidate` window and
+bootstrap observes the second `deleting` window. Each recovery then races a
+foreign directory into the inspected pathname and proves the foreign bytes
+survive. Marker-only/empty completion, foreign, mixed and identity-mismatched
+layouts are also covered.
+
+Fresh terminal source evidence:
+
+```text
+pnpm --filter @three-cubes/tc-sdlc build
+exit 0
+
+focused maintenance/catalogue/task4
+3 files, 39 tests passed
+
+pnpm --filter @three-cubes/tc-sdlc test
+7 files, 126 tests passed
+
+real Docker/Buildx integration
+1 file, 2 tests passed
+
+Darwin bootstrap/lifecycle integration
+1 file, 7 tests passed
+
+git diff --check
+exit 0
+```
+
+No OCI or catalogue regeneration is claimed; independent source rereview still
+precedes that immutable release step.

@@ -5,13 +5,13 @@ import {
   readFileSync,
   renameSync,
 } from "node:fs";
-import { rm } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative } from "node:path";
 
 import { canonicalJson, digest } from "../canonical.js";
 import {
   QUARANTINE_PREFIX,
   createQuarantine,
+  deleteQuarantineRoot,
   filesystemIdentity,
   finishQuarantine,
   inspectQuarantine,
@@ -285,8 +285,11 @@ export async function removeBootstrapStates(
         activeWorkers += 1;
         peakWorkers = Math.max(peakWorkers, activeWorkers);
         try {
-          await rm(quarantine, { recursive: true, force: false });
-          finishQuarantine(quarantineRoot);
+          const removed = await deleteQuarantineRoot(
+            quarantineRoot,
+            filesystemIdentity(quarantineRoot),
+          );
+          if (!removed) throw new Error("quarantine deletion failed");
         } finally {
           activeWorkers -= 1;
         }

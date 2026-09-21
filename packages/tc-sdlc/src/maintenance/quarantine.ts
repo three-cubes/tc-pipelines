@@ -1,16 +1,14 @@
 import {
-  existsSync,
   lstatSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmdirSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { rm } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { Worker } from "node:worker_threads";
 
 import { canonicalJson } from "../canonical.js";
 import type { FilesystemIdentity, MaintenanceEntry, MaintenanceRetainedEntry } from "./types.js";
@@ -74,6 +72,44 @@ function readMarker(root: string): QuarantineMarker | undefined {
   }
 }
 
+function payloadPhase(
+  root: string,
+  marker: QuarantineMarker | undefined,
+): "empty" | "candidate" | "deleting" | undefined {
+  const entries = readdirSync(root).sort();
+  if (entries.length === 0 && marker === undefined) return "empty";
+  if (marker === undefined || entries[0] !== MARKER) return undefined;
+  if (entries.length === 1) return "empty";
+  if (
+    entries.length !== 2 ||
+    (entries[1] !== "candidate" && entries[1] !== "deleting") ||
+    !sameIdentity(join(root, entries[1]), marker.payloadIdentity)
+  ) return undefined;
+  return entries[1];
+}
+
+export function deleteQuarantineRoot(
+  root: string,
+  identity: FilesystemIdentity,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const worker = new Worker(new URL("./deletion-worker.js", import.meta.url), {
+      workerData: { root, identity },
+    });
+    let completed = false;
+    worker.once("message", (message: Readonly<{ status?: string }>) => {
+      completed = true;
+      resolve(message.status === "removed");
+    });
+    worker.once("error", () => {
+      if (!completed) resolve(false);
+    });
+    worker.once("exit", () => {
+      if (!completed) resolve(false);
+    });
+  });
+}
+
 export function createQuarantine(
   parent: string,
   originalPath: string,
@@ -112,13 +148,7 @@ export function inspectQuarantine(
       return { retained: { path: displayPath, reason: "foreign" } };
     }
     const marker = readMarker(path);
-    const payload = join(path, "candidate");
-    if (marker === undefined) {
-      return { retained: { path: displayPath, reason: "foreign" } };
-    }
-    const entries = readdirSync(path).sort();
-    const emptyOwned = entries.length === 1 && entries[0] === MARKER;
-    if (!emptyOwned && !sameIdentity(payload, marker.payloadIdentity)) {
+    if (payloadPhase(path, marker) === undefined) {
       return { retained: { path: displayPath, reason: "foreign" } };
     }
     if (details.mtimeMs > cutoff) {
@@ -143,31 +173,16 @@ export async function removeQuarantineCandidate(
 ): Promise<Readonly<{ removed: boolean; retained?: MaintenanceRetainedEntry }>> {
   const root = join(base, candidate.path);
   const marker = readMarker(root);
-  const payload = join(root, "candidate");
   const refreshed = inspectQuarantine(root, candidate.path, cutoff).candidate;
   if (
-    marker === undefined ||
     refreshed === undefined ||
     !sameIdentity(root, candidate.identity) ||
-    (existsSync(payload) && !sameIdentity(payload, marker.payloadIdentity))
+    payloadPhase(root, marker) === undefined
   ) {
     return { removed: false, retained: { path: candidate.path, reason: "changed_during_apply" } };
   }
-  try {
-    if (!existsSync(payload)) {
-      finishQuarantine(root);
-      return { removed: true };
-    }
-    const deleting = join(root, "deleting");
-    renameSync(payload, deleting);
-    if (!sameIdentity(deleting, marker.payloadIdentity)) {
-      if (!existsSync(payload)) renameSync(deleting, payload);
-      return { removed: false, retained: { path: candidate.path, reason: "changed_during_apply" } };
-    }
-    await rm(deleting, { recursive: true, force: false });
-    finishQuarantine(root);
-    return { removed: true };
-  } catch {
-    return { removed: false, retained: { path: candidate.path, reason: "inspection_failed" } };
-  }
+  const removed = await deleteQuarantineRoot(root, candidate.identity);
+  return removed
+    ? { removed: true }
+    : { removed: false, retained: { path: candidate.path, reason: "inspection_failed" } };
 }

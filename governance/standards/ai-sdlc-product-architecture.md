@@ -145,8 +145,11 @@ boundary. All cleanup is receipt-bearing, identity-checked immediately before an
 atomic quarantine move, and preserves dirty worktrees and foreign replacements.
 Interrupted quarantines are themselves owner-marked and payload-identity-bound;
 the 48-hour recovery sweep inventories them without treating a name alone as
-deletion authority. Successful release artefact expiry is not implemented until
-the producer exposes a complete canonical reference inventory.
+deletion authority. Bounded deletion workers revalidate and synchronously
+delete only after atomically moving the complete quarantine under a fresh
+owner-bound root, closing asynchronous ancestor-replacement races without
+serialising independent cleanup. Successful release artefact expiry is not
+implemented until the producer exposes a complete canonical reference inventory.
 
 ## Task and preparation model
 

@@ -6,13 +6,13 @@ import {
   readFileSync,
   renameSync,
 } from "node:fs";
-import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import {
   QUARANTINE_PREFIX,
   createQuarantine,
+  deleteQuarantineRoot,
   filesystemIdentity,
   finishQuarantine,
   inspectQuarantine,
@@ -304,8 +304,11 @@ export async function removeTemporaryCandidates(
         activeWorkers += 1;
         peakWorkers = Math.max(peakWorkers, activeWorkers);
         try {
-          await rm(quarantine, { recursive: true, force: false });
-          finishQuarantine(quarantineRoot);
+          const removed = await deleteQuarantineRoot(
+            quarantineRoot,
+            filesystemIdentity(quarantineRoot),
+          );
+          if (!removed) throw new Error("quarantine deletion failed");
         } finally {
           activeWorkers -= 1;
         }

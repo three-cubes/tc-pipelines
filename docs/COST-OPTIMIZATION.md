@@ -147,8 +147,11 @@ prevents path replacement races from deleting foreign bytes. Restoring parent
 directory ownership is sufficient; cleanup does not recursively chmod content.
 Each quarantine has canonical owner and payload-identity metadata. A later
 routine recovery or explicit maintenance run inventories expired interrupted
-quarantines; it removes only the still-matching payload and preserves foreign or
-changed quarantine bytes.
+quarantines in the `candidate`, `deleting`, marker-only or empty terminal phase.
+Before recursive deletion, a bounded worker thread revalidates and atomically
+envelopes the entire quarantine under a new owner-bound root, then deletes
+synchronously without yielding. Foreign, mixed or changed layouts remain
+preserved.
 
 The persistent bootstrap inventory consists of referenced release states
 (including their dependency environments and toolchain launchers), managed

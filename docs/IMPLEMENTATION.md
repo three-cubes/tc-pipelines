@@ -276,7 +276,9 @@ operator chore. Each command removes its own scratch in `finally`; bootstrap,
 prepare and evaluation also recover interrupted, owner-marked scratch older than
 48 hours and bind that outcome into their terminal receipt. `tc-sdlc maintain`
 provides dry-run and apply receipts for the same bounded policy. It never scans
-foreign roots or deployment data. Materialised bootstrap states carry stable
+foreign roots or deployment data. Deletion workers revalidate and atomically
+re-quarantine complete roots before synchronous removal, so path replacement
+cannot redirect an asynchronous recursive delete. Materialised bootstrap states carry stable
 local-consumer references: maintenance retains every current state and immediate
 predecessor and expires only old states made explicitly unreferenced by valid
 producer metadata. The release-image producer uses a named tc-sdlc BuildKit

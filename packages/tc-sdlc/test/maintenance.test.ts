@@ -325,6 +325,41 @@ describe("tc-sdlc managed lifecycle", () => {
     expect(existsSync(join(quarantinePath, "candidate"))).toBe(true);
     utimesSync(quarantinePath, old, old);
 
+    const displaced = join(parent, "displaced-quarantine");
+    const racing = sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "replacement-race.json"),
+      mode: "apply",
+    });
+    try {
+      renameSync(quarantinePath, displaced);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    mkdirSync(join(quarantinePath, "deleting"), { recursive: true });
+    writeFileSync(
+      join(quarantinePath, "deleting", "foreign.txt"),
+      "foreign replacement bytes\n",
+    );
+    await racing;
+    expect(
+      readFileSync(join(quarantinePath, "deleting", "foreign.txt"), "utf8"),
+    ).toBe("foreign replacement bytes\n");
+    rmSync(quarantinePath, { recursive: true, force: true });
+    let recoveryPath = quarantinePath;
+    if (existsSync(displaced)) {
+      renameSync(displaced, quarantinePath);
+    } else {
+      const recoveredName = readdirSync(parent).find((name) =>
+        name.startsWith(".tc-sdlc-quarantine-"),
+      );
+      expect(recoveredName).toBeDefined();
+      recoveryPath = join(parent, recoveredName!);
+      quarantine = recoveredName;
+    }
+    utimesSync(recoveryPath, old, old);
+
     const receipt = await sdlc.maintain({
       stateRoot,
       temporaryRoot: parent,
@@ -336,7 +371,7 @@ describe("tc-sdlc managed lifecycle", () => {
       expect.objectContaining({ kind: "quarantine", path: quarantine }),
     );
     expect(receipt.removedCount).toBe(1);
-    expect(existsSync(quarantinePath)).toBe(false);
+    expect(existsSync(recoveryPath)).toBe(false);
 
     const foreign = join(parent, ".tc-sdlc-quarantine-foreign");
     mkdirSync(foreign);
@@ -361,6 +396,27 @@ describe("tc-sdlc managed lifecycle", () => {
       }),
     );
     utimesSync(mismatched, old, old);
+    const mixed = join(parent, ".tc-sdlc-quarantine-mixed");
+    mkdirSync(join(mixed, "candidate"), { recursive: true });
+    mkdirSync(join(mixed, "deleting"));
+    writeFileSync(join(mixed, "candidate", "owned.txt"), "owned candidate\n");
+    writeFileSync(join(mixed, "deleting", "foreign.txt"), "foreign deleting\n");
+    const mixedIdentity = lstatSync(join(mixed, "candidate"), { bigint: true });
+    writeFileSync(
+      join(mixed, ".tc-sdlc-quarantine.json"),
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/quarantine-owner/v1",
+        owner: "@three-cubes/tc-sdlc",
+        kind: "temporary",
+        originalName: "tc-sdlc-evaluation-mixed",
+        payloadIdentity: {
+          device: mixedIdentity.dev.toString(),
+          inode: mixedIdentity.ino.toString(),
+          birthtimeNanoseconds: mixedIdentity.birthtimeNs.toString(),
+        },
+      }),
+    );
+    utimesSync(mixed, old, old);
     const guarded = await sdlc.maintain({
       stateRoot,
       temporaryRoot: parent,
@@ -372,6 +428,26 @@ describe("tc-sdlc managed lifecycle", () => {
     expect(readFileSync(join(mismatched, "candidate", "preserve.txt"), "utf8")).toBe(
       "mismatched bytes\n",
     );
+    expect(readFileSync(join(mixed, "candidate", "owned.txt"), "utf8")).toBe(
+      "owned candidate\n",
+    );
+    expect(readFileSync(join(mixed, "deleting", "foreign.txt"), "utf8")).toBe(
+      "foreign deleting\n",
+    );
+
+    const emptyInterrupted = join(parent, ".tc-sdlc-quarantine-empty");
+    mkdirSync(emptyInterrupted);
+    utimesSync(emptyInterrupted, old, old);
+    const emptyRecovery = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "empty-quarantine.json"),
+      mode: "apply",
+    });
+    expect(emptyRecovery.candidates).toContainEqual(
+      expect.objectContaining({ kind: "quarantine", path: ".tc-sdlc-quarantine-empty" }),
+    );
+    expect(existsSync(emptyInterrupted)).toBe(false);
   }, 30_000);
 
   test("does not delete a foreign replacement installed after candidate inspection", async () => {
@@ -619,6 +695,118 @@ describe("tc-sdlc managed lifecycle", () => {
     });
     expect(existsSync(unreferencedMetadataAbsent)).toBe(true);
   });
+
+  test("recovers a bootstrap-state quarantine killed in the deleting phase", async () => {
+    const parent = temporary("tc-sdlc-maintenance-bootstrap-killed-temp-");
+    const stateRoot = temporary("tc-sdlc-maintenance-bootstrap-killed-state-");
+    const evidence = temporary("tc-sdlc-maintenance-bootstrap-killed-evidence-");
+    ownedState(stateRoot);
+    const currentKey = "releases/current/dependencies/darwin-arm64";
+    const expiredKey = "releases/expired/dependencies/darwin-arm64";
+    bootstrapState(stateRoot, currentKey);
+    const expired = bootstrapState(stateRoot, expiredKey);
+    for (let index = 0; index < 20_000; index += 1) {
+      writeFileSync(join(expired, `entry-${index}.txt`), "owned\n");
+    }
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(expired, old, old);
+    mkdirSync(join(stateRoot, "references"));
+    writeFileSync(
+      join(
+        stateRoot,
+        "references",
+        `${sdlc.digest({ consumer: "fixture", consumerRoot: "/fixture" }).slice("sha256:".length)}.json`,
+      ),
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/bootstrap-reference/v1",
+        owner: "@three-cubes/tc-sdlc",
+        consumer: "fixture",
+        consumerRoot: "/fixture",
+        currentStateKey: currentKey,
+      }),
+    );
+
+    const child = spawn(
+      process.execPath,
+      [
+        CLI,
+        "maintain",
+        "--state-root", stateRoot,
+        "--temporary-root", parent,
+        "--receipt", join(evidence, "killed.json"),
+        "--mode", "apply",
+      ],
+      { stdio: "ignore" },
+    );
+    const quarantineParent = join(stateRoot, "releases", "expired", "dependencies");
+    let quarantine: string | undefined;
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      quarantine = readdirSync(quarantineParent)
+        .find((name) => name.startsWith(".tc-sdlc-quarantine-"));
+      if (
+        quarantine !== undefined &&
+        existsSync(join(quarantineParent, quarantine, "deleting"))
+      ) break;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    expect(quarantine).toBeDefined();
+    child.kill("SIGKILL");
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    const quarantinePath = join(quarantineParent, quarantine!);
+    expect(existsSync(join(quarantinePath, "deleting"))).toBe(true);
+    utimesSync(quarantinePath, old, old);
+
+    const displaced = join(quarantineParent, "displaced-quarantine");
+    const racing = sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "replacement-race.json"),
+      mode: "apply",
+    });
+    try {
+      renameSync(quarantinePath, displaced);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    mkdirSync(join(quarantinePath, "deleting"), { recursive: true });
+    writeFileSync(
+      join(quarantinePath, "deleting", "foreign.txt"),
+      "foreign bootstrap replacement bytes\n",
+    );
+    await racing;
+    expect(
+      readFileSync(join(quarantinePath, "deleting", "foreign.txt"), "utf8"),
+    ).toBe("foreign bootstrap replacement bytes\n");
+    rmSync(quarantinePath, { recursive: true, force: true });
+    let recoveryPath = quarantinePath;
+    if (existsSync(displaced)) {
+      renameSync(displaced, quarantinePath);
+    } else {
+      const recoveredName = readdirSync(quarantineParent).find((name) =>
+        name.startsWith(".tc-sdlc-quarantine-"),
+      );
+      expect(recoveredName).toBeDefined();
+      recoveryPath = join(quarantineParent, recoveredName!);
+      quarantine = recoveredName;
+    }
+    utimesSync(recoveryPath, old, old);
+
+    const recovered = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "recovered.json"),
+      mode: "apply",
+    });
+    expect(recovered.candidates).toContainEqual(
+      expect.objectContaining({
+        kind: "quarantine",
+        path: `releases/expired/dependencies/${quarantine}`,
+      }),
+    );
+    expect(existsSync(recoveryPath)).toBe(false);
+    expect(existsSync(join(stateRoot, currentKey))).toBe(true);
+  }, 30_000);
 
   test.runIf(UV !== undefined)(
     "uses uv's public prune boundary only inside owned non-linked cache state",
