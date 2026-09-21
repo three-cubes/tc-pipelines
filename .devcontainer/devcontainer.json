@@ -1,13 +1,14 @@
 {
   "containerEnv": {
-    "TC_SDLC_IMAGE_DIGEST": "sha256:73decf541ad1a15dda01b451b64c6da5b0d58b666898fdf3b7052f187141bb93",
+    "TC_SDLC_IMAGE_DIGEST": "sha256:32cc1c4fb82870e8eda9952091c6d3708fc42a557ea4d2cca8c7a1f0c51e0e0a",
     "TC_SDLC_RELEASE": "3.0.0"
   },
-  "image": "ghcr.io/three-cubes/tc-sdlc@sha256:73decf541ad1a15dda01b451b64c6da5b0d58b666898fdf3b7052f187141bb93",
+  "image": "ghcr.io/three-cubes/tc-sdlc@sha256:32cc1c4fb82870e8eda9952091c6d3708fc42a557ea4d2cca8c7a1f0c51e0e0a",
   "mounts": [
     "source=tc-sdlc-state,target=/state,type=volume"
   ],
   "name": "Three Cubes SDLC 3.0.0",
   "remoteUser": "sdlc",
-  "workspaceFolder": "/workspace"
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached"
 }
