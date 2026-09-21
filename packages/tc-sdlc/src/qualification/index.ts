@@ -20,6 +20,14 @@ import { bytesDigest, canonicalJson, digest } from "../canonical.js";
 import { loadCatalogue } from "../catalogue/index.js";
 import { SdlcError } from "../errors.js";
 import { writeCanonicalEvidence } from "../evidence/index.js";
+import {
+  assertSucceededEvaluationReceipt,
+  assertSucceededPreparationReceipt,
+  parseEvaluationReceipt,
+  parsePreparationReceipt,
+  validateEvaluationReceipt,
+  validatePreparationReceipt,
+} from "../evidence/task4.js";
 import { snapshotFiles } from "../inputs/index.js";
 import { loadLock } from "../lock/index.js";
 import { loadDeclaration } from "../schema/declaration.js";
@@ -291,14 +299,6 @@ function requireDigestArray(value: unknown): void {
   }
 }
 
-function requireInputDigest(value: unknown): void {
-  if (!isRecord(value)) throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested receipt has an invalid input inventory");
-  requireExactKeys(value, ["path", "digest", "mode", "symlink"]);
-  if (!stringValue(value.path) || !digestValue(value.digest) || !Number.isSafeInteger(value.mode) || !(value.symlink === null || typeof value.symlink === "string")) {
-    throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested receipt has an invalid input inventory");
-  }
-}
-
 function requireRecovery(value: unknown): void {
   if (!isRecord(value)) throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested receipt has an invalid recovery receipt");
   requireExactKeys(value, ["schema", "status", "boundary", "retentionHours", "candidateCount", "removedCount", "reclaimedBytes", "entriesTruncated", "cleanupFailures", "peakCleanupWorkers"]);
@@ -341,13 +341,6 @@ function requireRunReceipt(value: unknown): void {
   }
 }
 
-function requireMutation(value: unknown): void {
-  if (!isRecord(value)) throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested receipt has invalid mutation");
-  requireExactKeys(value, ["path", "kind"], ["before", "after"]);
-  if (!stringValue(value.path) || !["add", "delete", "content", "mode", "symlink"].includes(value.kind as string)) throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested receipt has invalid mutation");
-  if (value.before !== undefined) requireInputDigest(value.before); if (value.after !== undefined) requireInputDigest(value.after);
-}
-
 function requireBootstrapReceiptShape(value: Record<string, unknown>): void {
   requireExactKeys(value, ["schema", "status", "reason", "release", "lockDigest", "platform", "architecture", "stateKey", "stateDigest", "reused", "taskIdentities", "adapters", "dependencies", "recovery", "diagnostics", "diagnosticsCount", "diagnosticsTruncated"]);
   if (
@@ -370,65 +363,6 @@ function requireBootstrapReceipt(value: Record<string, unknown>, expected: Reado
   }
 }
 
-function requirePreparationReceiptShape(value: Record<string, unknown>): void {
-  requireExactKeys(value, ["schema", "status", "reason", "declarationDigest", "catalogueDigest", "lockDigest", "bootstrapContext", "recovery", "finalTreeDigest", "firstPass", "secondPass"]);
-  if (value.schema !== "tc.sdlc/preparation-receipt/v1" || !["succeeded", "failed"].includes(value.status as string) || !(value.reason === null || typeof value.reason === "string") || !digestValue(value.declarationDigest) || !digestValue(value.catalogueDigest) || !digestValue(value.lockDigest) || !digestValue(value.finalTreeDigest) || !isRecord(value.firstPass) || !isRecord(value.secondPass)) {
-    throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested preparation receipt is not a complete producer receipt");
-  }
-  requireBootstrapContext(value.bootstrapContext, value.lockDigest); requireRecovery(value.recovery);
-  for (const pass of [value.firstPass, value.secondPass]) {
-    requireExactKeys(pass, ["mutations", "mutationCount", "mutationsTruncated"], ["scheduler"]);
-    if (!Array.isArray(pass.mutations) || !Number.isSafeInteger(pass.mutationCount) || (pass.mutationCount as number) < 0 || typeof pass.mutationsTruncated !== "boolean") {
-      throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested preparation receipt has an invalid fixed-point pass");
-    }
-    for (const mutation of pass.mutations) requireMutation(mutation);
-    if (pass.scheduler !== undefined) requireRunReceipt(pass.scheduler);
-  }
-}
-
-function requirePreparationReceipt(value: Record<string, unknown>, expected: Readonly<{ declarationDigest: string; catalogueDigest: string; lockDigest: string }>): void {
-  requirePreparationReceiptShape(value); assertBoundReceipt(value, expected);
-  if (value.status !== "succeeded") throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested preparation receipt is not a complete succeeded receipt");
-}
-
-function requireEvaluationReceiptShape(value: Record<string, unknown>): void {
-  requireExactKeys(value, ["schema", "status", "reason", "source", "declarationDigest", "catalogueDigest", "lockDigest", "bootstrapContext", "environmentClass", "producer", "recovery", "tasks", "mutations", "mutationCount", "mutationsTruncated"], ["scheduler"]);
-  if (value.schema !== "tc.sdlc/evaluation-receipt/v1" || !["succeeded", "failed"].includes(value.status as string) || !(value.reason === null || typeof value.reason === "string") || !isRecord(value.source) || !digestValue(value.declarationDigest) || !digestValue(value.catalogueDigest) || !digestValue(value.lockDigest) || !stringValue(value.environmentClass) || !stringValue(value.producer) || !Array.isArray(value.tasks) || !Array.isArray(value.mutations) || !Number.isSafeInteger(value.mutationCount) || (value.mutationCount as number) < 0 || typeof value.mutationsTruncated !== "boolean") {
-    throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested evaluation receipt is not a complete producer receipt");
-  }
-  requireExactKeys(value.source, ["commit", "treeDigest"]);
-  if (!stringValue(value.source.commit) || !digestValue(value.source.treeDigest)) throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested evaluation receipt has invalid source binding");
-  requireBootstrapContext(value.bootstrapContext, value.lockDigest); requireRecovery(value.recovery);
-  for (const task of value.tasks) {
-    if (!isRecord(task)) throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested evaluation receipt contains an invalid task");
-    requireExactKeys(task, ["key", "identity", "mode", "trustBoundary", "inputs", "outputs"]);
-    if (!stringValue(task.key) || !digestValue(task.identity) || task.mode !== "evaluate" || !["portable", "hosted", "live", "deployment"].includes(task.trustBoundary as string) || !Array.isArray(task.inputs) || !Array.isArray(task.outputs)) {
-      throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested evaluation receipt contains an invalid task");
-    }
-    for (const input of [...task.inputs, ...task.outputs]) requireInputDigest(input);
-  }
-  for (const mutation of value.mutations) requireMutation(mutation);
-  if (value.scheduler !== undefined) requireRunReceipt(value.scheduler);
-}
-
-function requireEvaluationReceipt(value: Record<string, unknown>, expected: Readonly<{ declarationDigest: string; catalogueDigest: string; lockDigest: string }>): void {
-  requireEvaluationReceiptShape(value); assertBoundReceipt(value, expected);
-  if (value.status !== "succeeded") throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested evaluation receipt is not a complete succeeded receipt");
-}
-
-function assertBoundReceipt(
-  receipt: Record<string, unknown>,
-  expected: Readonly<{ declarationDigest: string; catalogueDigest: string; lockDigest: string }>,
-): void {
-  if (
-    receipt.declarationDigest !== expected.declarationDigest ||
-    receipt.catalogueDigest !== expected.catalogueDigest ||
-    receipt.lockDigest !== expected.lockDigest
-  ) {
-    throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested receipt is not bound to the copied consumer declaration, catalogue and lock");
-  }
-}
-
 function receiptReference(output: string, path: string, taskIdentities: readonly string[] = []): ReceiptReference {
   const referencePath = (() => {
     try { return ownRelative(output, path); } catch { return null; }
@@ -442,8 +376,8 @@ function receiptReference(output: string, path: string, taskIdentities: readonly
     if (!isRecord(parsed)) return { path: referencePath, digest: digestValueAtPath, status: null, taskIdentities: [] };
     value = parsed as typeof value;
     if (value.schema === "tc.sdlc/bootstrap-receipt/v1") requireBootstrapReceiptShape(value);
-    else if (value.schema === "tc.sdlc/preparation-receipt/v1") requirePreparationReceiptShape(value);
-    else if (value.schema === "tc.sdlc/evaluation-receipt/v1") requireEvaluationReceiptShape(value);
+    else if (value.schema === "tc.sdlc/preparation-receipt/v1") validatePreparationReceipt(value);
+    else if (value.schema === "tc.sdlc/evaluation-receipt/v1") validateEvaluationReceipt(value);
     else return { path: referencePath, digest: digestValueAtPath, status: null, taskIdentities: [] };
   } catch {
     return { path: referencePath, digest: digestValueAtPath, status: null, taskIdentities: [] };
@@ -459,13 +393,7 @@ function preparationReference(output: string, path: string): PreparationReferenc
   const reference = receiptReference(output, path);
   if (!existsSync(path)) return emptyPreparationReference();
   try {
-    const value = receiptValue(path, "tc.sdlc/preparation-receipt/v1") as {
-      status?: unknown;
-      firstPass?: { scheduler?: { selection?: unknown } };
-      secondPass?: { scheduler?: { selection?: unknown } };
-    };
-    requirePreparationReceiptShape(value);
-    if (!terminalStatuses.has(value.status as string) || !isRecord(value.firstPass) || !isRecord(value.secondPass)) throw new SdlcError("CONSUMER_RECEIPT_INVALID", "nested preparation receipt has an invalid shape");
+    const value = parsePreparationReceipt(readFileSync(path, "utf8"));
     const identities = (selection: unknown): readonly string[] =>
       Array.isArray(selection) && selection.every(digestValue)
         ? [...selection].sort()
@@ -609,8 +537,8 @@ export async function qualifyConsumers(options: QualifyConsumersOptions): Promis
         requireBootstrapReceipt(bootstrapReceipt, { lockDigest: bindings.lockDigest, release: copiedCatalogue.release.version });
         appendChange(checkout, consumer.changed);
         runPublic(options.executablePath, ["prepare", "--declaration", join(checkout, "sdlc.yaml"), "--catalogue", catalogue, "--lock", lock, "--root", checkout, "--state-root", state, "--bootstrap-receipt", bootstrap, "--receipt", preparation]);
-        const preparationReceipt = requireSucceededReceipt(preparation, "tc.sdlc/preparation-receipt/v1");
-        requirePreparationReceipt(preparationReceipt, bindings);
+        const preparationReceipt = parsePreparationReceipt(readFileSync(preparation, "utf8"));
+        assertSucceededPreparationReceipt(preparationReceipt, bindings);
         if (
           preparationReceipt.bootstrapContext === null ||
           typeof preparationReceipt.bootstrapContext !== "object" ||
@@ -624,10 +552,10 @@ export async function qualifyConsumers(options: QualifyConsumersOptions): Promis
         const affectedStable = capacityIdentities(output, options.executablePath, ["check", ...common, "--changed", consumer.changed], affectedSingle, affected);
         const completeReference = receiptReference(output, complete);
         const affectedReference = receiptReference(output, affected);
-        const completeReceipt = requireSucceededReceipt(complete, "tc.sdlc/evaluation-receipt/v1");
-        const affectedReceipt = requireSucceededReceipt(affected, "tc.sdlc/evaluation-receipt/v1");
-        requireEvaluationReceipt(completeReceipt, bindings);
-        requireEvaluationReceipt(affectedReceipt, bindings);
+        const completeReceipt = parseEvaluationReceipt(readFileSync(complete, "utf8"));
+        const affectedReceipt = parseEvaluationReceipt(readFileSync(affected, "utf8"));
+        assertSucceededEvaluationReceipt(completeReceipt, bindings);
+        assertSucceededEvaluationReceipt(affectedReceipt, bindings);
         if (
           canonicalJson(completeReceipt.bootstrapContext) !== canonicalJson(preparationReceipt.bootstrapContext) ||
           canonicalJson(affectedReceipt.bootstrapContext) !== canonicalJson(preparationReceipt.bootstrapContext)

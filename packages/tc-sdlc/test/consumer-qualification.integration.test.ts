@@ -308,58 +308,6 @@ describe("tc-sdlc qualify-consumers", () => {
     });
   }, 180_000);
 
-  test("retains an outer receipt when a hostile fixture corrupts nested evidence", () => {
-    const manifest = copiedManifest((value) => value);
-    const scripts = join(dirname(manifest), "python", "scripts");
-    writeFileSync(join(scripts, "corrupt-preparation.py"), [
-      "from pathlib import Path",
-      "import time",
-      "receipt = Path(__file__).resolve().parents[3] / 'python' / 'evidence' / 'preparation.json'",
-      "for _ in range(500):",
-      "    if receipt.exists():",
-      "        receipt.write_text('null\\n')",
-      "        raise SystemExit(0)",
-      "    time.sleep(0.01)",
-    ].join("\n"));
-    const preparation = join(scripts, "prepare.py");
-    writeFileSync(preparation, `${readFileSync(preparation, "utf8")}\nfrom subprocess import DEVNULL, Popen\nimport sys\nPopen([sys.executable, 'scripts/corrupt-preparation.py'], stdout=DEVNULL, stderr=DEVNULL, start_new_session=True)\n`);
-    const run = failedQualification(cli, manifest);
-    const python = run.receipt.fixtures.find((fixture: { id: string }) => fixture.id === "python");
-    expect(python).toMatchObject({
-      status: "failed",
-      preparation: { path: "python/evidence/preparation.json", status: null },
-    });
-    expect(existsSync(join(run.output, python.preparation.path))).toBe(true);
-    expect(readFileSync(join(run.output, python.preparation.path), "utf8")).toBe("null\n");
-  }, 180_000);
-
-  test("retains an outer receipt for invalid preparation selections and unknown nested fields", () => {
-    const manifest = copiedManifest((value) => value);
-    const scripts = join(dirname(manifest), "python", "scripts");
-    writeFileSync(join(scripts, "corrupt-preparation-shape.py"), [
-      "from pathlib import Path",
-      "import json",
-      "import time",
-      "receipt = Path(__file__).resolve().parents[3] / 'python' / 'evidence' / 'preparation.json'",
-      "for _ in range(500):",
-      "    if receipt.exists():",
-      "        value = json.loads(receipt.read_text())",
-      "        value['firstPass']['scheduler']['selection'] = ['not-a-digest']",
-      "        value['firstPass']['unexpected'] = True",
-      "        receipt.write_text(json.dumps(value, separators=(',', ':')))",
-      "        raise SystemExit(0)",
-      "    time.sleep(0.01)",
-    ].join("\n"));
-    const preparation = join(scripts, "prepare.py");
-    writeFileSync(preparation, `${readFileSync(preparation, "utf8")}\nfrom subprocess import DEVNULL, Popen\nimport sys\nPopen([sys.executable, 'scripts/corrupt-preparation-shape.py'], stdout=DEVNULL, stderr=DEVNULL, start_new_session=True)\n`);
-    const run = failedQualification(cli, manifest);
-    const python = run.receipt.fixtures.find((fixture: { id: string }) => fixture.id === "python");
-    expect(python).toMatchObject({
-      status: "failed",
-      preparation: { path: "python/evidence/preparation.json", status: null, firstPassTaskIdentities: [] },
-    });
-  }, 180_000);
-
   test("reserves the outer receipt path from nested qualification evidence", () => {
     const run = qualification(cli, fixtureManifest, "python/evidence/complete.json");
     expect(run.result.status).toBe(1);

@@ -80,7 +80,10 @@ function planning(
   return { root, declaration, catalogue, lock };
 }
 
-function taskRunOptions(extra: Readonly<Record<string, unknown>> = {}) {
+function taskRunOptions(
+  extra: Readonly<Record<string, unknown>> = {},
+  lockDigest = `sha256:${"a".repeat(64)}`,
+) {
   return {
     capacity: { cpu: 1, memoryMiB: 128 },
     executionContext: {
@@ -89,13 +92,16 @@ function taskRunOptions(extra: Readonly<Record<string, unknown>> = {}) {
         release: release.version,
         platform: process.platform === "linux" ? "linux" : "darwin",
         architecture: process.arch,
-        lockDigest: `sha256:${"a".repeat(64)}`,
+        lockDigest,
         stateKey: "releases/test/task4",
         stateGenerationIdentity: `sha256:${"e".repeat(64)}`,
         bootstrapReceiptDigest: `sha256:${"b".repeat(64)}`,
         stateDigest: `sha256:${"c".repeat(64)}`,
         dependencyDigest: `sha256:${"d".repeat(64)}`,
-        fitness: declarationFitness,
+        fitness: {
+          package: declarationFitness.package,
+          version: release.fitness.version,
+        },
         adapters: [],
       },
       stateRoot: tmpdir(),
@@ -192,7 +198,7 @@ describe("tc-sdlc Task 4", () => {
     const receipt = await (sdlc as Record<string, any>).prepare({
       ...input,
       receiptPath,
-      runOptions: taskRunOptions(),
+      runOptions: taskRunOptions({}, sdlc.digest(input.lock)),
     });
 
     expect(receipt.status).toBe(status);
@@ -717,7 +723,7 @@ describe("tc-sdlc Task 4", () => {
     const preparation = await (sdlc as Record<string, any>).prepare({
       ...input,
       receiptPath: join(dirname(root), `${root.split("/").at(-1)}-prepare.json`),
-      runOptions: taskRunOptions(),
+      runOptions: taskRunOptions({}, sdlc.digest(input.lock)),
     });
     expect(preparation.status).toBe("succeeded");
     expect(
@@ -737,7 +743,7 @@ describe("tc-sdlc Task 4", () => {
         ...(preparationReceipt === undefined ? {} : { preparationReceipt }),
         runOptions: taskRunOptions({
           onEvent: (event: Record<string, unknown>) => observed.push(event),
-        }),
+        }, sdlc.digest(input.lock)),
       });
 
     await expect(evaluation(undefined, "missing")).resolves.toMatchObject({
@@ -800,7 +806,7 @@ describe("tc-sdlc Task 4", () => {
     const preparation = await (sdlc as Record<string, any>).prepare({
       ...input,
       receiptPath: join(dirname(root), `${root.split("/").at(-1)}-prepare.json`),
-      runOptions: taskRunOptions(),
+      runOptions: taskRunOptions({}, sdlc.digest(input.lock)),
     });
     const commit = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: root,
@@ -822,7 +828,7 @@ describe("tc-sdlc Task 4", () => {
             writeFileSync(join(root, "input.txt"), "substituted-after-proof");
           }
         },
-      }),
+      }, sdlc.digest(input.lock)),
     });
 
     expect(evaluation).toMatchObject({

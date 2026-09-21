@@ -21,7 +21,8 @@
     "release:image": "pnpm build && node ../../images/sdlc/build-release.mjs",
     "test": "vitest run --exclude test/**/*.integration.test.ts",
     "test:integration:consumers": "vitest run test/consumer-qualification.integration.test.ts",
-    "test:integration:fitness": "vitest run test/fitness.integration.test.ts",
+    "test:integration:fitness": "pnpm build && vitest run test/fitness.integration.test.ts",
+    "test:integration:evaluation": "vitest run test/evaluation.integration.test.ts",
     "test:integration:darwin": "vitest run test/bootstrap-darwin.integration.test.ts",
     "verify:image": "pnpm build && node ../../images/sdlc/verify.mjs"
   },

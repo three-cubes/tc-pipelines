@@ -16,7 +16,6 @@ import {
   unavailableFitnessReceipt,
   writeFitnessReceipt,
 } from "./executors/fitness.js";
-import type { PreparationReceipt } from "./evidence/task4.js";
 import { assertCurrentLock, loadLock, resolveLock, writeLock } from "./lock/index.js";
 import { maintain } from "./maintenance/index.js";
 import { loadDeclaration } from "./schema/declaration.js";
@@ -373,9 +372,7 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
   const preparationReceipt =
     command === "prepare"
       ? undefined
-      : (JSON.parse(
-          readFileSync(options["preparation-receipt"]!, "utf8"),
-        ) as PreparationReceipt);
+      : readFileSync(options["preparation-receipt"]!, "utf8");
   const receipt = await (async () => {
     try {
       return command === "prepare"

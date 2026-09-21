@@ -54,6 +54,14 @@ export type {
   SignedEvaluationReceipt,
   TreeMutation,
 } from "./evidence/task4.js";
+export {
+  assertSucceededEvaluationReceipt,
+  assertSucceededPreparationReceipt,
+  parseEvaluationReceipt,
+  parsePreparationReceipt,
+  validateEvaluationReceipt,
+  validatePreparationReceipt,
+} from "./evidence/task4.js";
 export { bindGraphLock, buildGraph, selectAffected, serialiseGraph, taskIdentity } from "./graph/index.js";
 export { assertCurrentLock, loadLock, resolveLock, validateLock, writeLock } from "./lock/index.js";
 export { maintain, serialiseMaintenanceReceipt } from "./maintenance/index.js";

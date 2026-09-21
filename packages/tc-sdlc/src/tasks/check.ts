@@ -6,6 +6,10 @@ import type {
   PreparationReceipt,
   TreeMutation,
 } from "../evidence/task4.js";
+import {
+  parsePreparationReceipt,
+  validatePreparationReceipt,
+} from "../evidence/task4.js";
 import { selectAffected } from "../graph/index.js";
 import { snapshotFiles } from "../inputs/index.js";
 import { recoverInterruptedTemporaryState } from "../maintenance/index.js";
@@ -28,7 +32,7 @@ export type EvaluationOptions = Readonly<{
   receiptPath: string;
   environmentClass: string;
   producer: string;
-  preparationReceipt?: PreparationReceipt;
+  preparationReceipt?: PreparationReceipt | string;
   maxMutations?: number;
   changedPaths?: readonly string[];
   runOptions: Omit<RunOptions, "cwd" | "receiptPath">;
@@ -91,7 +95,12 @@ async function evaluate(
         treeRoot: workspace.root,
       });
       if (preparationRequired) {
-        const preparation = options.preparationReceipt;
+        const suppliedPreparation = options.preparationReceipt;
+        const preparation = suppliedPreparation === undefined
+          ? undefined
+          : typeof suppliedPreparation === "string"
+            ? parsePreparationReceipt(suppliedPreparation)
+            : validatePreparationReceipt(suppliedPreparation);
         if (
           preparation === undefined ||
           preparation.status !== "succeeded" ||
