@@ -55,6 +55,7 @@ RUN apt-get update \
 WORKDIR /build
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY schemas ./schemas
+COPY images/sdlc/build-release.mjs images/sdlc/verify.mjs ./images/sdlc/
 COPY packages/tc-sdlc ./packages/tc-sdlc
 RUN pnpm install --frozen-lockfile \
     && pnpm --filter @three-cubes/tc-sdlc build \
