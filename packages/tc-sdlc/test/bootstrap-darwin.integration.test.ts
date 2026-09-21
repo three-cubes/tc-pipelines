@@ -1,11 +1,15 @@
 import * as sdlc from "../dist/index.js";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -215,6 +219,48 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       },
     });
     expect(warm).toMatchObject({ status: "succeeded", reused: true });
+    const uvDependency = receipt.dependencies.find((dependency) => dependency.manager === "uv")!;
+    expect(uvDependency.installedDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    const attrsDirectory = execFileSync(
+      python,
+      ["-c", "import attrs; print(attrs.__path__[0])"],
+      { encoding: "utf8" },
+    ).trim();
+    const movedAttrsDirectory = `${attrsDirectory}.renamed`;
+    renameSync(attrsDirectory, movedAttrsDirectory);
+    expect(() => execFileSync(python, ["-c", "import attrs"], { stdio: "pipe" })).toThrow();
+    const renamedPythonTree = await sdlc.bootstrap({
+      ...options,
+      stateRoot,
+      receiptPath: `${receiptPath}.renamed-python-tree`,
+      host: { platform: "darwin", architecture: process.arch, offline: true },
+    });
+    expect(renamedPythonTree).toMatchObject({ status: "failed", reason: "state_corrupt" });
+    renameSync(movedAttrsDirectory, attrsDirectory);
+    const attrModule = execFileSync(
+      python,
+      ["-c", "import attr._make; print(attr._make.__file__)"],
+      { encoding: "utf8" },
+    ).trim();
+    const attrModuleBytes = readFileSync(attrModule);
+    rmSync(attrModule);
+    rmSync(join(dirname(attrModule), "__pycache__"), { recursive: true, force: true });
+    expect(() => execFileSync(python, ["-c", "import attr._make"], { stdio: "pipe" })).toThrow();
+    const deletedPythonFile = await sdlc.bootstrap({
+      ...options,
+      stateRoot,
+      receiptPath: `${receiptPath}.deleted-python-file`,
+      host: { platform: "darwin", architecture: process.arch, offline: true },
+    });
+    expect(deletedPythonFile).toMatchObject({ status: "failed", reason: "state_corrupt" });
+    writeFileSync(attrModule, attrModuleBytes);
+    const restoredPythonTree = await sdlc.bootstrap({
+      ...options,
+      stateRoot,
+      receiptPath: `${receiptPath}.restored-python-tree`,
+      host: { platform: "darwin", architecture: process.arch, offline: true },
+    });
+    expect(restoredPythonTree).toMatchObject({ status: "succeeded", reused: true });
 
     const declarationPath = join(root, "sdlc.json");
     const cataloguePath = join(root, "catalogue.json");
@@ -283,6 +329,9 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(process.platform).toBe("darwin");
     const root = mkdtempSync(join(tmpdir(), "tc-sdlc-workspace-consumer-"));
     cpSync(workspaceConsumer, root, { recursive: true });
+    const undeclaredCache = join(root, "packages", "b", ".cache", "untracked");
+    mkdirSync(dirname(undeclaredCache), { recursive: true });
+    writeFileSync(undeclaredCache, "must not enter managed state");
     const stateRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-workspace-state-"));
     const options = input(root, [
       "package.json",
@@ -300,13 +349,16 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     expect(receipt).toMatchObject({ status: "succeeded", dependencies: [{ manager: "pnpm" }] });
     expect(receipt.dependencies[0]?.inputs.map((input) => input.path)).toEqual([
       "package.json",
+      "packages/a/index.js",
       "packages/a/package.json",
+      "packages/b/index.js",
       "packages/b/package.json",
       "patches/is-number@7.0.0.patch",
       "pnpm-lock.yaml",
       "pnpm-workspace.yaml",
     ]);
     const environment = join(stateRoot, receipt.stateKey, receipt.dependencies[0]!.environment);
+    expect(existsSync(join(environment, "packages", "b", ".cache"))).toBe(false);
     expect(existsSync(join(environment, "packages", "a", "node_modules", "yaml"))).toBe(true);
     expect(existsSync(join(environment, "packages", "a", "node_modules", "workspace-b"))).toBe(true);
     const nodeLauncher = join(
@@ -317,6 +369,35 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       "-e",
       `if (!require(${JSON.stringify(join(environment, "node_modules", "is-number"))}).tcSdlcPatched) process.exit(1)`,
     ], { encoding: "utf8" })).toBe("");
+    for (const source of [
+      join(root, "packages", "b"),
+      join(environment, "node_modules", "workspace-a"),
+    ]) {
+      expect(execFileSync(nodeLauncher, [
+        "-e",
+        `if (require(${JSON.stringify(source)}) !== "workspace-source-contract") process.exit(1)`,
+      ], { encoding: "utf8" })).toBe("");
+    }
+
+    const workspaceSource = join(root, "packages", "b", "index.js");
+    const originalWorkspaceSource = readFileSync(workspaceSource, "utf8");
+    writeFileSync(workspaceSource, `${originalWorkspaceSource}\nmodule.exports = "changed";\n`);
+    const staleSource = await sdlc.bootstrap({
+      ...options,
+      stateRoot,
+      receiptPath: join(dirname(stateRoot), "workspace-stale-source.json"),
+      host: { platform: "darwin", architecture: process.arch, offline: true },
+    });
+    expect(staleSource).toMatchObject({ status: "failed", reason: "offline_cold" });
+    expect(staleSource.stateKey).not.toBe(receipt.stateKey);
+    writeFileSync(workspaceSource, originalWorkspaceSource);
+    const restoredSource = await sdlc.bootstrap({
+      ...options,
+      stateRoot,
+      receiptPath: join(dirname(stateRoot), "workspace-restored-source.json"),
+      host: { platform: "darwin", architecture: process.arch, offline: true },
+    });
+    expect(restoredSource).toMatchObject({ status: "succeeded", reused: true });
 
     const memberManifest = join(root, "packages", "b", "package.json");
     const changed = JSON.parse(readFileSync(memberManifest, "utf8"));
@@ -358,6 +439,25 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     });
     expect(tamperedInstalledTree).toMatchObject({ status: "failed", reason: "state_corrupt" });
     writeFileSync(installedManifest, originalInstalledManifest);
+
+    const installedExecutable = join(
+      environment,
+      "packages",
+      "a",
+      "node_modules",
+      ".bin",
+      "yaml",
+    );
+    const executableMode = statSync(installedExecutable).mode & 0o777;
+    chmodSync(installedExecutable, 0o644);
+    const nonExecutableInstalledTree = await sdlc.bootstrap({
+      ...options,
+      stateRoot,
+      receiptPath: join(dirname(stateRoot), "workspace-non-executable-installed-tree.json"),
+      host: { platform: "darwin", architecture: process.arch, offline: true },
+    });
+    expect(nonExecutableInstalledTree).toMatchObject({ status: "failed", reason: "state_corrupt" });
+    chmodSync(installedExecutable, executableMode);
 
     rmSync(join(environment, "node_modules"), { recursive: true });
     const missingInstalledTree = await sdlc.bootstrap({

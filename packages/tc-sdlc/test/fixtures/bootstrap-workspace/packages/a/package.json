@@ -2,6 +2,10 @@
   "name": "workspace-a",
   "version": "1.0.0",
   "private": true,
+  "main": "index.js",
+  "files": [
+    "index.js"
+  ],
   "dependencies": {
     "workspace-b": "workspace:*",
     "yaml": "2.9.1"

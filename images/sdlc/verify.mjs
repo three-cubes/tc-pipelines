@@ -213,6 +213,15 @@ for (const path of [
   mkdirSync(dirname(destination), { recursive: true, mode: 0o777 });
   cpSync(join(repository, path), destination);
 }
+mkdirSync(join(repositoryRoot, "packages", "tc-sdlc"), {
+  recursive: true,
+  mode: 0o777,
+});
+cpSync(
+  join(repository, "packages", "tc-sdlc", "dist"),
+  join(repositoryRoot, "packages", "tc-sdlc", "dist"),
+  { recursive: true },
+);
 const repositoryDeclaration = validateDeclaration({
   schema: "tc.sdlc/v1",
   project: "tc-pipelines-real-dependency-closure",

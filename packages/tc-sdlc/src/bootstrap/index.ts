@@ -124,7 +124,7 @@ type DependencyLock = BootstrapDependencyEvidence & Readonly<{
 }>;
 
 type BootstrapState = Readonly<{
-  schema: "tc.sdlc/bootstrap-state/v5";
+  schema: "tc.sdlc/bootstrap-state/v6";
   release: string;
   lockDigest: string;
   dependencyDigest: string;
@@ -178,23 +178,42 @@ function fileDigest(path: string): string {
   return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
 }
 
-function directoryDigest(root: string): string {
+function isPythonRuntimeCache(path: string): boolean {
+  const segments = path.split("/");
+  const name = segments.at(-1) ?? "";
+  return segments.includes("__pycache__") || name.endsWith(".pyc") || name.endsWith(".pyo");
+}
+
+function directoryDigest(root: string, ignorePythonRuntimeCache = false): string {
   if (!existsSync(root) || lstatSync(root).isSymbolicLink() || !lstatSync(root).isDirectory()) {
     throw new Error("dependency environment is not a real directory");
   }
-  const entries: Record<string, unknown>[] = [];
+  const rootMetadata = lstatSync(root);
+  const entries: Record<string, unknown>[] = [
+    { path: ".", type: "directory", mode: rootMetadata.mode & 0o7777 },
+  ];
   const visit = (directory: string, prefix: string): void => {
     for (const name of readdirSync(directory).sort()) {
       const path = join(directory, name);
       const relativePath = prefix === "" ? name : posix.join(prefix, name);
+      if (ignorePythonRuntimeCache && isPythonRuntimeCache(relativePath)) continue;
       const metadata = lstatSync(path);
       if (metadata.isSymbolicLink()) {
         entries.push({ path: relativePath, type: "symlink", target: readlinkSync(path) });
       } else if (metadata.isDirectory()) {
-        entries.push({ path: relativePath, type: "directory" });
+        entries.push({
+          path: relativePath,
+          type: "directory",
+          mode: metadata.mode & 0o7777,
+        });
         visit(path, relativePath);
       } else if (metadata.isFile()) {
-        entries.push({ path: relativePath, type: "file", digest: fileDigest(path) });
+        entries.push({
+          path: relativePath,
+          type: "file",
+          mode: metadata.mode & 0o7777,
+          digest: fileDigest(path),
+        });
       } else {
         throw new Error(`dependency environment contains an unsupported entry: ${relativePath}`);
       }
@@ -202,6 +221,10 @@ function directoryDigest(root: string): string {
   };
   visit(root, "");
   return digest(entries);
+}
+
+function installedEnvironmentDigest(manager: "pnpm" | "uv", root: string): string {
+  return directoryDigest(root, manager === "uv");
 }
 
 function remediation(host: BootstrapHost, catalogue: ReleaseCatalogue): string {
@@ -636,6 +659,68 @@ function validatedPnpmImporters(
   return importers;
 }
 
+function workspaceSourcePaths(root: string, importer: string): readonly string[] {
+  if (importer === ".") return [];
+  const manifestPath = posix.join(importer, "package.json");
+  const manifest = JSON.parse(readFileSync(join(root, manifestPath), "utf8")) as {
+    files?: unknown;
+  };
+  if (
+    !Array.isArray(manifest.files) ||
+    manifest.files.length === 0 ||
+    manifest.files.some((path) => typeof path !== "string")
+  ) {
+    throw pnpmLockFailure(
+      "PNPM_WORKSPACE_SOURCE_INVALID",
+      `workspace package ${importer} must declare a non-empty files inventory`,
+    );
+  }
+  const packageRoot = resolve(root, importer);
+  const sources = new Set<string>();
+  const collect = (source: string): void => {
+    if (!resolvesInside(packageRoot, source) || !existsSync(source)) {
+      throw pnpmLockFailure(
+        "PNPM_WORKSPACE_SOURCE_INVALID",
+        `workspace package ${importer} declares a missing source path`,
+      );
+    }
+    const metadata = lstatSync(source);
+    if (metadata.isSymbolicLink()) {
+      throw pnpmLockFailure(
+        "PNPM_WORKSPACE_SOURCE_INVALID",
+        `workspace package ${importer} source inventory may not contain symbolic links`,
+      );
+    }
+    if (metadata.isDirectory()) {
+      for (const name of readdirSync(source).sort()) collect(join(source, name));
+      return;
+    }
+    if (!metadata.isFile()) {
+      throw pnpmLockFailure(
+        "PNPM_WORKSPACE_SOURCE_INVALID",
+        `workspace package ${importer} source inventory contains an unsupported entry`,
+      );
+    }
+    sources.add(posix.join(importer, relative(packageRoot, source).replaceAll("\\", "/")));
+  };
+  for (const declared of manifest.files as string[]) {
+    if (
+      declared === "" ||
+      declared === "." ||
+      isAbsolute(declared) ||
+      declared.split("/").some((segment) => segment === "..") ||
+      /[*?{[]/.test(declared)
+    ) {
+      throw pnpmLockFailure(
+        "PNPM_WORKSPACE_SOURCE_INVALID",
+        `workspace package ${importer} files must name explicit in-package files or directories`,
+      );
+    }
+    collect(resolve(packageRoot, declared));
+  }
+  return [...sources].sort();
+}
+
 function dependencyLocks(root: string): readonly DependencyLock[] {
   const dependencies: DependencyLock[] = [];
   const pnpmLock = join(root, "pnpm-lock.yaml");
@@ -661,6 +746,7 @@ function dependencyLocks(root: string): readonly DependencyLock[] {
     }
     for (const importer of validatedPnpmImporters(root, lock, workspace)) {
       inputPaths.add(importer === "." ? "package.json" : posix.join(importer, "package.json"));
+      for (const source of workspaceSourcePaths(root, importer)) inputPaths.add(source);
     }
     const rootManifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
       pnpm?: { patchedDependencies?: Record<string, string> };
@@ -940,7 +1026,10 @@ function materializeDependencies(
       for (const input of dependency.inputs) {
         const target = resolve(project, input.path);
         mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-        writeFileSync(target, readFileSync(input.sourcePath), { flag: "wx", mode: 0o600 });
+        writeFileSync(target, readFileSync(input.sourcePath), {
+          flag: "wx",
+          mode: lstatSync(input.sourcePath).mode & 0o7777,
+        });
       }
       execFileSync(
         resolve(stateRoot, byName.get("pnpm")!.launcher),
@@ -968,7 +1057,10 @@ function materializeDependencies(
           stdio: "pipe",
         },
       );
-      evidence.push(dependencyBinding(dependency));
+      evidence.push({
+        ...dependencyBinding(dependency),
+        installedDigest: installedEnvironmentDigest("uv", destination),
+      });
     }
   }
   return evidence;
@@ -1030,7 +1122,7 @@ async function materializeState(
     adapters,
   );
   const state: BootstrapState = {
-    schema: "tc.sdlc/bootstrap-state/v5",
+    schema: "tc.sdlc/bootstrap-state/v6",
     release: options.catalogue.release.version,
     lockDigest,
     dependencyDigest,
@@ -1074,7 +1166,7 @@ function validateWarmState(
       ({ installedDigest: _installedDigest, ...binding }) => binding,
     );
     if (
-      state.schema !== "tc.sdlc/bootstrap-state/v5" ||
+      state.schema !== "tc.sdlc/bootstrap-state/v6" ||
       state.release !== options.catalogue.release.version ||
       state.lockDigest !== lockDigest ||
       state.dependencyDigest !== dependencyDigest ||
@@ -1161,14 +1253,11 @@ function validateWarmState(
         throw new Error("dependency environment missing");
       }
       if (
-        dependency.manager === "pnpm" &&
-        (!/^sha256:[0-9a-f]{64}$/.test(dependency.installedDigest ?? "") ||
-          directoryDigest(environment) !== dependency.installedDigest)
+        !/^sha256:[0-9a-f]{64}$/.test(dependency.installedDigest ?? "") ||
+        installedEnvironmentDigest(dependency.manager, environment) !==
+          dependency.installedDigest
       ) {
         throw new Error("installed dependency environment changed");
-      }
-      if (dependency.manager === "uv" && dependency.installedDigest !== undefined) {
-        throw new Error("unexpected installed dependency binding");
       }
     }
     return state;
