@@ -9,6 +9,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -43,6 +44,29 @@ function ownedState(root: string): void {
     }),
     { mode: 0o600 },
   );
+}
+
+function bootstrapState(root: string, stateKey: string, old = true): string {
+  const directory = join(root, stateKey);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "state.json"),
+    sdlc.canonicalJson({
+      schema: "tc.sdlc/bootstrap-state/v6",
+      release: "3.0.0",
+      lockDigest: "sha256:" + "a".repeat(64),
+      dependencyDigest: "sha256:" + "b".repeat(64),
+      platform: "darwin",
+      architecture: "arm64",
+      adapters: [],
+      dependencies: [],
+    }),
+  );
+  if (old) {
+    const expired = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(directory, expired, expired);
+  }
+  return directory;
 }
 
 function managedTemporary(
@@ -249,10 +273,102 @@ describe("tc-sdlc managed lifecycle", () => {
     expect(receipt).toMatchObject({
       status: "succeeded",
       cleanupWorkers: 2,
+      peakCleanupWorkers: 2,
       candidateCount: 6,
       removedCount: 6,
     });
     expect(paths.some(existsSync)).toBe(false);
+  });
+
+  test("does not delete a foreign replacement installed after candidate inspection", async () => {
+    const parent = temporary("tc-sdlc-maintenance-replacement-");
+    const stateRoot = temporary("tc-sdlc-maintenance-state-");
+    const evidence = temporary("tc-sdlc-maintenance-evidence-");
+    ownedState(stateRoot);
+    const candidate = managedTemporary(parent, "tc-sdlc-evaluation-replaced", {
+      pid: 2_147_483_647,
+      old: true,
+    });
+    for (let index = 0; index < 100; index += 1) {
+      writeFileSync(join(candidate, `owned-${index}.txt`), "owned\n");
+    }
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(candidate, old, old);
+    const displaced = join(parent, "displaced-owned-root");
+
+    const running = sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "replacement.json"),
+      mode: "apply",
+      cleanupWorkers: 1,
+    });
+    try {
+      renameSync(candidate, displaced);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    mkdirSync(candidate, { recursive: true });
+    writeFileSync(join(candidate, "foreign.txt"), "preserve foreign bytes\n");
+
+    const receipt = await running;
+    expect(readFileSync(join(candidate, "foreign.txt"), "utf8")).toBe(
+      "preserve foreign bytes\n",
+    );
+    expect(receipt.removedCount).toBeLessThanOrEqual(1);
+  });
+
+  test("retains dirty tracked and untracked work in an evaluation workspace", async () => {
+    const parent = temporary("tc-sdlc-maintenance-nested-worktree-");
+    const stateRoot = temporary("tc-sdlc-maintenance-state-");
+    const evidence = temporary("tc-sdlc-maintenance-evidence-");
+    ownedState(stateRoot);
+    const ownedRoot = managedTemporary(parent, "tc-sdlc-evaluation-dirty-workspace", {
+      pid: 2_147_483_647,
+      old: false,
+    });
+    const workspace = join(ownedRoot, "workspace");
+    mkdirSync(workspace);
+    execFileSync("git", ["init", "--quiet"], { cwd: workspace });
+    writeFileSync(join(workspace, "tracked.txt"), "tracked\n");
+    execFileSync("git", ["add", "tracked.txt"], { cwd: workspace });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=Lifecycle Test",
+        "-c",
+        "user.email=lifecycle@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "fixture",
+      ],
+      { cwd: workspace },
+    );
+    writeFileSync(join(workspace, "tracked.txt"), "unsaved tracked bytes\n");
+    writeFileSync(join(workspace, "untracked.txt"), "unsaved untracked bytes\n");
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(join(ownedRoot, ".tc-sdlc-temporary.json"), old, old);
+    utimesSync(ownedRoot, old, old);
+
+    const receipt = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "nested-worktree.json"),
+      mode: "apply",
+    });
+
+    expect(receipt.retained).toContainEqual({
+      path: "tc-sdlc-evaluation-dirty-workspace",
+      reason: "dirty_worktree",
+    });
+    expect(readFileSync(join(workspace, "tracked.txt"), "utf8")).toBe(
+      "unsaved tracked bytes\n",
+    );
+    expect(readFileSync(join(workspace, "untracked.txt"), "utf8")).toBe(
+      "unsaved untracked bytes\n",
+    );
   });
 
   test("rejects foreign state and unowned BuildKit identities without deleting bytes", async () => {
@@ -308,6 +424,76 @@ describe("tc-sdlc managed lifecycle", () => {
     });
     expect(excessiveWorkers).toMatchObject({ status: "failed", reason: "invalid_options" });
     expect(existsSync(retained)).toBe(true);
+  });
+
+  test("expires only bootstrap states made unreferenced by producer-owned metadata", async () => {
+    const parent = temporary("tc-sdlc-maintenance-state-gc-temp-");
+    const stateRoot = temporary("tc-sdlc-maintenance-state-gc-");
+    const evidence = temporary("tc-sdlc-maintenance-state-gc-evidence-");
+    ownedState(stateRoot);
+    const currentKey = "releases/current/dependencies/darwin-arm64";
+    const predecessorKey = "releases/predecessor/dependencies/darwin-arm64";
+    const expiredKey = "releases/expired/dependencies/darwin-arm64";
+    const recentKey = "releases/recent/dependencies/darwin-arm64";
+    const current = bootstrapState(stateRoot, currentKey);
+    const predecessor = bootstrapState(stateRoot, predecessorKey);
+    const expired = bootstrapState(stateRoot, expiredKey);
+    const recent = bootstrapState(stateRoot, recentKey, false);
+    mkdirSync(join(stateRoot, "references"));
+    writeFileSync(
+      join(
+        stateRoot,
+        "references",
+        `${sdlc.digest({ consumer: "fixture", consumerRoot: "/fixture" }).slice("sha256:".length)}.json`,
+      ),
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/bootstrap-reference/v1",
+        owner: "@three-cubes/tc-sdlc",
+        consumer: "fixture",
+        consumerRoot: "/fixture",
+        currentStateKey: currentKey,
+        predecessorStateKey: predecessorKey,
+      }),
+    );
+
+    const receipt = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "state-gc.json"),
+      mode: "apply",
+    });
+
+    expect(receipt.candidates).toContainEqual(
+      expect.objectContaining({ kind: "bootstrap-state", path: expiredKey }),
+    );
+    expect(receipt.retained).toEqual(
+      expect.arrayContaining([
+        { path: currentKey, reason: "referenced" },
+        { path: predecessorKey, reason: "referenced" },
+        { path: recentKey, reason: "retention_window" },
+      ]),
+    );
+    expect(existsSync(expired)).toBe(false);
+    expect(existsSync(current)).toBe(true);
+    expect(existsSync(predecessor)).toBe(true);
+    expect(existsSync(recent)).toBe(true);
+
+    rmSync(join(stateRoot, "references"), { recursive: true });
+    const unreferencedMetadataAbsent = bootstrapState(
+      stateRoot,
+      "releases/no-authority/dependencies/darwin-arm64",
+    );
+    const guarded = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "state-gc-no-authority.json"),
+      mode: "apply",
+    });
+    expect(guarded.retained).toContainEqual({
+      path: "releases/no-authority/dependencies/darwin-arm64",
+      reason: "reference_metadata_absent",
+    });
+    expect(existsSync(unreferencedMetadataAbsent)).toBe(true);
   });
 
   test.runIf(UV !== undefined)(
@@ -426,6 +612,79 @@ describe("tc-sdlc managed lifecycle", () => {
       expect(
         readdirSync(temporaryRoot).filter((name) => name.startsWith("tc-sdlc-evaluation-")),
       ).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previous;
+    }
+  });
+
+  test("ordinary preparation recovers interrupted owned scratch on success and failure", async () => {
+    const temporaryRoot = temporary("tc-sdlc-maintenance-routine-root-");
+    const root = join(temporaryRoot, "source");
+    const evidence = join(temporaryRoot, "evidence");
+    mkdirSync(root);
+    mkdirSync(evidence);
+    writeFileSync(join(root, "input.txt"), "input\n");
+    const catalogue = sdlc.generateReleaseCatalogue({
+      releaseVersion: "3.0.0",
+      workflowCommit: "1234567890abcdef1234567890abcdef12345678",
+      imageDigest:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    });
+    const declarationFor = (command: string) =>
+      sdlc.validateDeclaration({
+        schema: "tc.sdlc/v1",
+        project: "lifecycle-prepare",
+        toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
+        fitness: sdlc.CANONICAL_SDLC_FITNESS,
+        projects: [{ name: "fixture", root: "." }],
+        targets: {
+          prepare: {
+            command,
+            mode: "prepare",
+            trustBoundary: "portable",
+            resources: { cpu: 1, memoryMiB: 32, ports: [], exclusive: [] },
+            budget: { phaseMs: 5_000, noProgressMs: 2_000, heartbeatMs: 100 },
+            inputs: ["input.txt"],
+            outputs: [],
+          },
+        },
+      });
+    const previous = process.env.TMPDIR;
+    const recoveries: sdlc.AutomaticRecoveryReceipt[] = [];
+    try {
+      for (const [name, command, status] of [
+        ["success", `${process.execPath} -e ''`, "succeeded"],
+        ["failure", `${process.execPath} -e 'process.exit(2)'`, "failed"],
+      ] as const) {
+        const runTemporaryRoot = temporary(`tc-sdlc-maintenance-routine-${name}-`);
+        process.env.TMPDIR = runTemporaryRoot;
+        const interrupted = managedTemporary(
+          runTemporaryRoot,
+          `tc-sdlc-evaluation-interrupted-${name}`,
+          { pid: 2_147_483_647, old: true },
+        );
+        const declaration = declarationFor(command);
+        const result = await sdlc.prepare({
+          root,
+          declaration,
+          catalogue,
+          lock: sdlc.resolveLock(declaration, catalogue),
+          receiptPath: join(evidence, `${name}.json`),
+          runOptions: { capacity: { cpu: 1, memoryMiB: 64 } },
+        });
+        expect(result.status).toBe(status);
+        expect(result.recovery).toMatchObject({
+          schema: "tc.sdlc/automatic-recovery/v1",
+          candidateCount: 1,
+          removedCount: 1,
+          cleanupFailures: 0,
+        });
+        expect(sdlc.canonicalJson(result.recovery)).not.toContain(runTemporaryRoot);
+        recoveries.push(result.recovery);
+        expect(existsSync(interrupted)).toBe(false);
+      }
+      expect(recoveries[0]).toEqual(recoveries[1]);
     } finally {
       if (previous === undefined) delete process.env.TMPDIR;
       else process.env.TMPDIR = previous;

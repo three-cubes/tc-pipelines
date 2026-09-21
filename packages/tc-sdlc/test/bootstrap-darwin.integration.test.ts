@@ -7,6 +7,8 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -193,6 +195,16 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
       env: { HOME: emptyHome, PATH: "/usr/bin:/bin", COREPACK_ENABLE_NETWORK: "0" },
     }).trim()).toBe("11.22.0");
     expect(readFileSync(receiptPath, "utf8")).toBe(sdlc.serialiseBootstrapReceipt(receipt));
+    const referenceFiles = readdirSync(join(stateRoot, "references"));
+    expect(referenceFiles).toHaveLength(1);
+    expect(
+      JSON.parse(readFileSync(join(stateRoot, "references", referenceFiles[0]!), "utf8")),
+    ).toMatchObject({
+      schema: "tc.sdlc/bootstrap-reference/v1",
+      owner: "@three-cubes/tc-sdlc",
+      consumerRoot: realpathSync(root),
+      currentStateKey: receipt.stateKey,
+    });
 
     const relocatedRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-relocated-consumer-"));
     for (const name of ["package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"]) {
@@ -207,6 +219,7 @@ describe("reviewed macOS bootstrap host and dependency boundary", () => {
     });
     expect(relocated).toMatchObject({ status: "succeeded", reused: true });
     expect(relocated.dependencies).toEqual(receipt.dependencies);
+    expect(readdirSync(join(stateRoot, "references"))).toHaveLength(2);
 
     const warm = await sdlc.bootstrap({
       ...options,

@@ -48,7 +48,7 @@ afterEach(() => {
 });
 
 test.runIf(dockerAvailable)(
-  "prunes only an explicitly named builder in tc-sdlc-owned Docker state",
+  "retains recent cache then reclaims it only from an explicitly owned builder",
   async () => {
     const stateRoot = temporary("tc-sdlc-maintenance-docker-state-");
     const temporaryRoot = temporary("tc-sdlc-maintenance-docker-temp-");
@@ -70,6 +70,12 @@ test.runIf(dockerAvailable)(
       { encoding: "utf8", env: environment },
     );
     expect(created.status, created.stderr).toBe(0);
+    const previous = {
+      DOCKER_HOST: process.env.DOCKER_HOST,
+      DOCKER_CONTEXT: process.env.DOCKER_CONTEXT,
+      BUILDX_CONFIG: process.env.BUILDX_CONFIG,
+      BUILDKIT_HOST: process.env.BUILDKIT_HOST,
+    };
     try {
       const bootstrapped = spawnSync(buildx!, ["inspect", "--builder", builder, "--bootstrap"], {
         encoding: "utf8",
@@ -77,25 +83,62 @@ test.runIf(dockerAvailable)(
         timeout: 120_000,
       });
       expect(bootstrapped.status, bootstrapped.stderr).toBe(0);
-      const receipt = await sdlc.maintain({
+      const context = temporary("tc-sdlc-maintenance-docker-context-");
+      writeFileSync(join(context, "Dockerfile"), "FROM scratch\nCOPY payload /payload\n");
+      writeFileSync(join(context, "payload"), Buffer.alloc(2 * 1024 * 1024, "x"));
+      const built = spawnSync(
+        buildx!,
+        [
+          "build",
+          "--builder", builder,
+          "--output", "type=cacheonly",
+          context,
+        ],
+        { encoding: "utf8", env: environment, timeout: 120_000 },
+      );
+      expect(built.status, built.stderr).toBe(0);
+
+      process.env.DOCKER_HOST = "unix:///foreign-denied.sock";
+      process.env.DOCKER_CONTEXT = "foreign-context";
+      process.env.BUILDX_CONFIG = join(temporaryRoot, "foreign-buildx");
+      process.env.BUILDKIT_HOST = "tcp://127.0.0.1:1";
+      const retained = await sdlc.maintain({
         stateRoot,
         temporaryRoot,
-        receiptPath: join(evidence, "receipt.json"),
+        receiptPath: join(evidence, "retained.json"),
         mode: "apply",
         retentionHours: 48,
         buildxExecutable: buildx!,
         dockerBuilder: builder,
       });
-      expect(receipt).toMatchObject({
+      expect(retained).toMatchObject({
         status: "succeeded",
-        tools: { buildkit: { status: "pruned", reclaimedBytes: expect.any(Number) } },
+        tools: { buildkit: { status: "pruned", reclaimedBytes: 0 } },
       });
+      const expired = await sdlc.maintain({
+        stateRoot,
+        temporaryRoot,
+        receiptPath: join(evidence, "expired.json"),
+        mode: "apply",
+        retentionHours: 0,
+        buildxExecutable: buildx!,
+        dockerBuilder: builder,
+      });
+      expect(expired).toMatchObject({
+        status: "succeeded",
+        tools: { buildkit: { status: "pruned" } },
+      });
+      expect(expired.tools.buildkit.reclaimedBytes).toBeGreaterThan(0);
     } finally {
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
       spawnSync(buildx!, ["rm", "--force", builder], {
         stdio: "ignore",
         env: environment,
       });
     }
   },
-  30_000,
+  180_000,
 );

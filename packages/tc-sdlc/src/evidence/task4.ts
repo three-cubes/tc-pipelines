@@ -1,6 +1,7 @@
 import type { KeyObject } from "node:crypto";
 
 import type { RunReceipt } from "./index.js";
+import type { AutomaticRecoveryReceipt } from "../maintenance/index.js";
 import type { InputDigest, TrustBoundary } from "../schema/types.js";
 
 export type TreeMutation = Readonly<{
@@ -17,6 +18,7 @@ export type PreparationReceipt = Readonly<{
   declarationDigest: string;
   catalogueDigest: string;
   lockDigest: string;
+  recovery: AutomaticRecoveryReceipt;
   finalTreeDigest: string;
   firstPass: Readonly<{
     mutations: readonly TreeMutation[];
@@ -51,6 +53,7 @@ export type EvaluationReceipt = Readonly<{
   lockDigest: string;
   environmentClass: string;
   producer: string;
+  recovery: AutomaticRecoveryReceipt;
   tasks: readonly EvaluationTaskEvidence[];
   scheduler?: RunReceipt;
   mutations: readonly TreeMutation[];
@@ -66,6 +69,7 @@ export type EvaluationCandidate = Omit<
   | "mutationsTruncated"
   | "status"
   | "reason"
+  | "recovery"
 >;
 
 export type SignedEvaluationReceipt = Readonly<{

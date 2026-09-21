@@ -12,12 +12,13 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { canonicalJson } from "../../packages/tc-sdlc/dist/index.js";
 
 const repository = realpathSync(fileURLToPath(new URL("../..", import.meta.url)));
+const OWNER = { schema: "tc.sdlc/state-owner/v1", owner: "@three-cubes/tc-sdlc" };
 
 function argument(name) {
   const index = process.argv.indexOf(`--${name}`);
@@ -42,7 +43,68 @@ function artifactDestination(value) {
   return { artifactsRoot, output };
 }
 
+function ownedStateRoot(value) {
+  if (!isAbsolute(value)) throw new Error("state root must be absolute");
+  const root = resolve(value);
+  const relation = relative(repository, root);
+  if (relation === "" || (relation !== ".." && !relation.startsWith(`..${sep}`))) {
+    throw new Error("state root must remain outside the checkout");
+  }
+  try {
+    if (!lstatSync(root).isDirectory() || lstatSync(root).isSymbolicLink()) {
+      throw new Error("invalid state directory");
+    }
+    const marker = join(root, ".tc-sdlc-owner.json");
+    if (
+      lstatSync(marker).isSymbolicLink() ||
+      readFileSync(marker, "utf8") !== canonicalJson(OWNER)
+    ) throw new Error("owner mismatch");
+  } catch {
+    throw new Error("state root is not owned by tc-sdlc");
+  }
+  return root;
+}
+
+function executable(value) {
+  if (!isAbsolute(value)) throw new Error("buildx executable must be absolute");
+  const path = realpathSync(value);
+  const details = lstatSync(path);
+  if (!details.isFile() || (details.mode & 0o111) === 0) {
+    throw new Error("buildx executable must be an executable regular file");
+  }
+  return path;
+}
+
+function dockerEnvironment(stateRoot) {
+  const environment = { ...process.env, DOCKER_CONFIG: join(stateRoot, "cache", "docker") };
+  for (const name of [
+    "BUILDX_CONFIG",
+    "BUILDER_NODE",
+    "BUILDKIT_HOST",
+    "DOCKER_CONTEXT",
+    "DOCKER_HOST",
+    "DOCKER_CERT_PATH",
+    "DOCKER_TLS_VERIFY",
+  ]) delete environment[name];
+  mkdirSync(environment.DOCKER_CONFIG, { recursive: true, mode: 0o700 });
+  return environment;
+}
+
+function writeAtomic(path, value) {
+  const temporary = `${path}.tmp-${process.pid}`;
+  writeFileSync(temporary, canonicalJson(value), { flag: "wx", mode: 0o600 });
+  renameSync(temporary, path);
+}
+
 const { artifactsRoot, output } = artifactDestination(argument("artifact-output"));
+const stateRoot = ownedStateRoot(argument("state-root"));
+const buildx = executable(argument("buildx-executable"));
+const dockerEndpoint = argument("docker-endpoint");
+if (!/^(unix|ssh):\/\/.+/.test(dockerEndpoint)) {
+  throw new Error("docker endpoint must be an explicit local unix or authenticated ssh endpoint");
+}
+const builder = "tc-sdlc-release";
+const environment = dockerEnvironment(stateRoot);
 const status = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
   cwd: repository,
   encoding: "utf8",
@@ -54,6 +116,20 @@ const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], {
 }).trim();
 if (!/^[0-9a-f]{40}$/.test(sourceCommit)) throw new Error("source commit is not immutable");
 
+const inspected = spawnSync(buildx, ["inspect", "--builder", builder], {
+  encoding: "utf8",
+  env: environment,
+});
+if (inspected.status !== 0) {
+  const created = spawnSync(
+    buildx,
+    ["create", "--name", builder, "--driver", "docker-container", dockerEndpoint],
+    { encoding: "utf8", env: environment },
+  );
+  if (created.error !== undefined) throw created.error;
+  if (created.status !== 0) throw new Error(`managed BuildKit builder creation failed with exit ${created.status}`);
+}
+
 const staging = mkdtempSync(join(artifactsRoot, `.${basename(output)}-`));
 try {
   const image = join(staging, "image.oci.tar");
@@ -63,9 +139,10 @@ try {
   let built;
   try {
     built = spawnSync(
-      "docker",
+      buildx,
       [
-        "buildx", "build",
+        "build",
+        "--builder", builder,
         "--platform", "linux/amd64,linux/arm64",
         "--file", join(repository, "images/sdlc/Dockerfile"),
         "--output", `type=oci,dest=${image}`,
@@ -73,7 +150,11 @@ try {
         "--progress", "plain",
         repository,
       ],
-      { cwd: repository, stdio: ["ignore", logDescriptor, logDescriptor] },
+      {
+        cwd: repository,
+        stdio: ["ignore", logDescriptor, logDescriptor],
+        env: environment,
+      },
     );
   } finally {
     closeSync(logDescriptor);
@@ -97,11 +178,30 @@ try {
         metadata: "metadata.json",
         log: "build.log",
       },
-      retention: "caller-managed",
+      lifecycle: {
+        class: "release-artifact-evidence",
+        owner: "@three-cubes/tc-sdlc",
+        retain: "catalogue-current-predecessor-or-incident-reference",
+      },
+      builder: {
+        name: builder,
+        dockerConfig: join(stateRoot, "cache", "docker"),
+        endpoint: dockerEndpoint,
+      },
     }),
     { flag: "wx", mode: 0o600 },
   );
   renameSync(staging, output);
+  const builders = join(stateRoot, "builders");
+  mkdirSync(builders, { recursive: true, mode: 0o700 });
+  writeAtomic(join(builders, `${builder}.json`), {
+    schema: "tc.sdlc/buildkit-owner/v1",
+    owner: "@three-cubes/tc-sdlc",
+    builder,
+    endpoint: dockerEndpoint,
+    sourceCommit,
+    artifactOutput: output,
+  });
   process.stdout.write(
     `${canonicalJson({
       schema: "tc.sdlc/image-build-result/v1",

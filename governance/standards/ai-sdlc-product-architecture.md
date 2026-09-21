@@ -133,6 +133,17 @@ Platform-specific tests form explicit tasks. A macOS bootstrap task verifies
 the native developer boundary. Linux container tasks verify the production
 user-space boundary. Live service journeys verify external runtime boundaries.
 
+Environment ownership includes lifecycle authority. Ephemeral tc-sdlc scratch
+is owner-marked and removed on command exit, with a 48-hour bounded recovery
+sweep for interrupted work. Rebuildable uv, pnpm and BuildKit caches are pruned
+only through their public tool interfaces under tc-sdlc-owned roots or named
+builders. Materialised toolchain state is deleted only when canonical producer
+references prove it is neither a consumer's current state nor its predecessor.
+Release artefacts similarly require catalogue/current/predecessor or incident
+reference authority. Deployment and VM data is outside this local maintenance
+boundary. All cleanup is receipt-bearing, identity-checked immediately before an
+atomic quarantine move, and preserves dirty worktrees and foreign replacements.
+
 ## Task and preparation model
 
 The Nx project and task graph represents dependencies between Python packages,

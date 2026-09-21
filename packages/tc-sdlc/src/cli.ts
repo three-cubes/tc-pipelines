@@ -74,6 +74,7 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
         "retention-hours",
         "cleanup-workers",
         "uv",
+        "pnpm",
         "buildx",
         "docker-builder",
       ],
@@ -99,6 +100,7 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
       ...(retentionHours === undefined ? {} : { retentionHours }),
       ...(cleanupWorkers === undefined ? {} : { cleanupWorkers }),
       ...(options.uv === undefined ? {} : { uvExecutable: options.uv }),
+      ...(options.pnpm === undefined ? {} : { pnpmExecutable: options.pnpm }),
       ...(options.buildx === undefined ? {} : { buildxExecutable: options.buildx }),
       ...(options["docker-builder"] === undefined
         ? {}

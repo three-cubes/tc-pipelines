@@ -146,6 +146,62 @@ describe("tc-sdlc release catalogue generation", () => {
     }
   });
 
+  test("requires an owned state root and explicit BuildKit routing before release work", () => {
+    const output = join(repository, "artifacts", `routing-${process.pid}`);
+    mkdirSync(join(repository, "artifacts"), { recursive: true });
+    const missing = spawnSync(
+      process.execPath,
+      [BUILD_RELEASE, "--artifact-output", output],
+      { encoding: "utf8", cwd: repository },
+    );
+    expect(missing.status).not.toBe(0);
+    expect(missing.stderr).toContain("missing --state-root");
+    expect(existsSync(output)).toBe(false);
+
+    const foreignState = mkdtempSync(join(tmpdir(), "tc-sdlc-release-foreign-state-"));
+    writeFileSync(join(foreignState, "user-data"), "preserve\n");
+    const foreign = spawnSync(
+      process.execPath,
+      [
+        BUILD_RELEASE,
+        "--artifact-output", output,
+        "--state-root", foreignState,
+        "--buildx-executable", process.execPath,
+        "--docker-endpoint", "unix:///not-used.sock",
+      ],
+      { encoding: "utf8", cwd: repository },
+    );
+    expect(foreign.status).not.toBe(0);
+    expect(foreign.stderr).toContain("state root is not owned by tc-sdlc");
+    expect(readFileSync(join(foreignState, "user-data"), "utf8")).toBe("preserve\n");
+    expect(existsSync(output)).toBe(false);
+
+    const ownedState = mkdtempSync(join(tmpdir(), "tc-sdlc-release-owned-state-"));
+    writeFileSync(
+      join(ownedState, ".tc-sdlc-owner.json"),
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/state-owner/v1",
+        owner: "@three-cubes/tc-sdlc",
+      }),
+    );
+    const plaintext = spawnSync(
+      process.execPath,
+      [
+        BUILD_RELEASE,
+        "--artifact-output", output,
+        "--state-root", ownedState,
+        "--buildx-executable", process.execPath,
+        "--docker-endpoint", "tcp://docker.example.invalid:2375",
+      ],
+      { encoding: "utf8", cwd: repository },
+    );
+    expect(plaintext.status).not.toBe(0);
+    expect(plaintext.stderr).toContain(
+      "docker endpoint must be an explicit local unix or authenticated ssh endpoint",
+    );
+    expect(existsSync(output)).toBe(false);
+  });
+
   test("image verification requires explicit scratch and retained evidence locations", () => {
     const result = spawnSync(
       process.execPath,

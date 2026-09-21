@@ -54,6 +54,8 @@ export { bindGraphLock, buildGraph, selectAffected, serialiseGraph, taskIdentity
 export { assertCurrentLock, loadLock, resolveLock, validateLock, writeLock } from "./lock/index.js";
 export { maintain, serialiseMaintenanceReceipt } from "./maintenance/index.js";
 export type {
+  AutomaticRecoveryReceipt,
+  FilesystemIdentity,
   MaintenanceEntry,
   MaintenanceMode,
   MaintenanceOptions,

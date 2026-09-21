@@ -8,6 +8,7 @@ import type {
 } from "../evidence/task4.js";
 import { selectAffected } from "../graph/index.js";
 import { snapshotFiles } from "../inputs/index.js";
+import { recoverInterruptedTemporaryState } from "../maintenance/index.js";
 import { runGraph, type RunOptions } from "../runtime/index.js";
 import type { ReleaseCatalogue, SdlcDeclaration, SdlcLock } from "../schema/types.js";
 import {
@@ -45,6 +46,7 @@ async function evaluate(
   if (!Number.isSafeInteger(maximumMutations) || maximumMutations < 1) {
     throw new TypeError("maxMutations must be a positive safe integer");
   }
+  const recovery = await recoverInterruptedTemporaryState();
   let source = { commit: "unresolved", treeDigest: digest(snapshotFiles(options.root)) };
   let scheduler: EvaluationReceipt["scheduler"];
   let taskEvidence: EvaluationReceipt["tasks"] = [];
@@ -157,6 +159,7 @@ async function evaluate(
     lockDigest: digest(options.lock),
     environmentClass: options.environmentClass,
     producer: options.producer,
+    recovery,
     tasks: taskEvidence,
     ...(scheduler === undefined ? {} : { scheduler }),
     mutations: treeMutations.slice(0, maximumMutations),

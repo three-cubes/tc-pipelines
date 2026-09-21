@@ -26,6 +26,10 @@ import { writeCanonicalEvidence } from "../evidence/index.js";
 import { bindGraphLock, buildGraph } from "../graph/index.js";
 import { resolveInputInventory } from "../inputs/index.js";
 import { assertCurrentLock } from "../lock/index.js";
+import {
+  recoverInterruptedTemporaryState,
+  type AutomaticRecoveryReceipt,
+} from "../maintenance/index.js";
 import type { ReleaseCatalogue, SdlcDeclaration, SdlcLock } from "../schema/types.js";
 
 export type BootstrapPlatform = "darwin" | "linux";
@@ -84,6 +88,7 @@ export type BootstrapReceipt = Readonly<{
   taskIdentities: readonly string[];
   adapters: readonly BootstrapAdapterEvidence[];
   dependencies: readonly BootstrapDependencyEvidence[];
+  recovery: AutomaticRecoveryReceipt;
   diagnostics: readonly BootstrapDiagnostic[];
   diagnosticsCount: number;
   diagnosticsTruncated: boolean;
@@ -132,6 +137,15 @@ type BootstrapState = Readonly<{
   architecture: string;
   adapters: readonly ResolvedAdapter[];
   dependencies: readonly BootstrapDependencyEvidence[];
+}>;
+
+type BootstrapReference = Readonly<{
+  schema: "tc.sdlc/bootstrap-reference/v1";
+  owner: "@three-cubes/tc-sdlc";
+  consumer: string;
+  consumerRoot: string;
+  currentStateKey: string;
+  predecessorStateKey?: string;
 }>;
 
 const OWNER = { schema: "tc.sdlc/state-owner/v1", owner: "@three-cubes/tc-sdlc" } as const;
@@ -1316,6 +1330,7 @@ function failedReceipt(
   dependencies: readonly BootstrapDependencyEvidence[],
   failure: Readonly<{ reason: string; diagnostics: readonly BootstrapDiagnostic[] }>,
   maximumDiagnostics: number,
+  recovery: AutomaticRecoveryReceipt,
 ): BootstrapReceipt {
   return {
     schema: "tc.sdlc/bootstrap-receipt/v1",
@@ -1330,13 +1345,62 @@ function failedReceipt(
     taskIdentities,
     adapters,
     dependencies,
+    recovery,
     diagnostics: failure.diagnostics.slice(0, maximumDiagnostics),
     diagnosticsCount: failure.diagnostics.length,
     diagnosticsTruncated: failure.diagnostics.length > maximumDiagnostics,
   };
 }
 
+function writeBootstrapReference(
+  stateRoot: string,
+  consumer: string,
+  consumerRoot: string,
+  stateKey: string,
+): void {
+  const directory = join(stateRoot, "references");
+  rejectSymlinkComponents(stateRoot, directory);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const referencePath = join(
+    directory,
+    `${digest({ consumer, consumerRoot }).slice("sha256:".length)}.json`,
+  );
+  rejectSymlinkComponents(stateRoot, referencePath);
+  let previous: BootstrapReference | undefined;
+  if (existsSync(referencePath)) {
+    const value = readCanonical(referencePath) as BootstrapReference;
+    if (
+      value.schema !== "tc.sdlc/bootstrap-reference/v1" ||
+      value.owner !== OWNER.owner ||
+      value.consumer !== consumer ||
+      value.consumerRoot !== consumerRoot
+    ) {
+      throw new BootstrapFailure("state_corrupt", [
+        {
+          code: "BOOTSTRAP_REFERENCE_CORRUPT",
+          message: "bootstrap state reference metadata is invalid",
+          action: "inspect the owned reference metadata before retrying bootstrap",
+        },
+      ]);
+    }
+    previous = value;
+  }
+  const predecessorStateKey =
+    previous?.currentStateKey !== undefined && previous.currentStateKey !== stateKey
+      ? previous.currentStateKey
+      : previous?.predecessorStateKey;
+  writeCanonicalEvidence(referencePath, {
+    schema: "tc.sdlc/bootstrap-reference/v1",
+    owner: OWNER.owner,
+    consumer,
+    consumerRoot,
+    currentStateKey: stateKey,
+    ...(predecessorStateKey === undefined ? {} : { predecessorStateKey }),
+  } satisfies BootstrapReference);
+}
+
 export async function bootstrap(options: BootstrapOptions): Promise<BootstrapReceipt> {
+  const recovery = await recoverInterruptedTemporaryState();
   const maximumDiagnostics = options.maxDiagnostics ?? 20;
   if (!Number.isSafeInteger(maximumDiagnostics) || maximumDiagnostics < 1) {
     throw new TypeError("maxDiagnostics must be a positive safe integer");
@@ -1421,6 +1485,12 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       adapters = state.adapters.map(adapterEvidence);
       dependencyEvidence = state.dependencies;
     }
+    writeBootstrapReference(
+      stateRoot,
+      options.declaration.project,
+      realpathSync(options.root),
+      stateKey,
+    );
     const receipt: BootstrapReceipt = {
       schema: "tc.sdlc/bootstrap-receipt/v1",
       status: "succeeded",
@@ -1434,6 +1504,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       taskIdentities,
       adapters,
       dependencies: dependencyEvidence,
+      recovery,
       diagnostics: [],
       diagnosticsCount: 0,
       diagnosticsTruncated: false,
@@ -1451,6 +1522,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       dependencyEvidence,
       failureReason(error),
       maximumDiagnostics,
+      recovery,
     );
     writeCanonicalEvidence(options.receiptPath, receipt);
     return receipt;

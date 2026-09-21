@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -100,16 +101,42 @@ describe("portable bootstrap public boundary", () => {
 
   test("rejects a stale lock before capability discovery", async () => {
     const options = fixture();
+    const recoveryRoot = mkdtempSync(join(tmpdir(), "tc-sdlc-portable-recovery-"));
+    const interrupted = join(recoveryRoot, "tc-sdlc-evaluation-interrupted");
+    mkdirSync(interrupted);
+    writeFileSync(
+      join(interrupted, ".tc-sdlc-temporary.json"),
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/temporary-owner/v1",
+        owner: "@three-cubes/tc-sdlc",
+        kind: "evaluation-workspace",
+        pid: 2_147_483_647,
+      }),
+    );
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(interrupted, old, old);
     const stale = structuredClone(options.lock) as Record<string, unknown>;
     stale.release = "9.9.9";
-    const receipt = await sdlc.bootstrap({
-      ...options,
-      lock: stale as never,
-      stateRoot: mkdtempSync(join(tmpdir(), "tc-sdlc-portable-stale-")),
-      receiptPath: join(dirname(options.root), "portable-stale.json"),
-      host,
-    });
-    expect(receipt).toMatchObject({ status: "failed", reason: "stale_lock" });
+    const previous = process.env.TMPDIR;
+    process.env.TMPDIR = recoveryRoot;
+    try {
+      const receipt = await sdlc.bootstrap({
+        ...options,
+        lock: stale as never,
+        stateRoot: mkdtempSync(join(tmpdir(), "tc-sdlc-portable-stale-")),
+        receiptPath: join(dirname(options.root), "portable-stale.json"),
+        host,
+      });
+      expect(receipt).toMatchObject({
+        status: "failed",
+        reason: "stale_lock",
+        recovery: { candidateCount: 1, removedCount: 1, cleanupFailures: 0 },
+      });
+      expect(existsSync(interrupted)).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previous;
+    }
   });
 
   test("rejects a workspace package omitted from the stale pnpm lock before host discovery", async () => {

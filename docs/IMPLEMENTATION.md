@@ -271,6 +271,19 @@ host capabilities with one actionable command and does not depend on state under
 a particular user's home directory. Native macOS/Linux and the canonical image
 must report the same SDLC release, lock digest and task identities.
 
+The developer-environment lifecycle is part of these commands, not an optional
+operator chore. Each command removes its own scratch in `finally`; bootstrap,
+prepare and evaluation also recover interrupted, owner-marked scratch older than
+48 hours and bind that outcome into their terminal receipt. `tc-sdlc maintain`
+provides dry-run and apply receipts for the same bounded policy. It never scans
+foreign roots or deployment data. Materialised bootstrap states carry stable
+local-consumer references: maintenance retains every current state and immediate
+predecessor and expires only old states made explicitly unreferenced by valid
+producer metadata. The release-image producer uses a named tc-sdlc BuildKit
+builder and state-owned Docker configuration with explicit daemon routing;
+release artefacts remain retained until catalogue/current/predecessor or incident
+references provide deletion authority.
+
 ### Task 6 — Disposable consumers and hosted adapter
 
 **Files**
