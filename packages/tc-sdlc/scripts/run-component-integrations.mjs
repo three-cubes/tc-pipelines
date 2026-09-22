@@ -1,12 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(packageRoot, "../..");
-const insideCanonicalImage = existsSync("/etc/tc-sdlc-release.json");
-const command = process.platform === "linux" && !insideCanonicalImage
+const command = process.platform === "linux"
   ? [process.env.DOCKER ?? "docker", [
       "build",
       "--target", "component-tests",
