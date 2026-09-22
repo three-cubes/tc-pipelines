@@ -55,6 +55,8 @@ RUN apt-get update \
 WORKDIR /build
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY schemas ./schemas
+COPY assurance/fixtures/sdlc ./assurance/fixtures/sdlc
+COPY release/catalogue.json ./release/catalogue.json
 COPY images/sdlc/build-release.mjs images/sdlc/verify.mjs ./images/sdlc/
 COPY packages/tc-sdlc ./packages/tc-sdlc
 RUN pnpm install --frozen-lockfile \
@@ -65,6 +67,11 @@ RUN pnpm install --frozen-lockfile \
 FROM builder AS package-tests
 COPY --from=uv /uv /uvx /usr/local/bin/
 RUN pnpm --filter @three-cubes/tc-sdlc test
+
+FROM builder AS component-tests
+COPY --from=uv /uv /uvx /usr/local/bin/
+COPY images/sdlc/image-marker.json /etc/tc-sdlc-release.json
+RUN pnpm --dir packages/tc-sdlc test:integration:components:direct
 
 FROM toolchain
 LABEL org.opencontainers.image.source="https://github.com/three-cubes/tc-pipelines" \
