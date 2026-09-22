@@ -299,7 +299,7 @@ jobs:
           version: "0.12.5"
           enable-cache: true
       - name: Capture committed candidate state
-        uses: three-cubes/tc-pipelines/actions/preparation-writeback@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@6f3d8aa097ea5a69cce477d52a2881e9b0d5ef5a
         with:
           mode: snapshot
           repository: ${{ github.repository }}
@@ -312,11 +312,11 @@ jobs:
           output: ${{ runner.temp }}/preparation-before.json
           root: ${{ github.workspace }}
       - name: Prepare candidate
-        uses: three-cubes/tc-pipelines/actions/python-preparation@5aa80b8d3b2460ab682c64c4090443660bf63c1e
+        uses: three-cubes/tc-pipelines/actions/python-preparation@6f3d8aa097ea5a69cce477d52a2881e9b0d5ef5a
         with:
           uv-version: ${{ inputs.uv-version }}
       - name: Capture first prepared state
-        uses: three-cubes/tc-pipelines/actions/preparation-writeback@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@6f3d8aa097ea5a69cce477d52a2881e9b0d5ef5a
         with:
           mode: snapshot
           repository: ${{ github.repository }}
@@ -338,11 +338,11 @@ jobs:
           patch: ${{ runner.temp }}/preparation-patch.json
           root: ${{ github.workspace }}
       - name: Prove preparation is a fixed point
-        uses: three-cubes/tc-pipelines/actions/python-preparation@5aa80b8d3b2460ab682c64c4090443660bf63c1e
+        uses: three-cubes/tc-pipelines/actions/python-preparation@6f3d8aa097ea5a69cce477d52a2881e9b0d5ef5a
         with:
           uv-version: ${{ inputs.uv-version }}
       - name: Capture second prepared state
-        uses: three-cubes/tc-pipelines/actions/preparation-writeback@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@6f3d8aa097ea5a69cce477d52a2881e9b0d5ef5a
         with:
           mode: snapshot
           repository: ${{ github.repository }}
