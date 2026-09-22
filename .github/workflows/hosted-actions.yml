@@ -49,7 +49,7 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
           sync-args: --locked
-      - name: Install locked environment for Python preparation
+      - name: Install locked environment
         if: inputs.case == 'action-actions-python-preparation'
         uses: ./actions/setup-uv-cached
         with:

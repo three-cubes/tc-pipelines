@@ -181,8 +181,22 @@ def test_hosted_action_self_checks_pass_repository_python_to_python_actions() ->
 
     triggers = document.get(True) or document["on"]
     assert triggers["workflow_call"]["inputs"]["python-version"]["required"] is True
-    assert len(selected) == 3
+    assert len(selected) == 4
     assert all(step.get("with", {}).get("python-version") == expected for step in selected)
+    preparation_action = next(
+        step
+        for step in steps
+        if step.get("if") == "inputs.case == 'action-actions-python-preparation'"
+        and step.get("uses") == "./actions/python-preparation"
+    )
+    assert preparation_action["with"] == {"uv-version": "0.12.5"}
+    preparation_setup = next(
+        step
+        for step in steps
+        if step.get("if") == "inputs.case == 'action-actions-python-preparation'"
+        and step.get("uses") == "./actions/setup-uv-cached"
+    )
+    assert preparation_setup["name"] == "Install locked environment"
 
 
 def test_shard_routing_self_checks_use_repository_python() -> None:
