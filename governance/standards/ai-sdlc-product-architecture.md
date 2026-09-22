@@ -67,6 +67,52 @@ command reads the release catalogue and materialises those references together
 with the package version and image digest. Consumers review one coordinated
 upgrade rather than maintaining independent pins.
 
+## Capability and composition model
+
+The coordinated release does not define the test boundary. An atomic capability
+has a public command, explicit inputs and an owned output that can be accepted
+without running a downstream capability or a complete release journey. A
+composer sequences already testable capabilities and owns only its aggregate
+result. Artifact utilities may produce canonical files without producing a
+receipt.
+
+| Kind | Capability | Public command | Inputs | Owned output | Status |
+|---|---|---|---|---|---|
+| Utility | Catalogue generation | `tc-sdlc catalogue` | release coordinates | `tc.sdlc/release-catalogue/v1` | implemented |
+| Utility | Lock generation | `tc-sdlc lock` | declaration and catalogue | `tc.sdlc/lock/v1` | implemented |
+| Component | Bootstrap lifecycle | `tc-sdlc bootstrap` | declaration, catalogue, generated lock and checkout | `tc.sdlc/bootstrap-receipt/v1` | implemented; direct packed acceptance present |
+| Component | State maintenance | `tc-sdlc maintain` | owned state root and retention policy | `tc.sdlc/maintenance-receipt/v1` | implemented; direct acceptance present |
+| Component | Preparation | `tc-sdlc prepare` | bootstrapped state and consumer checkout | `tc.sdlc/preparation-receipt/v1` | implemented; direct packed acceptance present |
+| Component | Graph evaluation | `tc-sdlc check-all` and `tc-sdlc check` | bootstrapped, prepared state and consumer checkout | `tc.sdlc/evaluation-receipt/v1` | implemented; direct packed acceptance present |
+| Component | Fitness target | `tc-sdlc fitness` | repository-scoped fitness declaration, generated lock and bootstrapped state | `tc.sdlc/fitness-receipt/v1` | implemented; direct packed acceptance present |
+| Composer | Native consumer journey | `tc-sdlc qualify-consumers` | fixture manifest, candidate catalogue and packed CLI | `tc.sdlc/consumer-qualification/v1` | implemented; deterministic acceptance present |
+| Component | Image producer | `tc-sdlc produce-image` | source identity and image definition | `tc.sdlc/image-release/v1` | planned |
+| Composer | Image qualification journey | `tc-sdlc qualify-image` | image-release receipt and fixture manifest | `tc.sdlc/image-qualification/v1` | planned |
+| Attestor | Release admission | `tc-sdlc admit-release` | consumer-, image-release and image-qualification receipts | `tc.sdlc/release-admission/v1` | planned |
+| Component | Release generation | `tc-sdlc generate-release` | admitted release receipt | catalogue, Dev Container files and `tc.sdlc/release-generation/v1` | planned |
+| Component | Writeback | `tc-sdlc write-release` | generation receipt and repository target | `tc.sdlc/release-writeback/v1` | planned |
+| Composer | Hosted journey | reusable hosted workflow | the same public commands | retained component receipts plus workflow identity | planned |
+
+A component is complete only when a direct packed-command acceptance suite
+creates its genuine prerequisites, invokes that command and validates the owned
+output. Malformed-input tests supply the bad input directly to the component
+that consumes it. They do not race a side process against a larger journey. A
+component is not accepted through coverage inherited from a composer. The
+status column records the current acceptance gaps.
+
+Composer acceptance is separate integration evidence. It proves sequencing,
+handoff and aggregate terminal evidence after the component suites pass. The
+native consumer journey combines bootstrap, preparation and evaluation; release
+admission later combines the independent native and image qualification
+outcomes. Hosted composition demonstrates portability without redefining any
+component contract.
+
+The dependency graph remains acyclic. Catalogue and lock generation precede
+bootstrap; preparation and evaluation follow bootstrap; native qualification
+composes those capabilities. Image production proceeds independently. Image
+qualification consumes the immutable image. Release admission consumes the
+qualification receipts. Generation and writeback follow admission.
+
 ## Consumer contract
 
 Each consumer carries a small `sdlc.yaml` declaration and a generated
@@ -129,6 +175,12 @@ low-latency inner loop. Native execution proves product behaviour within the
 declared platform scope. The canonical image supplies cross-environment release
 evidence.
 
+macOS treats Homebrew Node, Python and uv as validated host prerequisites, but
+not Homebrew or ambient-user pnpm selection. Bootstrap materialises the exact
+declared pnpm distribution under state-owned Corepack storage, executes it
+through a state-owned launcher and binds the complete distribution digest into
+state evidence. Warm offline reuse reads no ambient Corepack home.
+
 Platform-specific tests form explicit tasks. A macOS bootstrap task verifies
 the native developer boundary. Linux container tasks verify the production
 user-space boundary. Live service journeys verify external runtime boundaries.
@@ -139,6 +191,26 @@ sweep for interrupted work. Rebuildable uv, pnpm and BuildKit caches are pruned
 only through their public tool interfaces under tc-sdlc-owned roots or named
 builders. Materialised toolchain state is deleted only when canonical producer
 references prove it is neither a consumer's current state nor its predecessor.
+Bootstrap publishes a separate identity-bound pending transaction, revalidates
+the exact state under a kernel-held per-consumer recovery boundary and
+crash-durable commit lock, atomically commits
+`tc.sdlc/bootstrap-reference/v2`, and then removes only unchanged lock and
+pending evidence. The boundary uses one deterministic localhost port in the
+non-ephemeral 10000-29999 range; the kernel releases it on process death,
+alternative ports are never scanned, and unrelated collision is a safe-busy
+terminal outcome. The lock is a hard link to a fully fsynced marker bound to
+PID and operating-system process-start identity; live or ambiguous owners are
+never stolen. Maintenance acquires the same recovery boundary before stale
+lock cleanup, then performs an identity-bound
+move to quarantine, refreshes pending and committed authorities, and restores
+the candidate when a matching authority appears during the move or before
+interrupted-quarantine recovery. Device and inode are the stable move identity;
+birthtime is retained as evidence but is not assumed stable across rename.
+Quarantine-creation failure retains state
+and produces a failed receipt rather than an unrecorded exception.
+Expired pending transactions, proven-dead linked commit locks and orphan
+pre-link markers are reclaimed only after 48 hours, with a dedicated reference
+metadata count in the maintenance receipt.
 Release artefacts similarly require catalogue/current/predecessor or incident
 reference authority. Deployment and VM data is outside this local maintenance
 boundary. All cleanup is receipt-bearing, identity-checked immediately before an

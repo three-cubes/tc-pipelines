@@ -13,11 +13,11 @@ pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ACTION = REPO_ROOT / "actions" / "setup-uv-cached" / "action.yml"
-LEGACY_CARRIER_CALLERS = (
+REPOSITORY_RESOLVED_CALLERS = (
     REPO_ROOT / "actions" / "pre-commit-cached" / "action.yml",
     REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml",
 )
-LEGACY_DEFAULTS = {"uv-version": "0.12.5", "python-version": "3.12"}
+REPOSITORY_RESOLVED_DEFAULTS = {"uv-version": "", "python-version": ""}
 PYTHON_INSTALL_SURFACES = (
     ACTION,
     REPO_ROOT / "actions" / "pre-commit-cached" / "action.yml",
@@ -70,6 +70,24 @@ def _resolve(tmp_path: Path, *, uv_version: str = "", python_version: str = "") 
     return dict(line.split("=", maxsplit=1) for line in output_path.read_text(encoding="utf-8").splitlines())
 
 
+def _resolve_root_python(steps: list[dict], tmp_path: Path) -> str:
+    step = next(step for step in steps if step.get("id") == "root_python")
+    output_path = tmp_path / "github-output"
+    completed = subprocess.run(
+        ["bash", "-c", step["run"]],
+        cwd=REPO_ROOT,
+        env={**os.environ, "GITHUB_OUTPUT": str(output_path)},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    values = dict(
+        line.split("=", maxsplit=1) for line in output_path.read_text(encoding="utf-8").splitlines()
+    )
+    return values["python_version"]
+
+
 def test_org_action_resolves_repository_toolchain_files_before_legacy_fallback() -> None:
     """One source file drives local bootstrap and every reusable gate lane."""
 
@@ -86,12 +104,12 @@ def test_org_action_resolves_repository_toolchain_files_before_legacy_fallback()
     assert "UV_PYTHON: ${{ steps.toolchain.outputs.python_version }}" in action
 
 
-@pytest.mark.parametrize("path", LEGACY_CARRIER_CALLERS)
-@pytest.mark.parametrize("input_name, expected", LEGACY_DEFAULTS.items())
-def test_carrier_callers_keep_legacy_defaults_until_their_self_pins_move(
+@pytest.mark.parametrize("path", REPOSITORY_RESOLVED_CALLERS)
+@pytest.mark.parametrize("input_name, expected", REPOSITORY_RESOLVED_DEFAULTS.items())
+def test_carrier_callers_defer_to_repository_toolchain_files(
     path: Path, input_name: str, expected: str
 ) -> None:
-    """The carrier must feed its pinned pre-resolver composite valid inputs."""
+    """The carrier must not duplicate repository-owned Python and uv pins."""
     assert _caller_default(path, input_name) == expected
 
 
@@ -113,6 +131,66 @@ def test_toolchain_resolver_uses_legacy_values_for_empty_version_files(
     (tmp_path / ".python-version").touch()
 
     assert _resolve(tmp_path) == {"uv_version": "0.12.5", "python_version": "3.12"}
+
+
+def test_hosted_assurance_passes_repository_python_to_python_mutation_and_canary_gates(
+    tmp_path: Path,
+) -> None:
+    """Self-check jobs execute this repository under its declared toolchain."""
+    document = _yaml(REPO_ROOT / ".github" / "workflows" / "hosted-assurance.yml")
+    expected = "${{ needs.select.outputs.python_version }}"
+    select_job = document["jobs"]["select"]
+
+    expected_root = "${{ steps.root_python.outputs.python_version }}"
+    assert select_job["outputs"]["python_version"] == expected_root
+    setup = next(step for step in select_job["steps"] if step.get("uses") == "./actions/setup-uv-cached")
+    assert setup["with"]["python-version"] == expected_root
+    assert document["jobs"]["python"]["with"]["python-version"] == expected
+    assert document["jobs"]["mutation"]["with"]["python-version"] == expected
+    assert document["jobs"]["canary"]["with"]["python-version"] == expected
+    assert document["jobs"]["actions"]["with"]["python-version"] == expected
+    assert document["jobs"]["security"]["with"]["gitleaks-config"] == "governance/.gitleaks.toml"
+    assert "gitleaks-baseline" not in document["jobs"]["security"]["with"]
+    receipt_setup = next(
+        step
+        for step in document["jobs"]["receipts"]["steps"]
+        if step.get("uses") == "./actions/setup-uv-cached"
+    )
+    assert receipt_setup["with"]["python-version"] == expected
+    assert (
+        _resolve_root_python(select_job["steps"], tmp_path)
+        == (REPO_ROOT / ".python-version").read_text(encoding="utf-8").strip()
+    )
+
+
+def test_hosted_action_self_checks_pass_repository_python_to_python_actions() -> None:
+    """Composite-action probes use the checked-out repo's Python pin."""
+    document = _yaml(REPO_ROOT / ".github" / "workflows" / "hosted-actions.yml")
+    expected = "${{ inputs.python-version }}"
+    steps = document["jobs"]["adapter"]["steps"]
+    selected = [
+        step
+        for step in steps
+        if step.get("uses")
+        in {
+            "./actions/setup-uv-cached",
+            "./actions/pre-commit-cached",
+            "./actions/python-gate-body",
+        }
+    ]
+
+    triggers = document.get(True) or document["on"]
+    assert triggers["workflow_call"]["inputs"]["python-version"]["required"] is True
+    assert len(selected) == 3
+    assert all(step.get("with", {}).get("python-version") == expected for step in selected)
+
+
+def test_shard_routing_self_checks_use_repository_python() -> None:
+    """Reusable-gate probes inherit the repository pin through the shared gate."""
+    document = _yaml(REPO_ROOT / ".github" / "workflows" / "test-shard-routing.yml")
+
+    for job_name in ("unsharded", "sharded", "floor", "tier"):
+        assert "python-version" not in document["jobs"][job_name]["with"]
 
 
 @pytest.mark.parametrize("selector", ["pypy@3.10", "cpython-3.12.3", ">=3.12,<3.13"])

@@ -6,6 +6,11 @@ import type {
   PreparationReceipt,
   TreeMutation,
 } from "../evidence/task4.js";
+import {
+  assertSucceededPreparationReceipt,
+  parsePreparationReceipt,
+  validatePreparationReceipt,
+} from "../evidence/task4.js";
 import { selectAffected } from "../graph/index.js";
 import { snapshotFiles } from "../inputs/index.js";
 import { recoverInterruptedTemporaryState } from "../maintenance/index.js";
@@ -28,10 +33,10 @@ export type EvaluationOptions = Readonly<{
   receiptPath: string;
   environmentClass: string;
   producer: string;
-  preparationReceipt?: PreparationReceipt;
+  preparationReceipt?: PreparationReceipt | string;
   maxMutations?: number;
   changedPaths?: readonly string[];
-  runOptions?: Omit<RunOptions, "cwd" | "receiptPath">;
+  runOptions: Omit<RunOptions, "cwd" | "receiptPath">;
 }>;
 
 export function serialiseEvaluationReceipt(receipt: EvaluationReceipt): string {
@@ -55,6 +60,7 @@ async function evaluate(
   const workspace = materializeTree(options.root);
   try {
     try {
+      options.runOptions.executionContext.assertIdentity();
       const full = plan({ ...options, root: workspace.root });
       const graph = phaseGraph(full, "evaluate");
       const selected = all
@@ -90,15 +96,28 @@ async function evaluate(
         treeRoot: workspace.root,
       });
       if (preparationRequired) {
-        const preparation = options.preparationReceipt;
+        const suppliedPreparation = options.preparationReceipt;
+        const preparation = suppliedPreparation === undefined
+          ? undefined
+          : typeof suppliedPreparation === "string"
+            ? parsePreparationReceipt(suppliedPreparation)
+            : validatePreparationReceipt(suppliedPreparation);
+        if (preparation === undefined) {
+          throw new SdlcError(
+            "PREPARATION_EVIDENCE_INVALID",
+            "evaluation requires preparation evidence",
+          );
+        }
+        assertSucceededPreparationReceipt(preparation, {
+          declarationDigest: digest(options.declaration),
+          catalogueDigest: digest(options.catalogue),
+          lockDigest: digest(options.lock),
+        });
         if (
-          preparation === undefined ||
-          preparation.status !== "succeeded" ||
           preparation.secondPass.mutationCount !== 0 ||
           preparation.finalTreeDigest !== source.treeDigest ||
-          preparation.declarationDigest !== digest(options.declaration) ||
-          preparation.catalogueDigest !== digest(options.catalogue) ||
-          preparation.lockDigest !== digest(options.lock)
+          canonicalJson(preparation.bootstrapContext) !==
+            canonicalJson(options.runOptions.executionContext.binding)
         ) {
           throw new SdlcError(
             "PREPARATION_EVIDENCE_INVALID",
@@ -152,6 +171,7 @@ async function evaluate(
       declarationDigest: digest(options.declaration),
       catalogueDigest: digest(options.catalogue),
       lockDigest: digest(options.lock),
+      bootstrapContext: options.runOptions.executionContext.binding,
       environmentClass: options.environmentClass,
       producer: options.producer,
       recovery,

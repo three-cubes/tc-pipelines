@@ -135,12 +135,29 @@ function validateGraphDeclaration(
     for (const path of target.outputs ?? []) {
       assertRelativePath(path, `target ${targetName} output`);
     }
+    for (const item of target.evidence ?? []) {
+      assertRelativePath(item.path, `target ${targetName} evidence path`);
+      if (
+        item.path === "." ||
+        /[*?\[\]{}]/.test(item.path) ||
+        item.path.endsWith("/")
+      ) {
+        throw new SdlcError(
+          "GRAPH_EVIDENCE_INVALID",
+          `target ${targetName} evidence must name one exact relative file: ${item.path}`,
+        );
+      }
+    }
     assertUnambiguousPaths(target.inputs ?? [], `target ${targetName} inputs`);
     assertUnambiguousPaths(
       target.sharedInputs ?? [],
       `target ${targetName} shared inputs`,
     );
     assertUnambiguousPaths(target.outputs ?? [], `target ${targetName} outputs`);
+    assertUnambiguousPaths(
+      (target.evidence ?? []).map((item) => item.path),
+      `target ${targetName} evidence`,
+    );
   }
 
   const roots = new Map<string, string>();

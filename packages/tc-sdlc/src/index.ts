@@ -1,5 +1,4 @@
 export {
-  CANONICAL_SDLC_FITNESS,
   CANONICAL_SDLC_BOOTSTRAP,
   CANONICAL_SDLC_TOOLCHAINS,
   createReleaseCatalogue,
@@ -24,6 +23,11 @@ export type {
 export { bytesDigest, canonicalJson, digest } from "./canonical.js";
 export { restoreEvaluationCache, storeEvaluationCache } from "./cache/index.js";
 export { SdlcError } from "./errors.js";
+export { qualifyConsumers } from "./qualification/index.js";
+export type {
+  ConsumerQualificationReceipt,
+  QualifyConsumersOptions,
+} from "./qualification/index.js";
 export type { ExecutorContract } from "./executors/index.js";
 export { serialiseRunReceipt, writeCanonicalEvidence, writeRunReceipt } from "./evidence/index.js";
 export type {
@@ -50,6 +54,14 @@ export type {
   SignedEvaluationReceipt,
   TreeMutation,
 } from "./evidence/task4.js";
+export {
+  assertSucceededEvaluationReceipt,
+  assertSucceededPreparationReceipt,
+  parseEvaluationReceipt,
+  parsePreparationReceipt,
+  validateEvaluationReceipt,
+  validatePreparationReceipt,
+} from "./evidence/task4.js";
 export { bindGraphLock, buildGraph, selectAffected, serialiseGraph, taskIdentity } from "./graph/index.js";
 export { assertCurrentLock, loadLock, resolveLock, validateLock, writeLock } from "./lock/index.js";
 export { maintain, serialiseMaintenanceReceipt } from "./maintenance/index.js";
@@ -74,6 +86,12 @@ export { check, checkAll, serialiseEvaluationReceipt } from "./tasks/check.js";
 export type { EvaluationOptions } from "./tasks/check.js";
 export { prepare, serialisePreparationReceipt } from "./tasks/prepare.js";
 export type { PreparationOptions } from "./tasks/prepare.js";
+export { fitness } from "./tasks/fitness.js";
+export type { FitnessOptions } from "./tasks/fitness.js";
+export { parseFitnessReceipt } from "./executors/fitness.js";
+export type { FitnessReceipt } from "./executors/fitness.js";
+export { parseImageReleaseReceipt, produceImage, validateImageReleaseReceipt } from "./image/producer.js";
+export type { ImageReleaseReceipt, ProduceImageOptions } from "./image/producer.js";
 export { loadDeclaration, validateDeclaration } from "./schema/declaration.js";
 export type {
   GraphProject,

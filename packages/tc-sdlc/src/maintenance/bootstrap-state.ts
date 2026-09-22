@@ -5,9 +5,27 @@ import {
   readFileSync,
   renameSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 
-import { canonicalJson, digest } from "../canonical.js";
+import { canonicalJson } from "../canonical.js";
+import {
+  acquireBootstrapKernelBoundary,
+  assertBootstrapKernelBoundary,
+  releaseBootstrapKernelBoundary,
+  type BootstrapKernelBoundary,
+} from "../bootstrap/kernel-boundary.js";
+import {
+  bootstrapStateGenerationInvalidated,
+  retireBootstrapStateTombstone,
+  stableDirectoryIdentity,
+} from "../bootstrap/state-integrity.js";
+import {
+  cleanupExpiredDeadPending,
+  readBootstrapReferenceAuthorities,
+  leaseMatches,
+  referenceMatches,
+  type BootstrapReferenceAuthorities,
+} from "../bootstrap/references.js";
 import {
   QUARANTINE_PREFIX,
   createQuarantine,
@@ -15,24 +33,16 @@ import {
   filesystemIdentity,
   finishQuarantine,
   inspectQuarantine,
+  inspectQuarantinePayload,
   removeQuarantineCandidate,
   sameIdentity,
+  sameMoveIdentity,
 } from "./quarantine.js";
 import type {
+  FilesystemIdentity,
   MaintenanceEntry,
   MaintenanceRetainedEntry,
 } from "./types.js";
-
-const OWNER = "@three-cubes/tc-sdlc";
-
-type BootstrapReference = Readonly<{
-  schema: "tc.sdlc/bootstrap-reference/v1";
-  owner: typeof OWNER;
-  consumer: string;
-  consumerRoot: string;
-  currentStateKey: string;
-  predecessorStateKey?: string;
-}>;
 
 function directoryBytes(path: string): number {
   let total = 0;
@@ -110,60 +120,13 @@ function bootstrapQuarantinePaths(stateRoot: string): readonly string[] {
   return paths;
 }
 
-function referencePathIsValid(name: string, value: BootstrapReference): boolean {
-  return (
-    value.schema === "tc.sdlc/bootstrap-reference/v1" &&
-    value.owner === OWNER &&
-    typeof value.consumer === "string" &&
-    value.consumer.length > 0 &&
-    typeof value.consumerRoot === "string" &&
-    isAbsolute(value.consumerRoot) &&
-    name ===
-      `${digest({ consumer: value.consumer, consumerRoot: value.consumerRoot }).slice("sha256:".length)}.json`
-  );
-}
-
-function stateKeyIsValid(value: string): boolean {
-  return /^releases\/[^/]+\/[^/]+\/(darwin|linux)-[^/]+$/.test(value);
-}
-
-function bootstrapReferences(stateRoot: string): ReadonlySet<string> | undefined {
-  const directory = join(stateRoot, "references");
-  try {
-    const root = lstatSync(directory);
-    if (!root.isDirectory() || root.isSymbolicLink()) return undefined;
-    const referenced = new Set<string>();
-    const files = readdirSync(directory).sort();
-    if (files.length === 0) return undefined;
-    for (const name of files) {
-      if (!/^[a-zA-Z0-9._-]+\.json$/.test(name)) return undefined;
-      const path = join(directory, name);
-      const details = lstatSync(path);
-      if (!details.isFile() || details.isSymbolicLink()) return undefined;
-      const bytes = readFileSync(path, "utf8");
-      const value = JSON.parse(bytes) as BootstrapReference;
-      if (bytes !== canonicalJson(value) || !referencePathIsValid(name, value)) {
-        return undefined;
-      }
-      for (const key of [value.currentStateKey, value.predecessorStateKey]) {
-        if (key === undefined) continue;
-        if (!stateKeyIsValid(key)) return undefined;
-        referenced.add(key);
-      }
-    }
-    return referenced;
-  } catch {
-    return undefined;
-  }
-}
-
 export function inspectBootstrapStates(
   stateRoot: string,
   cutoff: number,
 ): Readonly<{ candidates: MaintenanceEntry[]; retained: MaintenanceRetainedEntry[] }> {
   const candidates: MaintenanceEntry[] = [];
   const retained: MaintenanceRetainedEntry[] = [];
-  const references = bootstrapReferences(stateRoot);
+  const references = readBootstrapReferenceAuthorities(stateRoot);
   for (const path of bootstrapQuarantinePaths(stateRoot)) {
     const inspected = inspectQuarantine(join(stateRoot, path), path, cutoff);
     if (inspected.candidate !== undefined) candidates.push(inspected.candidate);
@@ -171,9 +134,12 @@ export function inspectBootstrapStates(
   }
   for (const path of bootstrapStatePaths(stateRoot)) {
     const absolute = join(stateRoot, path);
+    const identity = filesystemIdentity(absolute);
     if (references === undefined) {
       retained.push({ path, reason: "reference_metadata_absent" });
-    } else if (references.has(path)) {
+    } else if (leaseMatches(references, path, identity)) {
+      retained.push({ path, reason: "leased" });
+    } else if (referenceMatches(references, path, identity)) {
       retained.push({ path, reason: "referenced" });
     } else if (lstatSync(absolute).mtimeMs > cutoff) {
       retained.push({ path, reason: "retention_window" });
@@ -182,7 +148,7 @@ export function inspectBootstrapStates(
         kind: "bootstrap-state",
         path,
         bytes: directoryBytes(absolute),
-        identity: filesystemIdentity(absolute),
+        identity,
       });
     }
   }
@@ -194,14 +160,133 @@ type RemovalResult = Readonly<{
   reclaimedBytes: number;
   failures: number;
   peakWorkers: number;
+  referenceMetadataRemovedCount: number;
   retained: MaintenanceRetainedEntry[];
 }>;
 
 function retainedReason(
-  references: ReadonlySet<string> | undefined,
+  references: BootstrapReferenceAuthorities | undefined,
   path: string,
+  identity: FilesystemIdentity,
 ): MaintenanceRetainedEntry["reason"] {
-  return references?.has(path) === true ? "referenced" : "changed_during_apply";
+  return leaseMatches(references, path, identity)
+    ? "leased"
+    : referenceMatches(references, path, identity)
+      ? "referenced"
+      : "changed_during_apply";
+}
+
+type BootstrapDeletionPreparation =
+  | Readonly<{ kind: "retained"; retained: MaintenanceRetainedEntry; failed: boolean }>
+  | Readonly<{ kind: "quarantined"; root: string; payload: string }>;
+
+function restoreReferencedQuarantine(
+  stateRoot: string,
+  candidate: MaintenanceEntry,
+): MaintenanceRetainedEntry | undefined {
+  const root = join(stateRoot, candidate.path);
+  try {
+    if (!sameIdentity(root, candidate.identity)) return undefined;
+    const payload = inspectQuarantinePayload(root);
+    if (payload?.kind !== "bootstrap-state") return undefined;
+    const parentKey = dirname(candidate.path).replaceAll("\\", "/");
+    const stateKey = `${parentKey}/${payload.originalName}`;
+    if (bootstrapStateGenerationInvalidated(stateRoot, stateKey, payload.payload)) {
+      // The caller only attempts restoration after the bounded retention window.
+      // A poisoned generation is never restored, even if old reference evidence names it.
+      return undefined;
+    }
+    const references = readBootstrapReferenceAuthorities(stateRoot);
+    if (!referenceMatches(references, stateKey, payload.identity)) return undefined;
+    const original = join(stateRoot, stateKey);
+    if (existsSync(original)) throw new Error("referenced state path already exists");
+    renameSync(payload.payload, original);
+    if (!sameMoveIdentity(original, payload.identity)) {
+      throw new Error("restored state identity changed");
+    }
+    finishQuarantine(root);
+    return { path: stateKey, reason: "referenced" };
+  } catch {
+    return undefined;
+  }
+}
+
+function prepareBootstrapDeletion(
+  stateRoot: string,
+  candidate: MaintenanceEntry,
+  cutoff: number,
+): BootstrapDeletionPreparation {
+  const path = join(stateRoot, candidate.path);
+  const references = readBootstrapReferenceAuthorities(stateRoot);
+  try {
+    if (
+      references === undefined ||
+      referenceMatches(references, candidate.path, candidate.identity) ||
+      !sameIdentity(path, candidate.identity) ||
+      lstatSync(path).mtimeMs > cutoff
+    ) {
+      return {
+        kind: "retained",
+        retained: {
+          path: candidate.path,
+          reason: references === undefined
+            ? "reference_metadata_absent"
+            : retainedReason(references, candidate.path, candidate.identity),
+        },
+        failed: false,
+      };
+    }
+    const created = createQuarantine(
+      dirname(path),
+      path,
+      "bootstrap-state",
+      candidate.identity,
+    );
+    renameSync(path, created.payload);
+    if (!sameMoveIdentity(created.payload, candidate.identity)) {
+      if (!existsSync(path)) {
+        renameSync(created.payload, path);
+        finishQuarantine(created.root);
+      }
+      return {
+        kind: "retained",
+        retained: { path: candidate.path, reason: "changed_during_apply" },
+        failed: existsSync(created.payload),
+      };
+    }
+    const refreshedReferences = readBootstrapReferenceAuthorities(stateRoot);
+    if (
+      refreshedReferences === undefined ||
+      referenceMatches(refreshedReferences, candidate.path, candidate.identity)
+    ) {
+      if (existsSync(path)) {
+        return {
+          kind: "retained",
+          retained: { path: candidate.path, reason: "inspection_failed" },
+          failed: true,
+        };
+      }
+      renameSync(created.payload, path);
+      finishQuarantine(created.root);
+      return {
+        kind: "retained",
+        retained: {
+          path: candidate.path,
+          reason: refreshedReferences === undefined
+            ? "reference_metadata_absent"
+            : "referenced",
+        },
+        failed: false,
+      };
+    }
+    return { kind: "quarantined", root: created.root, payload: created.payload };
+  } catch {
+    return {
+      kind: "retained",
+      retained: { path: candidate.path, reason: "inspection_failed" },
+      failed: true,
+    };
+  }
 }
 
 export async function removeBootstrapStates(
@@ -223,7 +308,52 @@ export async function removeBootstrapStates(
       const index = cursor++;
       const candidate = candidates[index]!;
       const path = join(stateRoot, candidate.path);
+      const quarantinePayloadForBoundary = candidate.kind === "quarantine"
+        ? inspectQuarantinePayload(path)
+        : undefined;
+      const stateKey = candidate.kind === "bootstrap-state"
+        ? candidate.path
+        : quarantinePayloadForBoundary?.kind === "bootstrap-state"
+          ? `${dirname(candidate.path).replaceAll("\\", "/")}/${quarantinePayloadForBoundary.originalName}`
+          : undefined;
+      let boundary: BootstrapKernelBoundary | undefined;
+      if (stateKey !== undefined) {
+        try {
+          boundary = await acquireBootstrapKernelBoundary(
+            stateRoot,
+            "bootstrap-state-materialization",
+            { stateKey },
+          );
+        } catch {
+          results[index] = {
+            removed: false,
+            retained: { path: candidate.path, reason: "changed_during_apply" },
+            failed: false,
+          };
+          continue;
+        }
+      }
+      try {
+        if (boundary !== undefined) assertBootstrapKernelBoundary(boundary);
       if (candidate.kind === "quarantine") {
+        const quarantinePayload = quarantinePayloadForBoundary;
+        const poisonedStateKey = quarantinePayload?.kind === "bootstrap-state"
+          ? `${dirname(candidate.path).replaceAll("\\", "/")}/${quarantinePayload.originalName}`
+          : undefined;
+        const poisonedIdentity = poisonedStateKey === undefined || quarantinePayload === undefined
+          ? undefined
+          : stableDirectoryIdentity(quarantinePayload.payload);
+        const poisoned = poisonedStateKey !== undefined && quarantinePayload !== undefined &&
+          bootstrapStateGenerationInvalidated(
+            stateRoot,
+            poisonedStateKey,
+            quarantinePayload.payload,
+          );
+        const restored = restoreReferencedQuarantine(stateRoot, candidate);
+        if (restored !== undefined) {
+          results[index] = { removed: false, retained: restored, failed: false };
+          continue;
+        }
         activeWorkers += 1;
         peakWorkers = Math.max(peakWorkers, activeWorkers);
         let recovered: Awaited<ReturnType<typeof removeQuarantineCandidate>>;
@@ -237,6 +367,9 @@ export async function removeBootstrapStates(
         } finally {
           activeWorkers -= 1;
         }
+        if (recovered.removed && poisoned && poisonedStateKey !== undefined && poisonedIdentity !== undefined) {
+          retireBootstrapStateTombstone(stateRoot, poisonedStateKey, poisonedIdentity);
+        }
         results[index] = recovered.removed
           ? { removed: true, bytes: candidate.bytes ?? 0 }
           : {
@@ -249,52 +382,28 @@ export async function removeBootstrapStates(
             };
         continue;
       }
-      const references = bootstrapReferences(stateRoot);
-      if (
-        references === undefined ||
-        references.has(candidate.path) ||
-        !sameIdentity(path, candidate.identity) ||
-        lstatSync(path).mtimeMs > cutoff
-      ) {
+      let prepared: BootstrapDeletionPreparation;
+      try {
+        prepared = prepareBootstrapDeletion(stateRoot, candidate, cutoff);
+      } catch {
         results[index] = {
           removed: false,
-          retained: { path: candidate.path, reason: retainedReason(references, candidate.path) },
-          failed: false,
+          retained: { path: candidate.path, reason: "inspection_failed" },
+          failed: true,
         };
         continue;
       }
-      const created = createQuarantine(
-        dirname(path),
-        path,
-        "bootstrap-state",
-        candidate.identity,
-      );
-      const quarantineRoot = created.root;
-      const quarantine = created.payload;
+      if (prepared.kind === "retained") {
+        results[index] = {
+          removed: false,
+          retained: prepared.retained,
+          failed: prepared.failed,
+        };
+        continue;
+      }
+      const quarantineRoot = prepared.root;
+      const quarantine = prepared.payload;
       try {
-        renameSync(path, quarantine);
-        const refreshed = bootstrapReferences(stateRoot);
-        if (
-          !sameIdentity(quarantine, candidate.identity) ||
-          refreshed === undefined ||
-          refreshed.has(candidate.path)
-        ) {
-          if (!existsSync(path)) {
-            renameSync(quarantine, path);
-            finishQuarantine(quarantineRoot);
-          }
-          results[index] = {
-            removed: false,
-            retained: {
-              path: candidate.path,
-              reason: existsSync(quarantine)
-                ? "inspection_failed"
-                : retainedReason(refreshed, candidate.path),
-            },
-            failed: existsSync(quarantine),
-          };
-          continue;
-        }
         activeWorkers += 1;
         peakWorkers = Math.max(peakWorkers, activeWorkers);
         try {
@@ -321,11 +430,26 @@ export async function removeBootstrapStates(
           failed: true,
         };
       }
+      } finally {
+        try {
+          if (boundary !== undefined) {
+            assertBootstrapKernelBoundary(boundary);
+            releaseBootstrapKernelBoundary(boundary);
+          }
+        } catch {
+          results[index] = {
+            removed: false,
+            retained: { path: candidate.path, reason: "inspection_failed" },
+            failed: true,
+          };
+        }
+      }
     }
   };
   await Promise.all(
     Array.from({ length: Math.min(workers, candidates.length) }, () => worker()),
   );
+  const referenceMetadataRemovedCount = await cleanupExpiredDeadPending(stateRoot, cutoff);
   let removedCount = 0;
   let reclaimedBytes = 0;
   let failures = 0;
@@ -339,5 +463,12 @@ export async function removeBootstrapStates(
       if (result.failed) failures += 1;
     }
   }
-  return { removedCount, reclaimedBytes, failures, peakWorkers, retained };
+  return {
+    removedCount,
+    reclaimedBytes,
+    failures,
+    peakWorkers,
+    referenceMetadataRemovedCount,
+    retained,
+  };
 }

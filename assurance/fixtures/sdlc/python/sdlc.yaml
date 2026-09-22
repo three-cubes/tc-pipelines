@@ -1,0 +1,54 @@
+schema: tc.sdlc/v1
+project: tc-sdlc-python-consumer
+toolchains:
+  python: "3.13"
+  node: "24"
+  packageManager: pnpm@11.22.0
+  uv: "0.12.5"
+fitness:
+  package: three-cubes-fitness
+  config: pyproject.toml
+  profiles:
+    full: full
+projects:
+  - name: python-service
+    root: .
+targets:
+  fitness:
+    executor: tc-sdlc:fitness
+    profile: full
+    scope: repository
+    mode: evaluate
+    trustBoundary: portable
+    inputs:
+      - pyproject.toml
+      - uv.lock
+      - sdlc.yaml
+    evidence:
+      - path: fitness.json
+        mediaType: application/json
+  prepare:
+    command: uv run --locked python -B scripts/prepare.py
+    mode: prepare
+    trustBoundary: portable
+    inputs:
+      - pyproject.toml
+      - uv.lock
+      - sdlc.yaml
+      - scripts/prepare.py
+      - src/input.txt
+    outputs:
+      - generated/value.txt
+  check:
+    command: uv run --locked python -B tests/verify.py
+    mode: evaluate
+    trustBoundary: portable
+    dependsOn: [prepare]
+    inputs:
+      - pyproject.toml
+      - uv.lock
+      - sdlc.yaml
+      - scripts/prepare.py
+      - src/**
+      - generated/**
+      - tests/**

@@ -18,7 +18,6 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  CANONICAL_SDLC_FITNESS,
   CANONICAL_SDLC_TOOLCHAINS,
   bootstrap,
   canonicalJson,
@@ -30,6 +29,7 @@ import {
 
 const repository = fileURLToPath(new URL("../..", import.meta.url));
 const fixture = join(repository, "packages/tc-sdlc/test/fixtures/bootstrap-consumer");
+const releaseFitness = JSON.parse(readFileSync(join(repository, "release/catalogue.json"), "utf8")).release.fitness;
 
 function argument(name) {
   const index = process.argv.indexOf(`--${name}`);
@@ -78,7 +78,7 @@ const declaration = validateDeclaration({
   schema: "tc.sdlc/v1",
   project: "bootstrap-image-verification",
   toolchains: CANONICAL_SDLC_TOOLCHAINS,
-  fitness: CANONICAL_SDLC_FITNESS,
+  fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
   projects: [{ name: "consumer", root: "." }],
   targets: {
     check: {
@@ -91,6 +91,7 @@ const declaration = validateDeclaration({
 });
 const catalogue = generateReleaseCatalogue({
   releaseVersion: "3.0.0",
+  fitnessVersion: releaseFitness.version,
   workflowCommit,
   imageDigest,
 });
@@ -226,7 +227,7 @@ const repositoryDeclaration = validateDeclaration({
   schema: "tc.sdlc/v1",
   project: "tc-pipelines-real-dependency-closure",
   toolchains: CANONICAL_SDLC_TOOLCHAINS,
-  fitness: CANONICAL_SDLC_FITNESS,
+  fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
   projects: [{ name: "repository", root: "." }],
   targets: {
     check: {
@@ -282,7 +283,7 @@ execFileSync("docker", [
   "--volume", `${repositoryDependencies}:/dependencies:ro`,
   image,
   "/dependencies/python/bin/python", "-c",
-  "from importlib.metadata import version; assert version('three-cubes-fitness') == '0.17.0'",
+  `from importlib.metadata import version; assert version('three-cubes-fitness') == ${JSON.stringify(releaseFitness.version)}`,
 ]);
 execFileSync("docker", [
   "run", "--rm", "--network", "none",

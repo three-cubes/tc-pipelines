@@ -428,6 +428,7 @@ def fake_apply_tools(tmp_path: Path) -> tuple[Path, Path]:
     yq = bin_dir / "yq"
     yq.write_text(
         """#!/usr/bin/env bash
+cat >/dev/null
 case "$1" in
   length) echo 1 ;;
   '.[0].vm-name') echo vm-test ;;

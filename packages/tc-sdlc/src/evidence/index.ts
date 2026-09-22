@@ -9,9 +9,18 @@ import {
 import { dirname } from "node:path";
 
 import { canonicalJson } from "../canonical.js";
+import type { BootstrapContextBinding } from "../bootstrap/index.js";
 
 export type RunStatus = "succeeded" | "failed" | "stalled" | "cancelled";
 export type TaskRunStatus = RunStatus | "skipped";
+
+export type TaskReceiptEvidence = Readonly<{
+  path: string;
+  sourceDigest: string;
+  contentDigest: string;
+  mediaType: string;
+  content: string;
+}>;
 
 export type RunEvent = Readonly<{
   taskKey: string;
@@ -53,6 +62,16 @@ export type TaskReceipt = Readonly<{
   stdout: string;
   stderr: string;
   outputTruncated: boolean;
+  executionContextDigest: string;
+  scratchId: string;
+  resources: Readonly<{
+    cpu: number;
+    memoryMiB: number;
+    ports: readonly number[];
+    exclusive: readonly string[];
+  }>;
+  evidence: readonly TaskReceiptEvidence[];
+  missingEvidence: readonly string[];
   events: readonly RunEvent[];
   diagnostic?: ProcessDiagnostic;
 }>;
@@ -61,6 +80,10 @@ export type RunReceipt = Readonly<{
   schema: "tc.sdlc/run-receipt/v1";
   declarationDigest: string;
   lockDigest: string;
+  bootstrapContext: BootstrapContextBinding;
+  scratchId: string;
+  scratchCleanup: "removed" | "retained";
+  reason: string | null;
   selection: readonly string[];
   status: RunStatus;
   tasks: readonly TaskReceipt[];

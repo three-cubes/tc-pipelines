@@ -132,7 +132,22 @@ not an operator memory task.
   beneath tc-sdlc-owned roots or builders;
 - materialised toolchain and dependency states are retained while referenced as
   a consumer's current state or immediate predecessor; only old states made
-  explicitly unreferenced by canonical producer metadata can expire;
+  explicitly unreferenced by canonical producer metadata can expire. Reference
+  publication uses a separate identity-bound pending transaction before a
+  kernel-held per-consumer recovery boundary and fsynced hard-link commit lock
+  enclose final validation and the atomic committed
+  `tc.sdlc/bootstrap-reference/v2` write. The recovery boundary is one
+  deterministic localhost port in the non-ephemeral 10000-29999 range; it is
+  released by the kernel on process death, never scans alternatives, and treats
+  an unrelated collision as safe busy. Live or ambiguously owned locks are
+  retained; only exact locks whose PID and process-start owner is proven dead
+  can be recovered. Maintenance acquires the same boundary before stale lock
+  cleanup and refreshes both
+  pending and committed authorities after identity-bound quarantine and during
+  interrupted-quarantine recovery, and its receipt separately counts expired
+  dead pending, linked-lock and orphan-marker metadata removed after 48 hours.
+  Device and inode bind the move; birthtime is retained as evidence without
+  assuming it is stable across rename;
 - release artefacts and evidence retain catalogue, current, predecessor and
   incident references. Failed staging is removed immediately, while successful
   outputs cannot expire until their producer emits sufficient reference
@@ -154,7 +169,9 @@ synchronously without yielding. Foreign, mixed or changed layouts remain
 preserved. A markerless empty directory is also retained: its name and emptiness
 alone are not ownership authority. Each worker has a receipt-bound terminal
 budget so a crash or non-response becomes a cleanup failure instead of hanging
-the command.
+the command. Failure to create an identity-bound quarantine is itself terminal
+receipt evidence; the candidate remains in place rather than escaping without
+an outcome.
 
 The persistent bootstrap inventory consists of referenced release states
 (including their dependency environments and toolchain launchers), managed

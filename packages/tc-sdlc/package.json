@@ -4,7 +4,7 @@
   "description": "The shared Three Cubes AI SDLC execution package.",
   "type": "module",
   "bin": {
-    "tc-sdlc": "dist/cli.js"
+    "tc-sdlc": "bin/tc-sdlc"
   },
   "exports": {
     ".": {
@@ -13,12 +13,22 @@
     }
   },
   "files": [
+    "bin",
     "dist"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-schemas.mjs",
     "release:image": "pnpm build && node ../../images/sdlc/build-release.mjs",
-    "test": "vitest run --exclude test/**/*.integration.test.ts",
+    "test": "pnpm build && vitest run --exclude test/**/*.integration.test.ts",
+    "test:integration:components": "node scripts/run-component-integrations.mjs",
+    "test:integration:components:direct": "pnpm build && vitest run test/bootstrap.integration.test.ts test/evaluation.integration.test.ts test/fitness.integration.test.ts test/consumer-qualification.integration.test.ts",
+    "test:integration:bootstrap": "pnpm build && vitest run test/bootstrap.integration.test.ts",
+    "test:integration:consumers": "vitest run test/consumer-qualification.integration.test.ts",
+    "test:integration:fitness": "pnpm build && vitest run test/fitness.integration.test.ts",
+    "test:integration:evaluation": "pnpm build && vitest run test/evaluation.integration.test.ts",
+    "test:integration:image": "pnpm build && vitest run test/image-producer.integration.test.ts test/image-producer.registry.integration.test.ts",
+    "test:integration:image-producer": "pnpm build && vitest run test/image-producer.integration.test.ts",
+    "test:integration:image-registry": "pnpm build && vitest run test/image-producer.registry.integration.test.ts",
     "test:integration:darwin": "vitest run test/bootstrap-darwin.integration.test.ts",
     "verify:image": "pnpm build && node ../../images/sdlc/verify.mjs"
   },

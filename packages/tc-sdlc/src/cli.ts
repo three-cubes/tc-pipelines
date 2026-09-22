@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 
 import { bootstrap } from "./bootstrap/index.js";
+import { loadBootstrapExecutionContext } from "./bootstrap/context.js";
 import { bytesDigest, canonicalJson } from "./canonical.js";
 import {
   generateReleaseCatalogue,
@@ -10,12 +11,20 @@ import {
   writeReleaseCatalogue,
 } from "./catalogue/index.js";
 import { SdlcError } from "./errors.js";
-import type { PreparationReceipt } from "./evidence/task4.js";
+import {
+  preflightFitnessReceipt,
+  unavailableFitnessReceipt,
+  writeFitnessReceipt,
+} from "./executors/fitness.js";
 import { assertCurrentLock, loadLock, resolveLock, writeLock } from "./lock/index.js";
 import { maintain } from "./maintenance/index.js";
+import { produceImage, retainImageUsageFailure } from "./image/producer.js";
 import { loadDeclaration } from "./schema/declaration.js";
+import { qualifyConsumers } from "./qualification/index.js";
+import { detectedHostCapacity } from "./runtime/index.js";
 import { check, checkAll } from "./tasks/check.js";
 import { prepare } from "./tasks/prepare.js";
+import { fitness } from "./tasks/fitness.js";
 
 type Command =
   | "catalogue"
@@ -25,7 +34,10 @@ type Command =
   | "maintain"
   | "prepare"
   | "check"
-  | "check-all";
+  | "check-all"
+  | "fitness"
+  | "produce-image"
+  | "qualify-consumers";
 
 function parseOptions(
   args: readonly string[],
@@ -64,7 +76,58 @@ function success(command: Command, payload: Record<string, unknown>): void {
   );
 }
 
+function requestedReceipt(args: readonly string[]): string | undefined {
+  const index = args.indexOf("--receipt");
+  return index === -1 ? undefined : args[index + 1];
+}
+
 async function run(command: Command, args: readonly string[]): Promise<void> {
+  if (command === "produce-image") {
+    let options: Record<string, string>;
+    try {
+      options = parseOptions(args, [
+        "source-root", "source-commit", "dockerfile", "registry-candidate", "docker-endpoint",
+        "buildx-executable", "git-executable", "state-root", "output", "receipt",
+      ]);
+    } catch (error) {
+      retainImageUsageFailure(args);
+      throw error;
+    }
+    const receipt = await produceImage({
+      sourceRoot: options["source-root"]!,
+      sourceCommit: options["source-commit"]!,
+      dockerfile: options.dockerfile!,
+      registryCandidate: options["registry-candidate"]!,
+      dockerEndpoint: options["docker-endpoint"]!,
+      buildxExecutable: options["buildx-executable"]!,
+      gitExecutable: options["git-executable"]!,
+      stateRoot: options["state-root"]!,
+      outputDirectory: options.output!,
+      receiptPath: options.receipt!,
+    });
+    if (receipt.status !== "succeeded") {
+      throw new SdlcError("IMAGE_PRODUCTION_FAILED", receipt.reason ?? "image production failed");
+    }
+    success(command, { receipt: options.receipt, receiptSchema: receipt.schema });
+    return;
+  }
+
+  if (command === "qualify-consumers") {
+    const options = parseOptions(args, ["manifest", "catalogue", "output", "receipt"]);
+    const receipt = await qualifyConsumers({
+      manifestPath: options.manifest!,
+      cataloguePath: options.catalogue!,
+      outputDirectory: options.output!,
+      receiptPath: options.receipt!,
+      executablePath: process.argv[1]!,
+    });
+    if (receipt.status !== "succeeded") {
+      throw new SdlcError("CONSUMER_QUALIFICATION_FAILED", receipt.reason ?? "consumer qualification failed");
+    }
+    success(command, { receipt: options.receipt, receiptSchema: receipt.schema });
+    return;
+  }
+
   if (command === "maintain") {
     const options = parseOptions(
       args,
@@ -129,14 +192,27 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
   }
 
   if (command === "catalogue") {
+    if (args.includes("--input")) {
+      const options = parseOptions(args, ["input", "output"]);
+      const catalogue = loadCatalogue(options.input!);
+      writeReleaseCatalogue(options.output!, catalogue);
+      success(command, {
+        release: catalogue.release.version,
+        catalogueDigest: bytesDigest(canonicalJson(catalogue)),
+        output: options.output,
+      });
+      return;
+    }
     const options = parseOptions(args, [
       "version",
+      "fitness-version",
       "workflow-commit",
       "image-digest",
       "output",
     ]);
     const catalogue = generateReleaseCatalogue({
       releaseVersion: options.version!,
+      fitnessVersion: options["fitness-version"]!,
       workflowCommit: options["workflow-commit"]!,
       imageDigest: options["image-digest"]!,
     });
@@ -220,54 +296,154 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
     return;
   }
 
+  if (command === "fitness") {
+    let options: Record<string, string>;
+    try {
+      options = parseOptions(args, ["declaration", "catalogue", "lock", "root", "state-root", "bootstrap-receipt", "receipt"]);
+    } catch (error) {
+      const receipt = requestedReceipt(args);
+      if (receipt !== undefined) writeFitnessReceipt(receipt, preflightFitnessReceipt("fitness_input_invalid"));
+      throw error;
+    }
+    let declaration;
+    let catalogue;
+    let loaded;
+    try {
+      declaration = loadDeclaration(options.declaration!);
+      catalogue = loadCatalogue(options.catalogue!);
+      loaded = loadLock(options.lock!);
+    } catch (error) {
+      writeFitnessReceipt(options.receipt!, preflightFitnessReceipt("fitness_input_invalid"));
+      throw error;
+    }
+    try {
+      assertCurrentLock(loaded.lock, declaration, catalogue);
+    } catch (error) {
+      writeFitnessReceipt(
+        options.receipt!,
+        unavailableFitnessReceipt(
+          declaration,
+          catalogue,
+          loaded.lock,
+          options.root!,
+          "fitness_lock_invalid",
+        ),
+      );
+      throw error;
+    }
+    let executionContext;
+    try {
+      executionContext = loadBootstrapExecutionContext(
+        options["bootstrap-receipt"]!,
+        options["state-root"]!,
+        loaded.lock,
+        catalogue,
+      );
+    } catch (error) {
+      writeFitnessReceipt(
+        options.receipt!,
+        unavailableFitnessReceipt(
+          declaration,
+          catalogue,
+          loaded.lock,
+          options.root!,
+          "fitness_bootstrap_context_invalid",
+        ),
+      );
+      throw new SdlcError(
+        "FITNESS_BOOTSTRAP_CONTEXT_INVALID",
+        error instanceof Error ? error.message : "fitness bootstrap context is unavailable",
+      );
+    }
+    try {
+      const receipt = await fitness({
+        root: options.root!,
+        declaration,
+        catalogue,
+        lock: loaded.lock,
+        receiptPath: options.receipt!,
+        runOptions: { executionContext },
+      });
+      success(command, { receipt: options.receipt, receiptSchema: receipt.schema });
+    } finally {
+      executionContext.lease.release();
+    }
+    return;
+  }
+
   const required = ["declaration", "catalogue", "lock", "root", "receipt"];
+  required.push("bootstrap-receipt", "state-root");
   if (command === "check") {
     required.push("changed", "environment", "producer", "preparation-receipt");
   } else if (command === "check-all") {
     required.push("environment", "producer", "preparation-receipt");
   }
-  const options = parseOptions(args, required);
+  const options = parseOptions(
+    args,
+    required,
+    command === "check" || command === "check-all" ? ["capacity"] : [],
+  );
+  let capacity;
+  if (options.capacity !== undefined) {
+    const workers = Number(options.capacity);
+    if (!Number.isSafeInteger(workers) || workers < 1) {
+      throw new SdlcError("USAGE", "--capacity must be a positive integer");
+    }
+    capacity = { ...detectedHostCapacity(), cpu: workers };
+  }
   const declaration = loadDeclaration(options.declaration!);
   const catalogue = loadCatalogue(options.catalogue!);
   const loaded = loadLock(options.lock!);
   assertCurrentLock(loaded.lock, declaration, catalogue);
-  const preparationReceipt =
-    command === "prepare"
-      ? undefined
-      : (JSON.parse(
-          readFileSync(options["preparation-receipt"]!, "utf8"),
-        ) as PreparationReceipt);
-  const receipt =
-    command === "prepare"
-      ? await prepare({
-          root: options.root!,
-          declaration,
-          catalogue,
-          lock: loaded.lock,
-          receiptPath: options.receipt!,
-        })
-      : command === "check"
-        ? await check({
+  const executionContext = loadBootstrapExecutionContext(
+    options["bootstrap-receipt"]!,
+    options["state-root"]!,
+    loaded.lock,
+    catalogue,
+  );
+  const receipt = await (async () => {
+    try {
+      const preparationReceipt =
+        command === "prepare"
+          ? undefined
+          : readFileSync(options["preparation-receipt"]!, "utf8");
+      return command === "prepare"
+        ? await prepare({
             root: options.root!,
             declaration,
             catalogue,
             lock: loaded.lock,
             receiptPath: options.receipt!,
-            changedPaths: options.changed!.split(",").filter(Boolean),
-            environmentClass: options.environment!,
-            producer: options.producer!,
-            preparationReceipt,
+            runOptions: { executionContext },
           })
-        : await checkAll({
-            root: options.root!,
-            declaration,
-            catalogue,
-            lock: loaded.lock,
-            receiptPath: options.receipt!,
-            environmentClass: options.environment!,
-            producer: options.producer!,
-            preparationReceipt,
-          });
+        : command === "check"
+          ? await check({
+              root: options.root!,
+              declaration,
+              catalogue,
+              lock: loaded.lock,
+              receiptPath: options.receipt!,
+              changedPaths: options.changed!.split(",").filter(Boolean),
+              environmentClass: options.environment!,
+              producer: options.producer!,
+              preparationReceipt,
+              runOptions: { executionContext, ...(capacity === undefined ? {} : { capacity }) },
+            })
+          : await checkAll({
+              root: options.root!,
+              declaration,
+              catalogue,
+              lock: loaded.lock,
+              receiptPath: options.receipt!,
+              environmentClass: options.environment!,
+              producer: options.producer!,
+              preparationReceipt,
+              runOptions: { executionContext, ...(capacity === undefined ? {} : { capacity }) },
+            });
+    } finally {
+      executionContext.lease.release();
+    }
+  })();
   if (receipt.status !== "succeeded") {
     throw new SdlcError("TASK_FAILED", `${command} failed: ${receipt.reason}`);
   }
@@ -284,6 +460,9 @@ const commands: readonly Command[] = [
   "prepare",
   "check",
   "check-all",
+  "fitness",
+  "produce-image",
+  "qualify-consumers",
 ];
 const envelopeCommand = commands.includes(rawCommand as Command) ? rawCommand : "unknown";
 
@@ -291,7 +470,7 @@ try {
   if (!commands.includes(rawCommand as Command)) {
     throw new SdlcError(
       "USAGE",
-      "command must be catalogue, lock, validate, bootstrap, maintain, prepare, check or check-all",
+      "command must be catalogue, lock, validate, bootstrap, maintain, prepare, check, check-all, fitness, produce-image or qualify-consumers",
     );
   }
   await run(rawCommand as Command, process.argv.slice(3));

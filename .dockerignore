@@ -2,9 +2,14 @@
 .venv
 .superpowers
 .devcontainer
-release
+release/*
+!release/catalogue.json
 node_modules
 packages/tc-sdlc/dist
 packages/tc-sdlc/node_modules
-assurance
+assurance/*
+!assurance/fixtures
+assurance/fixtures/*
+!assurance/fixtures/sdlc
+!assurance/fixtures/sdlc/**
 artifacts

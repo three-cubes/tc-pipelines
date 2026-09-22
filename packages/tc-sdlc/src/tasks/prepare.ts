@@ -17,7 +17,7 @@ export type PreparationOptions = Readonly<{
   lock: SdlcLock;
   receiptPath: string;
   maxMutations?: number;
-  runOptions?: Omit<RunOptions, "cwd" | "receiptPath">;
+  runOptions: Omit<RunOptions, "cwd" | "receiptPath">;
 }>;
 
 export function serialisePreparationReceipt(receipt: PreparationReceipt): string {
@@ -35,6 +35,7 @@ export async function prepare(options: PreparationOptions): Promise<PreparationR
     declarationDigest: digest(options.declaration),
     catalogueDigest: digest(options.catalogue),
     lockDigest: digest(options.lock),
+    bootstrapContext: options.runOptions.executionContext.binding,
     recovery,
   };
   let firstScheduler: RunReceipt | undefined;

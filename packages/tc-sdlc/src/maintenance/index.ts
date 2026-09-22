@@ -52,6 +52,7 @@ function receipt(
     cleanupWorkerMs: options.cleanupWorkerMs ?? DEFAULT_CLEANUP_WORKER_MS,
     peakCleanupWorkers: 0,
     cleanupFailures: 0,
+    referenceMetadataRemovedCount: 0,
     candidates: [],
     retained: [],
     tools: {
@@ -163,6 +164,7 @@ export async function maintain(options: MaintenanceOptions): Promise<Maintenance
   let reclaimedBytes = 0;
   let cleanupFailures = 0;
   let peakCleanupWorkers = 0;
+  let referenceMetadataRemovedCount = 0;
   if (options.mode === "apply") {
     const removal = await removeTemporaryCandidates(
       temporaryRoot,
@@ -187,6 +189,7 @@ export async function maintain(options: MaintenanceOptions): Promise<Maintenance
     reclaimedBytes += stateRemoval.reclaimedBytes;
     cleanupFailures += stateRemoval.failures;
     peakCleanupWorkers = Math.max(peakCleanupWorkers, stateRemoval.peakWorkers);
+    referenceMetadataRemovedCount = stateRemoval.referenceMetadataRemovedCount;
     stateRetained.push(...stateRemoval.retained);
   }
 
@@ -207,6 +210,7 @@ export async function maintain(options: MaintenanceOptions): Promise<Maintenance
       cleanupWorkerMs,
       peakCleanupWorkers,
       cleanupFailures,
+      referenceMetadataRemovedCount,
       candidates: [...inspected.candidates, ...stateCandidates],
       retained: [...inspected.retained, ...stateRetained],
       tools: toolPruning.tools,

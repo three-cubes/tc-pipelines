@@ -27,10 +27,42 @@ import { bindGraphLock, buildGraph } from "../graph/index.js";
 import { resolveInputInventory } from "../inputs/index.js";
 import { assertCurrentLock } from "../lock/index.js";
 import {
+  createQuarantine,
+  finishQuarantine,
+  sameMoveIdentity,
+} from "../maintenance/quarantine.js";
+import {
   recoverInterruptedTemporaryState,
   type AutomaticRecoveryReceipt,
 } from "../maintenance/index.js";
 import type { ReleaseCatalogue, SdlcDeclaration, SdlcLock } from "../schema/types.js";
+import type { BootstrapExecutionLease } from "./execution-lease.js";
+import {
+  acquireBootstrapKernelBoundary,
+  assertBootstrapKernelBoundary,
+  BootstrapKernelBoundaryError,
+  releaseBootstrapKernelBoundary,
+  type BootstrapKernelBoundary,
+} from "./kernel-boundary.js";
+import {
+  acquireBootstrapReferenceCommitLock,
+  BootstrapReferenceCommitError,
+  releaseBootstrapReferenceCommitLock,
+} from "./reference-lock.js";
+import {
+  commitBootstrapReference,
+  leaseMatches,
+  removePendingBootstrapReference,
+  readBootstrapReferenceAuthorities,
+  writePendingBootstrapReference,
+} from "./references.js";
+import {
+  bootstrapStateGenerationInvalidated,
+  assertBootstrapStateAdmitted,
+  invalidateBootstrapState,
+  stableDirectoryIdentity,
+} from "./state-integrity.js";
+import { assertBootstrapStateShape } from "./state-shape.js";
 
 export type BootstrapPlatform = "darwin" | "linux";
 export type BootstrapCapabilityName = "node" | "pnpm" | "python" | "uv";
@@ -84,6 +116,7 @@ export type BootstrapReceipt = Readonly<{
   platform: BootstrapPlatform;
   architecture: string;
   stateKey: string;
+  stateDigest: string | null;
   reused: boolean;
   taskIdentities: readonly string[];
   adapters: readonly BootstrapAdapterEvidence[];
@@ -92,6 +125,35 @@ export type BootstrapReceipt = Readonly<{
   diagnostics: readonly BootstrapDiagnostic[];
   diagnosticsCount: number;
   diagnosticsTruncated: boolean;
+}>;
+
+export type BootstrapContextBinding = Readonly<{
+  schema: "tc.sdlc/execution-context/v1";
+  release: string;
+  platform: BootstrapPlatform;
+  architecture: string;
+  lockDigest: string;
+  stateKey: string;
+  stateGenerationIdentity: string;
+  bootstrapReceiptDigest: string;
+  stateDigest: string;
+  dependencyDigest: string;
+  fitness: Readonly<{ package: string; version: string }>;
+  adapters: readonly Readonly<{
+    name: BootstrapCapabilityName;
+    version: string;
+    adapterDigest: string;
+  }>[];
+}>;
+
+export type BootstrapExecutionContext = Readonly<{
+  binding: BootstrapContextBinding;
+  stateRoot: string;
+  stateDirectory: string;
+  environment: Readonly<Record<string, string>>;
+  lease: BootstrapExecutionLease;
+  assertIdentity: () => void;
+  verifyIntegrity: () => void;
 }>;
 
 export type BootstrapOptions = Readonly<{
@@ -120,6 +182,18 @@ type HostCapability = Readonly<{
   executableDigest: string;
 }>;
 
+type PnpmInstaller = Readonly<{
+  node: string;
+  nodeRoot: string;
+  corepack: string;
+}>;
+
+type HostCapabilities = Readonly<{
+  adapters: readonly HostCapability[];
+  installerUv: HostCapability;
+  pnpmInstaller?: PnpmInstaller;
+}>;
+
 type ResolvedAdapter = BootstrapAdapterEvidence & Readonly<{ executable: string }>;
 
 type DependencyInput = BootstrapDependencyInput & Readonly<{ sourcePath: string }>;
@@ -139,13 +213,10 @@ type BootstrapState = Readonly<{
   dependencies: readonly BootstrapDependencyEvidence[];
 }>;
 
-type BootstrapReference = Readonly<{
-  schema: "tc.sdlc/bootstrap-reference/v1";
-  owner: "@three-cubes/tc-sdlc";
-  consumer: string;
-  consumerRoot: string;
-  currentStateKey: string;
-  predecessorStateKey?: string;
+type FilesystemIdentity = Readonly<{
+  device: string;
+  inode: string;
+  birthtimeNanoseconds: string;
 }>;
 
 const OWNER = { schema: "tc.sdlc/state-owner/v1", owner: "@three-cubes/tc-sdlc" } as const;
@@ -188,17 +259,163 @@ class BootstrapFailure extends Error {
   }
 }
 
+function quarantineInvalidatedState(
+  stateRoot: string,
+  stateKey: string,
+  stateDirectory: string,
+  expectedGenerationIdentity?: string,
+  beforeQuarantine?: (generationIdentity: string) => void,
+): void {
+  const generationIdentity = stableDirectoryIdentity(stateDirectory);
+  if (
+    expectedGenerationIdentity !== undefined &&
+    generationIdentity !== expectedGenerationIdentity
+  ) {
+    throw new BootstrapFailure("state_changed", [{
+      code: "BOOTSTRAP_STATE_CHANGED",
+      message: "release state generation changed before it could be quarantined",
+      action: "retry bootstrap after inspecting the changed state generation",
+    }]);
+  }
+  const identity = filesystemIdentity(stateDirectory);
+  if (
+    expectedGenerationIdentity !== undefined &&
+    stableDirectoryIdentity(stateDirectory) !== expectedGenerationIdentity
+  ) {
+    throw new BootstrapFailure("state_changed", [{
+      code: "BOOTSTRAP_STATE_CHANGED",
+      message: "release state generation changed before quarantine authority was checked",
+      action: "retry bootstrap after inspecting the changed state generation",
+    }]);
+  }
+  const referencesRoot = join(stateRoot, "references");
+  let referencesRootPresent = false;
+  try {
+    lstatSync(referencesRoot);
+    referencesRootPresent = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const authorities = readBootstrapReferenceAuthorities(stateRoot);
+  if (authorities === undefined && referencesRootPresent) {
+    throw new BootstrapFailure("reference_metadata_invalid", [{
+      code: "BOOTSTRAP_REFERENCE_METADATA_INVALID",
+      message: "cannot safely rebuild an invalidated release state without valid reference authority",
+      action: "repair reference metadata before retrying bootstrap",
+    }]);
+  }
+  if (authorities !== undefined && leaseMatches(authorities, stateKey, identity)) {
+    throw new BootstrapFailure("reference_commit_busy", [{
+      code: "BOOTSTRAP_REFERENCE_COMMIT_BUSY",
+      message: "an execution still holds the invalidated release-state generation",
+      action: "wait for the active consumer to terminate, then retry bootstrap",
+    }]);
+  }
+  beforeQuarantine?.(generationIdentity);
+  if (
+    expectedGenerationIdentity !== undefined &&
+    stableDirectoryIdentity(stateDirectory) !== expectedGenerationIdentity
+  ) {
+    throw new BootstrapFailure("state_changed", [{
+      code: "BOOTSTRAP_STATE_CHANGED",
+      message: "release state generation changed before quarantine publication",
+      action: "retry bootstrap after inspecting the changed state generation",
+    }]);
+  }
+  const quarantine = createQuarantine(
+    dirname(stateDirectory),
+    stateDirectory,
+    "bootstrap-state",
+    identity,
+  );
+  try {
+    renameSync(stateDirectory, quarantine.payload);
+    if (
+      !sameMoveIdentity(quarantine.payload, identity) ||
+      (expectedGenerationIdentity !== undefined &&
+        stableDirectoryIdentity(quarantine.payload) !== expectedGenerationIdentity)
+    ) {
+      throw new Error("invalidated state identity changed during quarantine");
+    }
+  } catch (error) {
+    try {
+      if (
+        !existsSync(stateDirectory) &&
+        existsSync(quarantine.payload) &&
+        sameMoveIdentity(quarantine.payload, identity)
+      ) {
+        renameSync(quarantine.payload, stateDirectory);
+      }
+      if (!existsSync(quarantine.payload)) finishQuarantine(quarantine.root);
+    } catch {
+      // Preserve uncertain filesystem state for owner-checked maintenance recovery.
+    }
+    throw new BootstrapFailure("state_corrupt", [{
+      code: "BOOTSTRAP_INVALIDATED_STATE_QUARANTINE_FAILED",
+      message: `invalidated state could not be isolated safely: ${error instanceof Error ? error.message : String(error)}`,
+      action: "inspect the retained owner-marked quarantine before retrying bootstrap",
+    }]);
+  }
+}
+
+function quarantineCorruptWarmState(
+  options: BootstrapOptions,
+  host: BootstrapHost,
+  stateRoot: string,
+  stateKey: string,
+  stateDirectory: string,
+  lockDigest: string,
+  dependencyDigest: string,
+  failureCode: string,
+): void {
+  const generationIdentity = stableDirectoryIdentity(stateDirectory);
+  const expectedMetadata = digest({
+    stateKey,
+    release: options.catalogue.release.version,
+    lockDigest,
+    dependencyDigest,
+    platform: host.platform,
+    architecture: host.architecture,
+  });
+  const observedMetadata = digest({ generationIdentity, failureCode });
+  quarantineInvalidatedState(
+    stateRoot,
+    stateKey,
+    stateDirectory,
+    generationIdentity,
+    (observedGenerationIdentity) => invalidateBootstrapState(
+      stateRoot,
+      stateKey,
+      observedGenerationIdentity,
+      expectedMetadata,
+      observedMetadata,
+      observedGenerationIdentity,
+    ),
+  );
+}
+
 function fileDigest(path: string): string {
   return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
 }
 
-function isPythonRuntimeCache(path: string): boolean {
-  const segments = path.split("/");
-  const name = segments.at(-1) ?? "";
-  return segments.includes("__pycache__") || name.endsWith(".pyc") || name.endsWith(".pyo");
+function filesystemIdentity(path: string): FilesystemIdentity {
+  const details = lstatSync(path, { bigint: true });
+  return {
+    device: details.dev.toString(),
+    inode: details.ino.toString(),
+    birthtimeNanoseconds: details.birthtimeNs.toString(),
+  };
 }
 
-function directoryDigest(root: string, ignorePythonRuntimeCache = false): string {
+function sameFilesystemIdentity(path: string, expected: FilesystemIdentity): boolean {
+  try {
+    return canonicalJson(filesystemIdentity(path)) === canonicalJson(expected);
+  } catch {
+    return false;
+  }
+}
+
+function directoryDigest(root: string): string {
   if (!existsSync(root) || lstatSync(root).isSymbolicLink() || !lstatSync(root).isDirectory()) {
     throw new Error("dependency environment is not a real directory");
   }
@@ -210,7 +427,6 @@ function directoryDigest(root: string, ignorePythonRuntimeCache = false): string
     for (const name of readdirSync(directory).sort()) {
       const path = join(directory, name);
       const relativePath = prefix === "" ? name : posix.join(prefix, name);
-      if (ignorePythonRuntimeCache && isPythonRuntimeCache(relativePath)) continue;
       const metadata = lstatSync(path);
       if (metadata.isSymbolicLink()) {
         entries.push({ path: relativePath, type: "symlink", target: readlinkSync(path) });
@@ -237,13 +453,13 @@ function directoryDigest(root: string, ignorePythonRuntimeCache = false): string
   return digest(entries);
 }
 
-function installedEnvironmentDigest(manager: "pnpm" | "uv", root: string): string {
-  return directoryDigest(root, manager === "uv");
+function installedEnvironmentDigest(root: string): string {
+  return directoryDigest(root);
 }
 
 function remediation(host: BootstrapHost, catalogue: ReleaseCatalogue): string {
   return host.platform === "darwin"
-    ? "/bin/bash -lc 'brew install node@24 python@3.13 uv && \"$(brew --prefix node@24)/bin/corepack\" install --global pnpm@11.22.0'"
+    ? "/bin/bash -lc 'brew install node@24 python@3.13 uv'"
     : `docker pull ghcr.io/three-cubes/tc-sdlc@${catalogue.release.imageDigest}`;
 }
 
@@ -454,7 +670,7 @@ function homebrewCapabilities(
   declaration: SdlcDeclaration,
   catalogue: ReleaseCatalogue,
   stateRoot: string,
-): Readonly<{ adapters: readonly HostCapability[]; installerUv: HostCapability }> {
+): HostCapabilities {
   const prefix = host.architecture === "arm64" ? "/opt/homebrew" : "/usr/local";
   try {
     accessSync(join(prefix, "bin", "brew"), constants.X_OK);
@@ -469,7 +685,6 @@ function homebrewCapabilities(
       throw new Error("Homebrew capability escaped its formula cellar");
     }
     const node = join(prefix, "opt", "node@24", "bin", "node");
-    const pnpm = join(prefix, "opt", "node@24", "bin", "pnpm");
     const python = join(prefix, "opt", "python@3.13", "libexec", "bin", "python3");
     const pathValue = [dirname(node), dirname(python), join(prefix, "bin"), "/usr/bin", "/bin"].join(":");
     const probeEnvironment = managedProbeEnvironment(
@@ -482,14 +697,6 @@ function homebrewCapabilities(
         contracts[0]!,
         node,
         declaration.toolchains.node,
-        "homebrew",
-        pathValue,
-        probeEnvironment,
-      ),
-      capability(
-        contracts[1]!,
-        pnpm,
-        declaration.toolchains.packageManager.replace(/^pnpm@/, ""),
         "homebrew",
         pathValue,
         probeEnvironment,
@@ -518,7 +725,15 @@ function homebrewCapabilities(
       executable: uvExecutable,
       executableDigest: fileDigest(uvExecutable),
     };
-    return { adapters, installerUv };
+    return {
+      adapters,
+      installerUv,
+      pnpmInstaller: {
+        node: realpathSync(node),
+        nodeRoot,
+        corepack: join(nodeRoot, "lib", "node_modules", "corepack", "dist", "corepack.js"),
+      },
+    };
   } catch (error) {
     throw prerequisiteFailure(
       host,
@@ -534,7 +749,7 @@ function canonicalImageCapabilities(
   declaration: SdlcDeclaration,
   catalogue: ReleaseCatalogue,
   stateRoot: string,
-): Readonly<{ adapters: readonly HostCapability[]; installerUv: HostCapability }> {
+): HostCapabilities {
   try {
     const marker = readCanonical("/etc/tc-sdlc-release.json") as Record<string, unknown>;
     if (
@@ -582,7 +797,7 @@ function hostCapabilities(
   declaration: SdlcDeclaration,
   catalogue: ReleaseCatalogue,
   stateRoot: string,
-): ReturnType<typeof homebrewCapabilities> {
+): HostCapabilities {
   return host.platform === "darwin"
     ? homebrewCapabilities(host, declaration, catalogue, stateRoot)
     : canonicalImageCapabilities(host, declaration, catalogue, stateRoot);
@@ -897,6 +1112,110 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+function pnpmDistributionRoot(executable: string): string {
+  return dirname(dirname(executable));
+}
+
+function materializeCataloguePnpm(
+  options: BootstrapOptions,
+  host: BootstrapHost,
+  stateRoot: string,
+  stateDirectory: string,
+  installer: PnpmInstaller | undefined,
+): HostCapability {
+  if (installer === undefined) {
+    throw prerequisiteFailure(
+      host,
+      options.catalogue,
+      "macOS bootstrap requires Corepack from the reviewed Homebrew node@24 prerequisite",
+    );
+  }
+  if (host.offline) {
+    throw new BootstrapFailure("offline_cold", [
+      {
+        code: "BOOTSTRAP_OFFLINE_COLD",
+        message: "offline bootstrap requires an existing verified warm state",
+        action: "retry without offline mode to materialise the release state",
+      },
+    ]);
+  }
+  let corepack: string;
+  try {
+    corepack = realpathSync(installer.corepack);
+    if (
+      !resolvesInside(installer.nodeRoot, corepack) ||
+      lstatSync(corepack).isSymbolicLink() ||
+      !lstatSync(corepack).isFile()
+    ) {
+      throw new Error("Corepack escaped the reviewed node@24 formula");
+    }
+  } catch (error) {
+    throw prerequisiteFailure(
+      host,
+      options.catalogue,
+      "macOS bootstrap requires Corepack from the reviewed Homebrew node@24 prerequisite",
+      error instanceof Error ? error.message : "invalid Corepack prerequisite",
+    );
+  }
+  const version = options.declaration.toolchains.packageManager.replace(/^pnpm@/, "");
+  const pathValue = `${dirname(installer.node)}:/usr/bin:/bin`;
+  rejectSymlinkComponents(stateRoot, join(stateDirectory, "corepack"));
+  const environment = managedEnvironment(
+    stateRoot,
+    stateDirectory,
+    pathValue,
+  );
+  execFileSync(
+    installer.node,
+    [corepack, "install", "--global", `pnpm@${version}`],
+    { cwd: options.root, env: environment, stdio: "pipe" },
+  );
+  const distribution = join(stateDirectory, "corepack", "v1", "pnpm", version);
+  const executable = join(distribution, "bin", "pnpm.cjs");
+  rejectSymlinkComponents(stateRoot, executable);
+  if (
+    !existsSync(executable) ||
+    lstatSync(executable).isSymbolicLink() ||
+    !lstatSync(executable).isFile()
+  ) {
+    throw new BootstrapFailure("distribution_corrupt", [
+      {
+        code: "PNPM_DISTRIBUTION_INVALID",
+        capability: "pnpm",
+        expected: version,
+        message: "Corepack did not materialise the exact pnpm distribution in owned state",
+        action: "discard the partial state and retry online",
+      },
+    ]);
+  }
+  const observed = contracts[1]!.observed(
+    execFileSync(installer.node, [executable, "--version"], {
+      encoding: "utf8",
+      env: { ...environment, COREPACK_ENABLE_NETWORK: "0" },
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim(),
+  );
+  if (observed === null || !contracts[1]!.matches(observed, version)) {
+    throw new BootstrapFailure("distribution_corrupt", [
+      {
+        code: "PNPM_DISTRIBUTION_VERSION_MISMATCH",
+        capability: "pnpm",
+        expected: version,
+        observed: observed ?? "unrecognised",
+        message: "state-owned pnpm distribution does not match the declared version",
+        action: "discard the partial state and retry online",
+      },
+    ]);
+  }
+  return {
+    name: "pnpm",
+    version,
+    provider: "catalogue-distribution",
+    executable,
+    executableDigest: directoryDigest(distribution),
+  };
+}
+
 async function materializeCatalogueUv(
   options: BootstrapOptions,
   host: BootstrapHost,
@@ -995,7 +1314,7 @@ function resolvedAdapter(
   const launcherPath = resolve(stateRoot, launcher);
   const node = capabilities.find((capability) => capability.name === "node");
   const bytes = value.name === "pnpm"
-    ? `#!/bin/sh\nset -eu\nSCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexport HOME="$SCRIPT_DIR/../home"\nexport XDG_CONFIG_HOME="$SCRIPT_DIR/../home/config"\nexport COREPACK_HOME="$SCRIPT_DIR/../corepack"\nexec ${shellQuote(node!.executable)} ${shellQuote(value.executable)} "$@"\n`
+    ? `#!/bin/sh\nset -eu\nSCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexport HOME="\${HOME:-$SCRIPT_DIR/../home}"\nexport XDG_CONFIG_HOME="\${XDG_CONFIG_HOME:-$SCRIPT_DIR/../home/config}"\nexport COREPACK_HOME="\${COREPACK_HOME:-$SCRIPT_DIR/../corepack}"\nexec ${shellQuote(node!.executable)} ${shellQuote(value.executable)} "$@"\n`
     : `#!/bin/sh\nset -eu\nexec ${shellQuote(value.executable)} "$@"\n`;
   writeAtomicExecutable(launcherPath, bytes);
   const launcherDigest = bytesDigest(bytes);
@@ -1052,6 +1371,9 @@ function materializeDependencies(
           project,
           "install",
           "--frozen-lockfile",
+          ...(existsSync(join(project, "pnpm-workspace.yaml"))
+            ? []
+            : ["--ignore-workspace"]),
           "--store-dir",
           join(stateRoot, "cache", "pnpm"),
         ],
@@ -1073,7 +1395,7 @@ function materializeDependencies(
       );
       evidence.push({
         ...dependencyBinding(dependency),
-        installedDigest: installedEnvironmentDigest("uv", destination),
+        installedDigest: installedEnvironmentDigest(destination),
       });
     }
   }
@@ -1115,6 +1437,13 @@ async function materializeState(
   let capabilities = prerequisites.adapters;
   if (host.platform === "darwin") {
     const python = capabilities.find((value) => value.name === "python")!;
+    const pnpm = materializeCataloguePnpm(
+      options,
+      host,
+      stateRoot,
+      directory,
+      prerequisites.pnpmInstaller,
+    );
     const uv = await materializeCatalogueUv(
       options,
       host,
@@ -1123,7 +1452,12 @@ async function materializeState(
       prerequisites.installerUv,
       python,
     );
-    capabilities = [...capabilities, { ...uv, provider: "catalogue-distribution" }];
+    const byName = new Map<string, HostCapability>([
+      ...capabilities.map((capability) => [capability.name, capability] as const),
+      [pnpm.name, pnpm],
+      [uv.name, { ...uv, provider: "catalogue-distribution" }],
+    ]);
+    capabilities = contracts.map((contract) => byName.get(contract.name)!);
   }
   const adapters = capabilities.map((value) =>
     resolvedAdapter(stateRoot, stateKey, value, capabilities),
@@ -1192,6 +1526,7 @@ function validateWarmState(
     ) {
       throw new Error("state bindings mismatch");
     }
+    assertBootstrapStateShape(resolve(stateRoot, stateKey), stateKey, state);
     const current = new Map(prerequisites.adapters.map((value) => [value.name, value]));
     const adapterPath = [
       ...new Set(state.adapters.map((adapter) => dirname(adapter.executable))),
@@ -1211,13 +1546,24 @@ function validateWarmState(
       }
       const launcher = resolve(stateRoot, adapter.launcher);
       rejectSymlinkComponents(stateRoot, launcher);
+      if (adapter.provider === "catalogue-distribution") {
+        rejectSymlinkComponents(
+          realpathSync(stateRoot),
+          realpathSync(adapter.executable),
+        );
+      }
+      const executableDigest =
+        adapter.name === "pnpm" && adapter.provider === "catalogue-distribution"
+          ? directoryDigest(pnpmDistributionRoot(adapter.executable))
+          : fileDigest(adapter.executable);
       if (
         !existsSync(launcher) ||
         lstatSync(launcher).isSymbolicLink() ||
         fileDigest(launcher) !== adapter.launcherDigest ||
         !existsSync(adapter.executable) ||
         lstatSync(adapter.executable).isSymbolicLink() ||
-        fileDigest(adapter.executable) !== adapter.executableDigest
+        !lstatSync(adapter.executable).isFile() ||
+        executableDigest !== adapter.executableDigest
       ) {
         throw new Error("adapter artifact mismatch");
       }
@@ -1268,7 +1614,7 @@ function validateWarmState(
       }
       if (
         !/^sha256:[0-9a-f]{64}$/.test(dependency.installedDigest ?? "") ||
-        installedEnvironmentDigest(dependency.manager, environment) !==
+        installedEnvironmentDigest(environment) !==
           dependency.installedDigest
       ) {
         throw new Error("installed dependency environment changed");
@@ -1292,6 +1638,36 @@ function failureReason(error: unknown): Readonly<{
   diagnostics: readonly BootstrapDiagnostic[];
 }> {
   if (error instanceof BootstrapFailure) return error;
+  if (error instanceof BootstrapKernelBoundaryError) {
+    return {
+      reason: error.kind === "busy" ? "state_materialization_busy" : "reference_commit_invalid",
+      diagnostics: [{
+        code: error.kind === "busy"
+          ? "BOOTSTRAP_STATE_MATERIALIZATION_BUSY"
+          : "BOOTSTRAP_STATE_MATERIALIZATION_INVALID",
+        message: error.message,
+        action: error.kind === "busy"
+          ? "wait for the active release-state materialisation and retry"
+          : "inspect the release-state materialisation boundary before retrying bootstrap",
+      }],
+    };
+  }
+  if (error instanceof BootstrapReferenceCommitError) {
+    return {
+      reason: error.kind === "busy" ? "reference_commit_busy" : "reference_commit_invalid",
+      diagnostics: [
+        {
+          code: error.kind === "busy"
+            ? "BOOTSTRAP_REFERENCE_COMMIT_BUSY"
+            : "BOOTSTRAP_REFERENCE_COMMIT_INVALID",
+          message: error.message,
+          action: error.kind === "busy"
+            ? "allow the active bootstrap to finish, then retry"
+            : "preserve the reference evidence and inspect the owned commit-lock path",
+        },
+      ],
+    };
+  }
   if (error instanceof SdlcError && error.code === "LOCK_STALE") {
     return {
       reason: "stale_lock",
@@ -1341,6 +1717,7 @@ function failedReceipt(
     platform: host.platform,
     architecture: host.architecture,
     stateKey,
+    stateDigest: null,
     reused,
     taskIdentities,
     adapters,
@@ -1350,53 +1727,6 @@ function failedReceipt(
     diagnosticsCount: failure.diagnostics.length,
     diagnosticsTruncated: failure.diagnostics.length > maximumDiagnostics,
   };
-}
-
-function writeBootstrapReference(
-  stateRoot: string,
-  consumer: string,
-  consumerRoot: string,
-  stateKey: string,
-): void {
-  const directory = join(stateRoot, "references");
-  rejectSymlinkComponents(stateRoot, directory);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const referencePath = join(
-    directory,
-    `${digest({ consumer, consumerRoot }).slice("sha256:".length)}.json`,
-  );
-  rejectSymlinkComponents(stateRoot, referencePath);
-  let previous: BootstrapReference | undefined;
-  if (existsSync(referencePath)) {
-    const value = readCanonical(referencePath) as BootstrapReference;
-    if (
-      value.schema !== "tc.sdlc/bootstrap-reference/v1" ||
-      value.owner !== OWNER.owner ||
-      value.consumer !== consumer ||
-      value.consumerRoot !== consumerRoot
-    ) {
-      throw new BootstrapFailure("state_corrupt", [
-        {
-          code: "BOOTSTRAP_REFERENCE_CORRUPT",
-          message: "bootstrap state reference metadata is invalid",
-          action: "inspect the owned reference metadata before retrying bootstrap",
-        },
-      ]);
-    }
-    previous = value;
-  }
-  const predecessorStateKey =
-    previous?.currentStateKey !== undefined && previous.currentStateKey !== stateKey
-      ? previous.currentStateKey
-      : previous?.predecessorStateKey;
-  writeCanonicalEvidence(referencePath, {
-    schema: "tc.sdlc/bootstrap-reference/v1",
-    owner: OWNER.owner,
-    consumer,
-    consumerRoot,
-    currentStateKey: stateKey,
-    ...(predecessorStateKey === undefined ? {} : { predecessorStateKey }),
-  } satisfies BootstrapReference);
 }
 
 export async function bootstrap(options: BootstrapOptions): Promise<BootstrapReceipt> {
@@ -1417,6 +1747,12 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
   let taskIdentities: readonly string[] = [];
   let adapters: readonly BootstrapAdapterEvidence[] = [];
   let dependencyEvidence: readonly BootstrapDependencyEvidence[] = [];
+  let stateBoundary: BootstrapKernelBoundary | undefined;
+  const releaseStateBoundary = (): void => {
+    const boundary = stateBoundary;
+    stateBoundary = undefined;
+    if (boundary !== undefined) releaseBootstrapKernelBoundary(boundary);
+  };
   try {
     host = normalHost(options.host);
     assertCurrentLock(options.lock, options.declaration, options.catalogue);
@@ -1433,9 +1769,15 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       `${host.platform}-${host.architecture}`,
     );
     const stateRoot = validateStateRoot(options.root, options.stateRoot);
-    const ownership = inspectOwnership(stateRoot);
     mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
     chmodSync(stateRoot, 0o700);
+    stateBoundary = await acquireBootstrapKernelBoundary(
+      stateRoot,
+      "bootstrap-state-materialization",
+      { stateKey },
+    );
+    assertBootstrapKernelBoundary(stateBoundary);
+    const ownership = inspectOwnership(stateRoot);
     if (ownership === "absent") {
       writeCanonicalEvidence(join(stateRoot, ".tc-sdlc-owner.json"), OWNER);
     }
@@ -1445,21 +1787,75 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       options.catalogue,
       stateRoot,
     );
+    const expectedStateDirectory = resolve(stateRoot, stateKey);
+    let invalidatedGeneration = false;
     if (ownership === "owned") {
-      const warm = validateWarmState(
-        options,
-        host,
-        stateRoot,
-        stateKey,
-        lockDigest,
-        dependencyDigest,
-        dependencies,
-        prerequisites,
-      );
-      if (warm !== null) {
-        reused = true;
-        adapters = warm.adapters.map(adapterEvidence);
-        dependencyEvidence = warm.dependencies;
+      rejectSymlinkComponents(stateRoot, expectedStateDirectory);
+      if (existsSync(expectedStateDirectory)) {
+        invalidatedGeneration = bootstrapStateGenerationInvalidated(
+          stateRoot,
+          stateKey,
+          expectedStateDirectory,
+        );
+        if (invalidatedGeneration) {
+          quarantineInvalidatedState(stateRoot, stateKey, expectedStateDirectory);
+        } else if (!existsSync(join(expectedStateDirectory, "state.json"))) {
+          const partial = new BootstrapFailure("state_corrupt", [{
+            code: "BOOTSTRAP_STATE_PARTIAL",
+            message: "release state exists without a valid completion manifest",
+            action: "quarantine the incomplete generation and bootstrap online again",
+          }]);
+          if (host.offline) throw partial;
+          quarantineCorruptWarmState(
+            options,
+            host,
+            stateRoot,
+            stateKey,
+            expectedStateDirectory,
+            lockDigest,
+            dependencyDigest,
+            "BOOTSTRAP_STATE_PARTIAL",
+          );
+          invalidatedGeneration = true;
+        }
+      }
+      if (!invalidatedGeneration) {
+        let warm: BootstrapState | null;
+        try {
+          warm = validateWarmState(
+            options,
+            host,
+            stateRoot,
+            stateKey,
+            lockDigest,
+            dependencyDigest,
+            dependencies,
+            prerequisites,
+          );
+        } catch (error) {
+          if (!(error instanceof BootstrapFailure) || error.reason !== "state_corrupt") {
+            throw error;
+          }
+          if (host.offline) {
+            throw error;
+          }
+          quarantineCorruptWarmState(
+            options,
+            host,
+            stateRoot,
+            stateKey,
+            expectedStateDirectory,
+            lockDigest,
+            dependencyDigest,
+            error.diagnostics[0]?.code ?? "BOOTSTRAP_STATE_CORRUPT",
+          );
+          warm = null;
+        }
+        if (warm !== null) {
+          reused = true;
+          adapters = warm.adapters.map(adapterEvidence);
+          dependencyEvidence = warm.dependencies;
+        }
       }
     }
     if (!reused) {
@@ -1485,12 +1881,79 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       adapters = state.adapters.map(adapterEvidence);
       dependencyEvidence = state.dependencies;
     }
-    writeBootstrapReference(
+    const finalStatePath = resolve(stateRoot, stateKey);
+    // A poisoned generation remains rejected until a distinct directory identity
+    // has been materialised at the same content-addressed key.
+    if (existsSync(finalStatePath)) {
+      assertBootstrapStateAdmitted(stateRoot, stateKey, finalStatePath);
+    }
+    const verified = validateWarmState(
+      options,
+      host,
+      stateRoot,
+      stateKey,
+      lockDigest,
+      dependencyDigest,
+      dependencies,
+      prerequisites,
+    );
+    if (verified === null) {
+      throw new BootstrapFailure("state_changed", [
+        {
+          code: "BOOTSTRAP_STATE_CHANGED",
+          message: "bootstrap state changed before reference publication",
+          action: "retry bootstrap to materialise and reference one verified state",
+        },
+      ]);
+    }
+    const verifiedIdentity = filesystemIdentity(finalStatePath);
+    assertBootstrapKernelBoundary(stateBoundary);
+    const publication = writePendingBootstrapReference(
       stateRoot,
       options.declaration.project,
       realpathSync(options.root),
       stateKey,
+      verifiedIdentity,
     );
+    let finalState: BootstrapState | null = null;
+    let commitLock: Awaited<ReturnType<typeof acquireBootstrapReferenceCommitLock>> | undefined;
+    try {
+      commitLock = await acquireBootstrapReferenceCommitLock(stateRoot, publication);
+      finalState = validateWarmState(
+        options,
+        host,
+        stateRoot,
+        stateKey,
+        lockDigest,
+        dependencyDigest,
+        dependencies,
+        prerequisites,
+      );
+      if (
+        finalState === null ||
+        !sameFilesystemIdentity(finalStatePath, verifiedIdentity)
+      ) {
+        throw new BootstrapFailure("state_changed", [
+          {
+            code: "BOOTSTRAP_STATE_CHANGED",
+            message: "bootstrap state changed before reference publication",
+            action: "retry bootstrap to materialise and reference one verified state",
+          },
+        ]);
+      }
+      commitBootstrapReference(stateRoot, publication, commitLock);
+    } finally {
+      try {
+        if (commitLock !== undefined) releaseBootstrapReferenceCommitLock(commitLock);
+      } finally {
+        removePendingBootstrapReference(publication);
+      }
+    }
+    adapters = finalState.adapters.map(adapterEvidence);
+    dependencyEvidence = finalState.dependencies;
+    const statePath = resolve(finalStatePath, "state.json");
+    rejectSymlinkComponents(stateRoot, statePath);
+    const stateDigest = fileDigest(statePath);
     const receipt: BootstrapReceipt = {
       schema: "tc.sdlc/bootstrap-receipt/v1",
       status: "succeeded",
@@ -1500,6 +1963,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       platform: host.platform,
       architecture: host.architecture,
       stateKey,
+      stateDigest,
       reused,
       taskIdentities,
       adapters,
@@ -1509,9 +1973,23 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       diagnosticsCount: 0,
       diagnosticsTruncated: false,
     };
+    releaseStateBoundary();
     writeCanonicalEvidence(options.receiptPath, receipt);
     return receipt;
   } catch (error) {
+    let failure = failureReason(error);
+    try {
+      releaseStateBoundary();
+    } catch (releaseError) {
+      failure = {
+        reason: failure.reason,
+        diagnostics: [...failure.diagnostics, {
+          code: "BOOTSTRAP_STATE_MATERIALIZATION_RELEASE_FAILED",
+          message: releaseError instanceof Error ? releaseError.message : String(releaseError),
+          action: "inspect whether another bootstrap still owns the materialisation boundary",
+        }],
+      };
+    }
     const receipt = failedReceipt(
       options,
       host,
@@ -1520,11 +1998,13 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapRec
       taskIdentities,
       adapters,
       dependencyEvidence,
-      failureReason(error),
+      failure,
       maximumDiagnostics,
       recovery,
     );
     writeCanonicalEvidence(options.receiptPath, receipt);
     return receipt;
+  } finally {
+    releaseStateBoundary();
   }
 }

@@ -10,6 +10,7 @@ export PATH := $(TC_SCANNER_BIN_DIR):$(PATH)
 prepare:
 	uvx --from uv==0.12.5 uv lock
 	uv sync --locked
+	pnpm install --frozen-lockfile
 	INSTALL_OSV_SCANNER=true INSTALL_CHECKOV_SCANNER=true bash actions/python-gate-body/provision-scanners.sh
 	uv run --no-sync ruff check --force-exclude --select E,F,I,UP,B,S,RUF --target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero .
 	uv run --no-sync ruff format --force-exclude --line-length 110 --target-version py312 .

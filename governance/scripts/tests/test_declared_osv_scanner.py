@@ -383,14 +383,14 @@ def test_unpartitioned_shards_keep_required_scanner_available() -> None:
     assert _lane_owns_provisioning(shard_owner, shard_tier="") is True
 
 
-def test_real_checkov_install_uses_explicit_bin_and_preserves_consumer_lock_environment(
+def test_checkov_provisioning_uses_its_locked_python_under_ambient_repo_python(
     tmp_path: Path,
 ) -> None:
     consumer = tmp_path / "consumer"
     consumer.mkdir()
     (consumer / "pyproject.toml").write_text(
         '[project]\nname = "scanner-consumer-fixture"\nversion = "0.0.0"\n'
-        'requires-python = ">=3.12"\ndependencies = ["asteval==1.0.9"]\n',
+        'requires-python = ">=3.12,<3.13"\ndependencies = ["asteval==1.0.9"]\n',
         encoding="utf-8",
     )
     for command in (
@@ -400,13 +400,14 @@ def test_real_checkov_install_uses_explicit_bin_and_preserves_consumer_lock_envi
         result = subprocess.run(command, cwd=consumer, text=True, capture_output=True, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
     lock_before = (consumer / "uv.lock").read_bytes()
-    install_bin = _default_scanner_bin()
+    install_bin = tmp_path / "scanners" / "bin"
     path_file = tmp_path / "scanner-path"
     environment = {
         key: value for key, value in os.environ.items() if key not in {"RUNNER_TEMP", "GITHUB_PATH"}
     }
     environment.update(
         INSTALL_CHECKOV_SCANNER="true",
+        UV_PYTHON="3.13",
         TC_SCANNER_BIN_DIR=str(install_bin),
         TC_SCANNER_PATH_FILE=str(path_file),
     )
@@ -431,6 +432,17 @@ def test_real_checkov_install_uses_explicit_bin_and_preserves_consumer_lock_envi
         check=False,
     )
     checkov_python = (install_bin / "checkov").resolve().parent / "python"
+    checkov_runtime = subprocess.run(
+        [
+            str(checkov_python),
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ],
+        cwd=consumer,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     checkov_asteval = subprocess.run(
         [str(checkov_python), "-c", "import asteval; print(asteval.__version__)"],
         cwd=consumer,
@@ -498,6 +510,7 @@ def test_real_checkov_install_uses_explicit_bin_and_preserves_consumer_lock_envi
         (install_bin / "checkov").is_file(),
         consumer_asteval.stdout.strip(),
         checkov_asteval.stdout.strip(),
+        checkov_runtime.stdout.strip(),
         checkov_version.returncode,
         checkov_ecdsa.stdout.strip(),
         scanner_outcome(checkov_clean.returncode, checkov_clean.stdout, "CKV_AWS_20"),
@@ -508,6 +521,7 @@ def test_real_checkov_install_uses_explicit_bin_and_preserves_consumer_lock_envi
         True,
         "1.0.9",
         locked_asteval,
+        "3.12",
         0,
         "False",
         "clean",
@@ -518,6 +532,7 @@ def test_real_checkov_install_uses_explicit_bin_and_preserves_consumer_lock_envi
         + provision.stderr
         + consumer_asteval.stderr
         + checkov_asteval.stderr
+        + checkov_runtime.stderr
         + checkov_version.stdout
         + checkov_version.stderr
         + checkov_ecdsa.stderr

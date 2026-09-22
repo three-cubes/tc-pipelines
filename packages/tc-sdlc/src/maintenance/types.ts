@@ -38,6 +38,7 @@ export type MaintenanceRetainedEntry = Readonly<{
     | "linked"
     | "changed_during_apply"
     | "referenced"
+    | "leased"
     | "reference_metadata_absent"
     | "inspection_failed";
 }>;
@@ -65,6 +66,7 @@ export type MaintenanceReceipt = Readonly<{
   cleanupWorkerMs: number;
   peakCleanupWorkers: number;
   cleanupFailures: number;
+  referenceMetadataRemovedCount: number;
   candidates: readonly MaintenanceEntry[];
   retained: readonly MaintenanceRetainedEntry[];
   tools: Readonly<{

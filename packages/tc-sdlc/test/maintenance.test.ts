@@ -16,7 +16,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test } from "vitest";
@@ -32,6 +32,34 @@ function temporary(prefix: string): string {
   const root = mkdtempSync(join(tmpdir(), prefix));
   roots.push(root);
   return root;
+}
+
+function taskRunOptions(capacity = { cpu: 1, memoryMiB: 64 }) {
+  return {
+    capacity,
+    executionContext: {
+      binding: {
+        schema: "tc.sdlc/execution-context/v1",
+        release: "3.0.0",
+        platform: process.platform === "linux" ? "linux" : "darwin",
+        architecture: process.arch,
+        lockDigest: `sha256:${"a".repeat(64)}`,
+        stateKey: "releases/test/maintenance",
+        stateGenerationIdentity: `sha256:${"e".repeat(64)}`,
+        bootstrapReceiptDigest: `sha256:${"b".repeat(64)}`,
+        stateDigest: `sha256:${"c".repeat(64)}`,
+        dependencyDigest: `sha256:${"d".repeat(64)}`,
+        fitness: { package: "three-cubes-fitness", version: "0.17.1" },
+        adapters: [],
+      },
+      stateRoot: tmpdir(),
+      stateDirectory: tmpdir(),
+      environment: { PATH: process.env.PATH ?? "" },
+      lease: { assertCurrent: () => undefined, release: () => undefined },
+      assertIdentity: () => undefined,
+      verifyIntegrity: () => undefined,
+    },
+  };
 }
 
 function ownedState(root: string): void {
@@ -67,6 +95,15 @@ function bootstrapState(root: string, stateKey: string, old = true): string {
     utimesSync(directory, expired, expired);
   }
   return directory;
+}
+
+function filesystemIdentity(path: string) {
+  const details = lstatSync(path, { bigint: true });
+  return {
+    device: details.dev.toString(),
+    inode: details.ino.toString(),
+    birthtimeNanoseconds: details.birthtimeNs.toString(),
+  };
 }
 
 function managedTemporary(
@@ -452,6 +489,46 @@ describe("tc-sdlc managed lifecycle", () => {
     expect(existsSync(emptyInterrupted)).toBe(true);
   }, 30_000);
 
+  test("recovers an owned quarantine when birthtime evidence changes across a move", async () => {
+    const parent = temporary("tc-sdlc-maintenance-move-identity-");
+    const stateRoot = temporary("tc-sdlc-maintenance-move-state-");
+    const evidence = temporary("tc-sdlc-maintenance-move-evidence-");
+    ownedState(stateRoot);
+    const root = join(parent, ".tc-sdlc-quarantine-moved");
+    const payload = join(root, "candidate");
+    mkdirSync(payload, { recursive: true });
+    writeFileSync(join(payload, "owned.txt"), "owned bytes\n");
+    const movedIdentity = filesystemIdentity(payload);
+    writeFileSync(
+      join(root, ".tc-sdlc-quarantine.json"),
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/quarantine-owner/v1",
+        owner: "@three-cubes/tc-sdlc",
+        kind: "temporary",
+        originalName: "tc-sdlc-evaluation-moved",
+        payloadIdentity: {
+          ...movedIdentity,
+          birthtimeNanoseconds: `${BigInt(movedIdentity.birthtimeNanoseconds) + 1n}`,
+        },
+      }),
+    );
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(root, old, old);
+
+    const receipt = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "move-identity.json"),
+      mode: "apply",
+    });
+
+    expect(receipt).toMatchObject({ status: "succeeded", removedCount: 1 });
+    expect(receipt.candidates).toContainEqual(
+      expect.objectContaining({ kind: "quarantine", path: ".tc-sdlc-quarantine-moved" }),
+    );
+    expect(existsSync(root)).toBe(false);
+  });
+
   test("bounds deletion-worker lifecycle and records a terminal cleanup failure", async () => {
     const parent = temporary("tc-sdlc-maintenance-worker-budget-");
     const stateRoot = temporary("tc-sdlc-maintenance-state-");
@@ -530,6 +607,94 @@ describe("tc-sdlc managed lifecycle", () => {
     );
     expect(receipt.removedCount).toBeLessThanOrEqual(1);
   });
+
+  test.runIf(process.platform !== "win32" && process.getuid?.() !== 0)(
+    "records quarantine-creation failures and retains scratch and bootstrap candidates",
+    async () => {
+      const parent = temporary("tc-sdlc-maintenance-unwritable-temp-");
+      const stateRoot = temporary("tc-sdlc-maintenance-unwritable-state-");
+      const evidence = temporary("tc-sdlc-maintenance-unwritable-evidence-");
+      ownedState(stateRoot);
+      const scratch = managedTemporary(parent, "tc-sdlc-evaluation-unwritable", {
+        pid: 2_147_483_647,
+        old: true,
+      });
+      chmodSync(parent, 0o500);
+      let scratchReceipt: sdlc.MaintenanceReceipt | undefined;
+      try {
+        scratchReceipt = await sdlc.maintain({
+          stateRoot,
+          temporaryRoot: parent,
+          receiptPath: join(evidence, "scratch.json"),
+          mode: "apply",
+        });
+      } finally {
+        chmodSync(parent, 0o700);
+      }
+      expect(scratchReceipt).toMatchObject({
+        status: "failed",
+        reason: "temporary_cleanup_failed",
+        candidateCount: 1,
+        removedCount: 0,
+        cleanupFailures: 1,
+        retained: [{ path: "tc-sdlc-evaluation-unwritable", reason: "inspection_failed" }],
+      });
+      expect(existsSync(scratch)).toBe(true);
+      expect(readFileSync(join(evidence, "scratch.json"), "utf8")).toBe(
+        sdlc.serialiseMaintenanceReceipt(scratchReceipt!),
+      );
+
+      const currentKey = "releases/current/dependencies/darwin-arm64";
+      const expiredKey = "releases/expired/dependencies/darwin-arm64";
+      const current = bootstrapState(stateRoot, currentKey);
+      const expired = bootstrapState(stateRoot, expiredKey);
+      mkdirSync(join(stateRoot, "references"));
+      writeFileSync(
+        join(
+          stateRoot,
+          "references",
+          `${sdlc.digest({ consumer: "fixture", consumerRoot: "/fixture" }).slice("sha256:".length)}.json`,
+        ),
+        sdlc.canonicalJson({
+          schema: "tc.sdlc/bootstrap-reference/v2",
+          owner: "@three-cubes/tc-sdlc",
+          phase: "committed",
+          transaction: "00000000-0000-4000-8000-000000000001",
+          committedAtMs: 1,
+          consumer: "fixture",
+          consumerRoot: "/fixture",
+          currentStateKey: currentKey,
+          currentStateIdentity: filesystemIdentity(current),
+        }),
+      );
+      const stateParent = join(stateRoot, "releases", "expired", "dependencies");
+      chmodSync(stateParent, 0o500);
+      let stateReceipt: sdlc.MaintenanceReceipt | undefined;
+      try {
+        stateReceipt = await sdlc.maintain({
+          stateRoot,
+          temporaryRoot: temporary("tc-sdlc-maintenance-unwritable-empty-"),
+          receiptPath: join(evidence, "bootstrap-state.json"),
+          mode: "apply",
+        });
+      } finally {
+        chmodSync(stateParent, 0o700);
+      }
+      expect(stateReceipt).toMatchObject({
+        status: "failed",
+        reason: "temporary_cleanup_failed",
+        removedCount: 0,
+        cleanupFailures: 1,
+        retained: expect.arrayContaining([
+          { path: expiredKey, reason: "inspection_failed" },
+        ]),
+      });
+      expect(existsSync(expired)).toBe(true);
+      expect(readFileSync(join(evidence, "bootstrap-state.json"), "utf8")).toBe(
+        sdlc.serialiseMaintenanceReceipt(stateReceipt!),
+      );
+    },
+  );
 
   test("retains dirty tracked and untracked work in an evaluation workspace", async () => {
     const parent = temporary("tc-sdlc-maintenance-nested-worktree-");
@@ -690,12 +855,17 @@ describe("tc-sdlc managed lifecycle", () => {
         `${sdlc.digest({ consumer: "fixture", consumerRoot: "/fixture" }).slice("sha256:".length)}.json`,
       ),
       sdlc.canonicalJson({
-        schema: "tc.sdlc/bootstrap-reference/v1",
+        schema: "tc.sdlc/bootstrap-reference/v2",
         owner: "@three-cubes/tc-sdlc",
+        phase: "committed",
+        transaction: "00000000-0000-4000-8000-000000000001",
+        committedAtMs: 1,
         consumer: "fixture",
         consumerRoot: "/fixture",
         currentStateKey: currentKey,
+        currentStateIdentity: filesystemIdentity(current),
         predecessorStateKey: predecessorKey,
+        predecessorStateIdentity: filesystemIdentity(predecessor),
       }),
     );
 
@@ -739,6 +909,179 @@ describe("tc-sdlc managed lifecycle", () => {
     expect(existsSync(unreferencedMetadataAbsent)).toBe(true);
   });
 
+  test("restores an identity-bound state referenced after quarantine", async () => {
+    const parent = temporary("tc-sdlc-maintenance-reference-race-temp-");
+    const stateRoot = temporary("tc-sdlc-maintenance-reference-race-state-");
+    const evidence = temporary("tc-sdlc-maintenance-reference-race-evidence-");
+    ownedState(stateRoot);
+    const currentKey = "releases/current/dependencies/darwin-arm64";
+    const expiredKey = "releases/expired/dependencies/darwin-arm64";
+    const current = bootstrapState(stateRoot, currentKey);
+    const expired = bootstrapState(stateRoot, expiredKey);
+    const expiredIdentity = filesystemIdentity(expired);
+    const references = join(stateRoot, "references");
+    mkdirSync(references);
+    let greatestName = "";
+    for (let index = 0; index < 5_000; index += 1) {
+      const consumer = `existing-${index}`;
+      const consumerRoot = `/fixture/existing-${index}`;
+      const name = `${sdlc.digest({ consumer, consumerRoot }).slice("sha256:".length)}.json`;
+      greatestName = name > greatestName ? name : greatestName;
+      writeFileSync(
+        join(references, name),
+        sdlc.canonicalJson({
+          schema: "tc.sdlc/bootstrap-reference/v2",
+          owner: "@three-cubes/tc-sdlc",
+          phase: "committed",
+          transaction: "00000000-0000-4000-8000-000000000001",
+          committedAtMs: 1,
+          consumer,
+          consumerRoot,
+          currentStateKey: currentKey,
+          currentStateIdentity: filesystemIdentity(current),
+        }),
+      );
+    }
+    let targetIndex = 0;
+    let targetConsumer = "";
+    let targetRoot = "";
+    let targetName = "";
+    while (targetName <= greatestName) {
+      targetConsumer = `late-reference-${targetIndex}`;
+      targetRoot = `/fixture/late-reference-${targetIndex}`;
+      targetName = `${sdlc.digest({ consumer: targetConsumer, consumerRoot: targetRoot }).slice("sha256:".length)}.json`;
+      targetIndex += 1;
+    }
+    const targetPath = join(references, targetName);
+    const targetReference = (identity: ReturnType<typeof filesystemIdentity>) =>
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/bootstrap-reference/v2",
+        owner: "@three-cubes/tc-sdlc",
+        phase: "committed",
+        transaction: "00000000-0000-4000-8000-000000000001",
+        committedAtMs: 1,
+        consumer: targetConsumer,
+        consumerRoot: targetRoot,
+        currentStateKey: expiredKey,
+        currentStateIdentity: identity,
+      });
+    writeFileSync(targetPath, targetReference(filesystemIdentity(current)));
+
+    const receiptPath = join(evidence, "reference-race.json");
+    const child = spawn(
+      process.execPath,
+      [
+        CLI,
+        "maintain",
+        "--state-root", stateRoot,
+        "--temporary-root", parent,
+        "--receipt", receiptPath,
+        "--mode", "apply",
+      ],
+      { stdio: "ignore" },
+    );
+    const exited = new Promise<number | null>((resolve) => {
+      child.once("exit", resolve);
+    });
+    let resumed = false;
+    try {
+      const quarantineParent = join(stateRoot, "releases", "expired", "dependencies");
+      let quarantine: string | undefined;
+      const deadline = Date.now() + 30_000;
+      while (quarantine === undefined && Date.now() < deadline) {
+        quarantine = readdirSync(quarantineParent)
+          .map((name) => join(quarantineParent, name))
+          .find((path) =>
+            path.includes(".tc-sdlc-quarantine-") &&
+            existsSync(join(path, "candidate"))
+          );
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      expect(quarantine).toBeDefined();
+      expect(child.kill("SIGSTOP")).toBe(true);
+      expect(existsSync(join(quarantine!, "candidate"))).toBe(true);
+      writeFileSync(targetPath, targetReference(expiredIdentity));
+      expect(child.kill("SIGCONT")).toBe(true);
+      resumed = true;
+      expect(await exited).toBe(0);
+    } finally {
+      if (!resumed && child.exitCode === null) {
+        child.kill("SIGCONT");
+        child.kill("SIGKILL");
+      }
+    }
+
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+    expect(receipt).toMatchObject({
+      schema: "tc.sdlc/maintenance-receipt/v1",
+      status: "succeeded",
+      removedCount: 0,
+      retained: expect.arrayContaining([
+        { path: expiredKey, reason: "referenced" },
+      ]),
+    });
+    expect(existsSync(expired)).toBe(true);
+    expect(filesystemIdentity(expired)).toEqual(
+      JSON.parse(readFileSync(targetPath, "utf8")).currentStateIdentity,
+    );
+  }, 60_000);
+
+  test("restores an interrupted bootstrap-state quarantine authorised by a pending transaction", async () => {
+    const parent = temporary("tc-sdlc-maintenance-pending-recovery-temp-");
+    const stateRoot = temporary("tc-sdlc-maintenance-pending-recovery-state-");
+    const evidence = temporary("tc-sdlc-maintenance-pending-recovery-evidence-");
+    ownedState(stateRoot);
+    const stateKey = "releases/pending/dependencies/darwin-arm64";
+    const state = bootstrapState(stateRoot, stateKey);
+    const identity = filesystemIdentity(state);
+    const quarantine = join(dirname(state), ".tc-sdlc-quarantine-pending-recovery");
+    mkdirSync(quarantine);
+    writeFileSync(
+      join(quarantine, ".tc-sdlc-quarantine.json"),
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/quarantine-owner/v1",
+        owner: "@three-cubes/tc-sdlc",
+        kind: "bootstrap-state",
+        originalName: "darwin-arm64",
+        payloadIdentity: identity,
+      }),
+    );
+    renameSync(state, join(quarantine, "deleting"));
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1_000);
+    utimesSync(quarantine, old, old);
+    const pending = join(stateRoot, "references", "pending");
+    mkdirSync(pending, { recursive: true });
+    const transaction = "00000000-0000-4000-8000-000000000009";
+    writeFileSync(
+      join(pending, `${transaction}.json`),
+      sdlc.canonicalJson({
+        schema: "tc.sdlc/bootstrap-reference-pending/v1",
+        owner: "@three-cubes/tc-sdlc",
+        phase: "pending",
+        transaction,
+        consumer: "pending-fixture",
+        consumerRoot: "/fixture/pending",
+        stateKey,
+        stateIdentity: identity,
+        pid: process.pid,
+        processStartedAt: "fixture-process-start",
+        createdAtMs: Date.now(),
+      }),
+    );
+
+    const receipt = await sdlc.maintain({
+      stateRoot,
+      temporaryRoot: parent,
+      receiptPath: join(evidence, "pending-recovery.json"),
+      mode: "apply",
+    });
+
+    expect(receipt).toMatchObject({ status: "succeeded", removedCount: 0 });
+    expect(receipt.retained).toContainEqual({ path: stateKey, reason: "referenced" });
+    expect(filesystemIdentity(state)).toEqual(identity);
+    expect(existsSync(quarantine)).toBe(false);
+  });
+
   test("recovers a bootstrap-state quarantine killed in the deleting phase", async () => {
     const parent = temporary("tc-sdlc-maintenance-bootstrap-killed-temp-");
     const stateRoot = temporary("tc-sdlc-maintenance-bootstrap-killed-state-");
@@ -746,7 +1089,7 @@ describe("tc-sdlc managed lifecycle", () => {
     ownedState(stateRoot);
     const currentKey = "releases/current/dependencies/darwin-arm64";
     const expiredKey = "releases/expired/dependencies/darwin-arm64";
-    bootstrapState(stateRoot, currentKey);
+    const current = bootstrapState(stateRoot, currentKey);
     const expired = bootstrapState(stateRoot, expiredKey);
     for (let index = 0; index < 20_000; index += 1) {
       writeFileSync(join(expired, `entry-${index}.txt`), "owned\n");
@@ -761,11 +1104,15 @@ describe("tc-sdlc managed lifecycle", () => {
         `${sdlc.digest({ consumer: "fixture", consumerRoot: "/fixture" }).slice("sha256:".length)}.json`,
       ),
       sdlc.canonicalJson({
-        schema: "tc.sdlc/bootstrap-reference/v1",
+        schema: "tc.sdlc/bootstrap-reference/v2",
         owner: "@three-cubes/tc-sdlc",
+        phase: "committed",
+        transaction: "00000000-0000-4000-8000-000000000001",
+        committedAtMs: 1,
         consumer: "fixture",
         consumerRoot: "/fixture",
         currentStateKey: currentKey,
+        currentStateIdentity: filesystemIdentity(current),
       }),
     );
 
@@ -931,7 +1278,7 @@ describe("tc-sdlc managed lifecycle", () => {
       schema: "tc.sdlc/v1",
       project: "lifecycle-fixture",
       toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
-      fitness: sdlc.CANONICAL_SDLC_FITNESS,
+      fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
       projects: [{ name: "fixture", root: "." }],
       targets: {
         check: {
@@ -947,6 +1294,7 @@ describe("tc-sdlc managed lifecycle", () => {
     });
     const catalogue = sdlc.generateReleaseCatalogue({
       releaseVersion: "3.0.0",
+      fitnessVersion: "0.17.1",
       workflowCommit: "1234567890abcdef1234567890abcdef12345678",
       imageDigest:
         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -962,7 +1310,7 @@ describe("tc-sdlc managed lifecycle", () => {
         receiptPath: join(evidence, "evaluation.json"),
         environmentClass: `native-${process.platform}`,
         producer: "lifecycle-test",
-        runOptions: { capacity: { cpu: 1, memoryMiB: 64 } },
+        runOptions: taskRunOptions({ cpu: 1, memoryMiB: 64 }),
       });
       expect(result.status).toBe("failed");
       expect(
@@ -976,11 +1324,16 @@ describe("tc-sdlc managed lifecycle", () => {
         receiptPath: join(evidence, "evaluation-invalid-capacity.json"),
         environmentClass: `native-${process.platform}`,
         producer: "lifecycle-test",
-        runOptions: { capacity: { cpu: 0, memoryMiB: 64 } },
+        runOptions: taskRunOptions({ cpu: 0, memoryMiB: 64 }),
       });
       expect(rejected).toMatchObject({
         status: "failed",
-        reason: "host capacity must be positive",
+        reason: "scheduler_failed",
+        scheduler: {
+          status: "failed",
+          reason: "host capacity must be positive",
+          scratchCleanup: "removed",
+        },
       });
       expect(
         readdirSync(temporaryRoot).filter((name) => name.startsWith("tc-sdlc-evaluation-")),
@@ -1000,6 +1353,7 @@ describe("tc-sdlc managed lifecycle", () => {
     writeFileSync(join(root, "input.txt"), "input\n");
     const catalogue = sdlc.generateReleaseCatalogue({
       releaseVersion: "3.0.0",
+      fitnessVersion: "0.17.1",
       workflowCommit: "1234567890abcdef1234567890abcdef12345678",
       imageDigest:
         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1009,7 +1363,7 @@ describe("tc-sdlc managed lifecycle", () => {
         schema: "tc.sdlc/v1",
         project: "lifecycle-prepare",
         toolchains: sdlc.CANONICAL_SDLC_TOOLCHAINS,
-        fitness: sdlc.CANONICAL_SDLC_FITNESS,
+        fitness: { package: "three-cubes-fitness", config: "pyproject.toml", profiles: { full: "full" } },
         projects: [{ name: "fixture", root: "." }],
         targets: {
           prepare: {
@@ -1044,7 +1398,7 @@ describe("tc-sdlc managed lifecycle", () => {
           catalogue,
           lock: sdlc.resolveLock(declaration, catalogue),
           receiptPath: join(evidence, `${name}.json`),
-          runOptions: { capacity: { cpu: 1, memoryMiB: 64 } },
+          runOptions: taskRunOptions({ cpu: 1, memoryMiB: 64 }),
         });
         expect(result.status).toBe(status);
         expect(result.recovery).toMatchObject({

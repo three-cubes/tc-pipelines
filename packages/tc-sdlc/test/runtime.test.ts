@@ -1,5 +1,6 @@
 import * as sdlc from "../dist/index.js";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,7 +19,7 @@ const release = {
   lockSchema: "tc.sdlc/lock/v1",
   fitness: {
     package: "three-cubes-fitness",
-    version: "0.17.0",
+    version: "0.17.1",
   },
   toolchains: {
     node: "24",
@@ -29,12 +30,18 @@ const release = {
   bootstrap: sdlc.CANONICAL_SDLC_BOOTSTRAP,
 } as const;
 
+const declarationFitness = {
+  package: "three-cubes-fitness",
+  config: "pyproject.toml",
+  profiles: { full: "full" },
+} as const;
+
 function graphFor(targets: Readonly<Record<string, Record<string, unknown>>>) {
   const declaration = {
     schema: "tc.sdlc/v1",
     project: "runtime-fixture",
     toolchains: release.toolchains,
-    fitness: release.fitness,
+    fitness: declarationFitness,
     projects: [{ name: "fixture", root: "." }],
     targets,
   } as const;
@@ -66,7 +73,315 @@ function runtimeTarget(
   };
 }
 
+function testExecutionContext() {
+  return {
+    binding: {
+      schema: "tc.sdlc/execution-context/v1",
+      release: "2.2.0",
+      platform: process.platform === "linux" ? "linux" : "darwin",
+      architecture: process.arch,
+      lockDigest: `sha256:${"a".repeat(64)}`,
+      stateKey: "releases/2.2.0/test/darwin-arm64",
+      stateGenerationIdentity: `sha256:${"e".repeat(64)}`,
+      bootstrapReceiptDigest: `sha256:${"b".repeat(64)}`,
+      stateDigest: `sha256:${"c".repeat(64)}`,
+      dependencyDigest: `sha256:${"d".repeat(64)}`,
+      fitness: { package: "three-cubes-fitness", version: "0.17.1" },
+      adapters: [],
+    },
+    stateRoot: "/tmp/test-state",
+    stateDirectory: "/tmp/test-state/releases/2.2.0/test/darwin-arm64",
+    environment: { PATH: process.env.PATH ?? "" },
+    lease: { assertCurrent: () => undefined, release: () => undefined },
+    assertIdentity: () => undefined,
+    verifyIntegrity: () => undefined,
+  };
+}
+
+function runGraphWithContext(
+  graph: unknown,
+  selection: readonly string[],
+  options: Record<string, any>,
+) {
+  return (sdlc as Record<string, any>).runGraph(graph, selection, {
+    ...options,
+    executionContext: options.executionContext ?? testExecutionContext(),
+  });
+}
+
 describe("tc-sdlc runtime", () => {
+  test("retains a terminal receipt and removes run scratch after a scheduling exception", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-schedule-failure-"));
+    const graph = graphFor({ check: runtimeTarget("node -e 'process.exit(0)'") });
+    const receiptPath = join(directory, "run.json");
+    const before = new Set(readdirSync(tmpdir()).filter((name) => name.startsWith("tc-sdlc-run-")));
+
+    const receipt = await runGraphWithContext(
+      graph,
+      [graph.tasks[0].identity],
+      {
+        cwd: directory,
+        receiptPath,
+        capacity: { cpu: 0, memoryMiB: 256 },
+      },
+    );
+
+    expect(receipt).toMatchObject({
+      status: "failed",
+      reason: "host capacity must be positive",
+      scratchCleanup: "removed",
+      tasks: [{ status: "skipped", reason: "run_aborted:host capacity must be positive" }],
+    });
+    expect(readFileSync(receiptPath, "utf8")).toBe(sdlc.canonicalJson(receipt));
+    expect(readdirSync(tmpdir()).filter((name) =>
+      name.startsWith("tc-sdlc-run-") && !before.has(name),
+    )).toEqual([]);
+  });
+
+  test("runs every task with an isolated writable home, temp and cache", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-isolation-"));
+    writeFileSync(
+      join(directory, "environment.mjs"),
+      'console.log(JSON.stringify({home: process.env.HOME, temp: process.env.TMPDIR, cache: process.env.XDG_CACHE_HOME, noBytecode: process.env.PYTHONDONTWRITEBYTECODE}));\n',
+    );
+    const graph = graphFor({ check: runtimeTarget("node environment.mjs") });
+    const receipt = await runGraphWithContext(
+      graph,
+      [graph.tasks[0].identity],
+      {
+        cwd: directory,
+        receiptPath: join(directory, "receipt.json"),
+        capacity: { cpu: 1, memoryMiB: 256 },
+        executionContext: testExecutionContext(),
+      },
+    );
+    const observed = JSON.parse(receipt.tasks[0].stdout.trim()) as Record<string, string>;
+
+    expect(receipt.status).toBe("succeeded");
+    expect(observed.home).toMatch(/\/tc-sdlc-run-[^/]+\/[^/]+\/home$/);
+    expect(observed.temp).toMatch(/\/tc-sdlc-run-[^/]+\/[^/]+\/tmp$/);
+    expect(observed.cache).toMatch(/\/tc-sdlc-run-[^/]+\/[^/]+\/cache\/xdg$/);
+    expect(observed.noBytecode).toBe("1");
+    expect(new Set([observed.home, observed.temp, observed.cache]).size).toBe(3);
+  });
+
+  test("rejects caller overrides of the bootstrap-owned executable environment", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-hostile-env-"));
+    writeFileSync(join(directory, "check.mjs"), 'console.log("executed");\n');
+    const graph = graphFor({ check: runtimeTarget("node check.mjs") });
+
+    const receipt = await runGraphWithContext(
+      graph,
+      [graph.tasks[0].identity],
+      {
+        cwd: directory,
+        receiptPath: join(directory, "receipt.json"),
+        capacity: { cpu: 1, memoryMiB: 256 },
+        executionContext: testExecutionContext(),
+        environment: {
+          PATH: join(directory, "hostile-bin"),
+          VIRTUAL_ENV: join(directory, "ambient-python"),
+        },
+      },
+    );
+
+    expect(receipt.status).toBe("failed");
+    expect(receipt.tasks[0].reason).toBe("task_environment_invalid");
+    expect(receipt.tasks[0].stdout).not.toContain("executed");
+  });
+
+  test("resolves workspace packages from the prepared checkout and external packages from managed state", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-workspace-resolution-"));
+    const stateEnvironment = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-workspace-state-"));
+    const nodeModules = join(stateEnvironment, "node_modules");
+    mkdirSync(join(directory, "packages", "workspace-b"), { recursive: true });
+    mkdirSync(join(stateEnvironment, "packages", "workspace-b"), { recursive: true });
+    mkdirSync(join(nodeModules, "external-package"), { recursive: true });
+    for (const root of [join(directory, "packages", "workspace-b"), join(stateEnvironment, "packages", "workspace-b")]) {
+      writeFileSync(join(root, "package.json"), JSON.stringify({ name: "workspace-b", type: "commonjs", exports: "./index.js" }));
+    }
+    writeFileSync(join(directory, "packages", "workspace-b", "index.js"), 'module.exports = "prepared";\n');
+    writeFileSync(join(stateEnvironment, "packages", "workspace-b", "index.js"), 'module.exports = "stale";\n');
+    symlinkSync("../packages/workspace-b", join(nodeModules, "workspace-b"), "dir");
+    writeFileSync(join(nodeModules, "external-package", "package.json"), JSON.stringify({ name: "external-package", type: "commonjs", exports: "./index.js" }));
+    writeFileSync(join(nodeModules, "external-package", "index.js"), 'module.exports = "managed";\n');
+    writeFileSync(
+      join(directory, "esm.mjs"),
+      'import workspace from "workspace-b"; import external from "external-package"; console.log(`${workspace}:${external}`);\n',
+    );
+    writeFileSync(
+      join(directory, "commonjs.cjs"),
+      'console.log(`${require("workspace-b")}:${require("external-package")}`);\n',
+    );
+    const graph = graphFor({
+      commonjs: runtimeTarget("node commonjs.cjs"),
+      esm: runtimeTarget("node esm.mjs"),
+    });
+    const context = testExecutionContext();
+    const receipt = await runGraphWithContext(graph, graph.tasks.map((task) => task.identity), {
+      cwd: directory,
+      receiptPath: join(directory, "receipt.json"),
+      capacity: { cpu: 1, memoryMiB: 256 },
+      executionContext: {
+        ...context,
+        environment: {
+          ...context.environment,
+          TC_SDLC_NODE_LAUNCHER: process.execPath,
+          TC_SDLC_NODE_MODULES: nodeModules,
+        },
+      },
+    });
+
+    expect(receipt.status).toBe("succeeded");
+    expect(receipt.tasks.map((task) => task.stdout.trim())).toEqual([
+      "prepared:managed",
+      "prepared:managed",
+    ]);
+  });
+
+  test("redacts retained task evidence and binds source and retained digests", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-evidence-redaction-"));
+    const token = "consumer-secret-7f3a";
+    const raw = `token=${token}\n`;
+    const retained = "token=[REDACTED]\n";
+    writeFileSync(
+      join(directory, "ledger.mjs"),
+      'import { writeFileSync } from "node:fs"; writeFileSync(`${process.env.TC_SDLC_TASK_EVIDENCE_DIR}/ledger.txt`, `token=${process.env.TEST_API_TOKEN}\\n`);\n',
+    );
+    const graph = graphFor({
+      check: runtimeTarget("node ledger.mjs", {
+        evidence: [{ path: "ledger.txt", mediaType: "text/plain" }],
+      }),
+    });
+    const receipt = await runGraphWithContext(
+      graph,
+      [graph.tasks[0].identity],
+      {
+        cwd: directory,
+        receiptPath: join(directory, "receipt.json"),
+        capacity: { cpu: 1, memoryMiB: 256 },
+        executionContext: testExecutionContext(),
+        environment: { TEST_API_TOKEN: token },
+      },
+    );
+    const evidence = receipt.tasks[0].evidence[0];
+
+    expect(receipt.status).toBe("succeeded");
+    expect(receipt.tasks[0].evidence).toHaveLength(1);
+    expect(evidence.content).toBe(retained);
+    expect(evidence.content).not.toContain(token);
+    expect(evidence.sourceDigest).toBe(`sha256:${createHash("sha256").update(raw).digest("hex")}`);
+    expect(evidence.contentDigest).toBe(`sha256:${createHash("sha256").update(retained).digest("hex")}`);
+    expect(readFileSync(join(directory, "receipt.json"), "utf8")).not.toContain(token);
+  });
+
+  test("redacts JSON-escaped secret values from retained evidence", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-json-redaction-"));
+    const token = 'line-one"\\line-two\nline-three';
+    writeFileSync(
+      join(directory, "evidence.mjs"),
+      'import { writeFileSync } from "node:fs"; writeFileSync(`${process.env.TC_SDLC_TASK_EVIDENCE_DIR}/result.json`, `${JSON.stringify({ token: process.env.TEST_API_TOKEN })}\\n`);\n',
+    );
+    const graph = graphFor({
+      check: runtimeTarget("node evidence.mjs", {
+        evidence: [{ path: "result.json", mediaType: "application/json" }],
+      }),
+    });
+    const receipt = await runGraphWithContext(graph, [graph.tasks[0].identity], {
+      cwd: directory,
+      receiptPath: join(directory, "receipt.json"),
+      capacity: { cpu: 1, memoryMiB: 256 },
+      environment: { TEST_API_TOKEN: token },
+    });
+
+    expect(receipt.status).toBe("succeeded");
+    expect(JSON.parse(receipt.tasks[0].evidence[0].content)).toEqual({ token: "[REDACTED]" });
+    expect(readFileSync(join(directory, "receipt.json"), "utf8")).not.toContain(JSON.stringify(token).slice(1, -1));
+  });
+
+  test("rejects binary, symlinked and oversized declared task evidence without retaining bytes", async () => {
+    for (const mode of ["binary", "symlink", "oversized"]) {
+      const directory = mkdtempSync(join(tmpdir(), `tc-sdlc-runtime-evidence-${mode}-`));
+      writeFileSync(
+        join(directory, "evidence.mjs"),
+        `import { writeFileSync, symlinkSync } from "node:fs";\nimport { join } from "node:path";\nconst root = process.env.TC_SDLC_TASK_EVIDENCE_DIR;\nconst evidence = join(root, "ledger.txt");\nconst mode = process.argv[2];\nif (mode === "binary") writeFileSync(evidence, Buffer.from([0xff, 0x00, 0x80]));\nelse if (mode === "symlink") { writeFileSync(join(root, "target.txt"), "must not be retained\\n"); symlinkSync("target.txt", evidence); }\nelse writeFileSync(evidence, "x".repeat(2 * 1024 * 1024 + 1));\n`,
+      );
+      const graph = graphFor({
+        check: runtimeTarget(`node evidence.mjs ${mode}`, {
+          evidence: [{ path: "ledger.txt", mediaType: "text/plain" }],
+        }),
+      });
+      const receipt = await runGraphWithContext(
+        graph,
+        [graph.tasks[0].identity],
+        {
+          cwd: directory,
+          receiptPath: join(directory, "receipt.json"),
+          capacity: { cpu: 1, memoryMiB: 256 },
+        },
+      );
+
+      expect(receipt.status, mode).toBe("failed");
+      expect(receipt.tasks[0].reason, mode).toBe("task_evidence_invalid");
+      expect(receipt.tasks[0].evidence, mode).toEqual([]);
+      expect(readFileSync(join(directory, "receipt.json"), "utf8"), mode).not.toContain("must not be retained");
+    }
+  });
+
+  test("retains valid partial evidence without replacing a task failure reason", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-evidence-partial-"));
+    writeFileSync(
+      join(directory, "partial.mjs"),
+      'import { writeFileSync } from "node:fs"; writeFileSync(`${process.env.TC_SDLC_TASK_EVIDENCE_DIR}/partial.txt`, "partial result\\n"); process.exit(9);\n',
+    );
+    const graph = graphFor({
+      check: runtimeTarget("node partial.mjs", {
+        evidence: [
+          { path: "partial.txt", mediaType: "text/plain" },
+          { path: "missing.json", mediaType: "application/json" },
+        ],
+      }),
+    });
+    const receipt = await runGraphWithContext(
+      graph,
+      [graph.tasks[0].identity],
+      {
+        cwd: directory,
+        receiptPath: join(directory, "receipt.json"),
+        capacity: { cpu: 1, memoryMiB: 256 },
+      },
+    );
+
+    expect(receipt.status).toBe("failed");
+    expect(receipt.tasks[0].reason).toBe("process_exit_nonzero");
+    expect(receipt.tasks[0].evidence).toMatchObject([
+      { path: "partial.txt", content: "partial result\n" },
+    ]);
+    expect(receipt.tasks[0].missingEvidence).toEqual(["missing.json"]);
+  });
+
+  test("fails a successful task whose declared evidence is missing", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-evidence-missing-"));
+    const graph = graphFor({
+      check: runtimeTarget("node -e 'process.exit(0)'", {
+        evidence: [{ path: "required.json", mediaType: "application/json" }],
+      }),
+    });
+    const receipt = await runGraphWithContext(
+      graph,
+      [graph.tasks[0].identity],
+      {
+        cwd: directory,
+        receiptPath: join(directory, "receipt.json"),
+        capacity: { cpu: 1, memoryMiB: 256 },
+      },
+    );
+
+    expect(receipt.status).toBe("failed");
+    expect(receipt.tasks[0].reason).toBe("task_evidence_invalid");
+    expect(receipt.tasks[0].missingEvidence).toEqual(["required.json"]);
+  });
+
   test("binds declared task resources and budgets into graph identity", () => {
     const first = graphFor({
       check: {
@@ -148,7 +463,7 @@ describe("tc-sdlc runtime", () => {
     const receiptPath = join(directory, "run-receipt.json");
     const observed: Record<string, unknown>[] = [];
 
-    const receipt = await (sdlc as Record<string, any>).runGraph(
+    const receipt = await runGraphWithContext(
       graph,
       graph.tasks.map((task: { identity: string }) => task.identity),
       {
@@ -166,16 +481,19 @@ describe("tc-sdlc runtime", () => {
     ]);
     expect(
       observed
-        .filter((event) => event.type !== "heartbeat")
+        .filter((event) => event.type !== "heartbeat" && event.type !== "terminal")
         .map((event) => [event.taskKey, event.type]),
     ).toEqual([
       ["fixture:prepare", "start"],
       ["fixture:prepare", "output"],
-      ["fixture:prepare", "terminal"],
       ["fixture:check", "start"],
       ["fixture:check", "output"],
-      ["fixture:check", "terminal"],
     ]);
+    expect(observed.filter((event) => event.type === "terminal")).toEqual(
+      receipt.tasks.flatMap((task: Record<string, any>) =>
+        task.events.filter((event: Record<string, unknown>) => event.type === "terminal"),
+      ),
+    );
     expect(readFileSync(receiptPath, "utf8")).toBe(
       (sdlc as Record<string, any>).serialiseRunReceipt(receipt),
     );
@@ -204,7 +522,7 @@ describe("tc-sdlc runtime", () => {
       "check.trigger",
     ]);
 
-    const receipt = await (sdlc as Record<string, any>).runGraph(
+    const receipt = await runGraphWithContext(
       graph,
       selection,
       {
@@ -243,7 +561,7 @@ describe("tc-sdlc runtime", () => {
     );
 
     await expect(
-      (sdlc as Record<string, any>).runGraph(graph, [check.identity], {
+      runGraphWithContext(graph, [check.identity], {
         cwd: directory,
         receiptPath,
         capacity: { cpu: 1, memoryMiB: 256 },
@@ -272,7 +590,7 @@ console.log("${self}-met-${peer}");
       right: runtimeTarget("node right.mjs"),
     });
 
-    const receipt = await (sdlc as Record<string, any>).runGraph(
+    const receipt = await runGraphWithContext(
       graph,
       graph.tasks.map((task: { identity: string }) => task.identity),
       {
@@ -333,7 +651,7 @@ console.log("released");
       runtimeTarget("node claim.mjs", { resources });
     const graph = graphFor({ first: target(), second: target() });
 
-    const receipt = await (sdlc as Record<string, any>).runGraph(
+    const receipt = await runGraphWithContext(
       graph,
       graph.tasks.map((task: { identity: string }) => task.identity),
       {
@@ -363,7 +681,7 @@ console.log("released");
       }),
     });
 
-    const receipt = await (sdlc as Record<string, any>).runGraph(
+    const receipt = await runGraphWithContext(
       graph,
       [graph.tasks[0].identity],
       {
@@ -405,7 +723,7 @@ console.log("released");
     });
     const observed: Record<string, unknown>[] = [];
 
-    const receipt = await (sdlc as Record<string, any>).runGraph(
+    const receipt = await runGraphWithContext(
       graph,
       graph.tasks.map((task: { identity: string }) => task.identity),
       {
@@ -452,7 +770,7 @@ console.log("released");
     const receiptPath = join(directory, "run-receipt.json");
 
     await expect(
-      (sdlc as Record<string, any>).runGraph(
+      runGraphWithContext(
         graph,
         select(graph.tasks[0].identity),
         {
@@ -483,7 +801,7 @@ console.log("second");
     });
     const observed: Record<string, unknown>[] = [];
 
-    const receipt = await (sdlc as Record<string, any>).runGraph(
+    const receipt = await runGraphWithContext(
       graph,
       [graph.tasks[0].identity],
       {
@@ -540,7 +858,7 @@ await delay(500);
       }),
     });
 
-    const receipt = await (sdlc as Record<string, any>).runGraph(
+    const receipt = await runGraphWithContext(
       graph,
       [graph.tasks[0].identity],
       {
@@ -605,7 +923,7 @@ for (let index = 0; index < 20; index += 1) {
       }),
     });
 
-    const receipt = await (sdlc as Record<string, any>).runGraph(
+    const receipt = await runGraphWithContext(
       graph,
       [graph.tasks[0].identity],
       {
@@ -664,7 +982,7 @@ await delay(500);
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 80);
 
-    const receipt = await (sdlc as Record<string, any>).runGraph(
+    const receipt = await runGraphWithContext(
       graph,
       [graph.tasks[0].identity],
       {
@@ -718,7 +1036,7 @@ await delay(500);
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 80);
 
-    const receipt = await (sdlc as Record<string, any>).runGraph(
+    const receipt = await runGraphWithContext(
       graph,
       graph.tasks.map((task: { identity: string }) => task.identity),
       {
@@ -765,7 +1083,7 @@ console.error("stderr:${secret}:" + "y".repeat(300));
     const receiptPath = join(directory, "run-receipt.json");
     const observed: Record<string, unknown>[] = [];
 
-    const receipt = await (sdlc as Record<string, any>).runGraph(
+    const receipt = await runGraphWithContext(
       graph,
       [graph.tasks[0].identity],
       {
@@ -788,7 +1106,7 @@ console.error("stderr:${secret}:" + "y".repeat(300));
     expect(evidence).toContain("[REDACTED]");
   });
 
-  test("serialises the same receipt across scheduler concurrency levels", async () => {
+  test("preserves task identities and outcomes across scheduler concurrency levels", async () => {
     const firstDirectory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-"));
     const secondDirectory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-"));
     const script = `
@@ -809,12 +1127,12 @@ console.log(process.argv[3]);
     });
     const selection = graph.tasks.map((task: { identity: string }) => task.identity);
 
-    const serial = await (sdlc as Record<string, any>).runGraph(graph, selection, {
+    const serial = await runGraphWithContext(graph, selection, {
       cwd: firstDirectory,
       receiptPath: join(firstDirectory, "run-receipt.json"),
       capacity: { cpu: 1, memoryMiB: 256 },
     });
-    const concurrent = await (sdlc as Record<string, any>).runGraph(
+    const concurrent = await runGraphWithContext(
       graph,
       selection,
       {
@@ -824,8 +1142,104 @@ console.log(process.argv[3]);
       },
     );
 
-    expect((sdlc as Record<string, any>).serialiseRunReceipt(concurrent)).toBe(
-      (sdlc as Record<string, any>).serialiseRunReceipt(serial),
+    const stableTaskEvidence = (receipt: Record<string, any>) => receipt.tasks
+      .map((task: Record<string, any>) => ({
+        key: task.key,
+        identity: task.identity,
+        status: task.status,
+        exitCode: task.exitCode,
+        executionContextDigest: task.executionContextDigest,
+        resources: task.resources,
+      }))
+      .sort((left: Record<string, any>, right: Record<string, any>) => left.key.localeCompare(right.key));
+    expect(concurrent.bootstrapContext).toEqual(serial.bootstrapContext);
+    expect(stableTaskEvidence(concurrent)).toEqual(stableTaskEvidence(serial));
+  });
+
+  test("performs one full bootstrap integrity check per graph run, not per task", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-integrity-count-"));
+    let fullChecks = 0;
+    const executionContext = {
+      ...testExecutionContext(),
+      verifyIntegrity: () => { fullChecks += 1; },
+    };
+    const graph = graphFor({
+      first: runtimeTarget("node -e 'process.exit(0)'"),
+      second: runtimeTarget("node -e 'process.exit(0)'"),
+      third: runtimeTarget("node -e 'process.exit(0)'"),
+    });
+    const receipt = await runGraphWithContext(
+      graph,
+      graph.tasks.map((task: { identity: string }) => task.identity),
+      {
+        cwd: directory,
+        receiptPath: join(directory, "run-receipt.json"),
+        capacity: { cpu: 2, memoryMiB: 768 },
+        executionContext,
+      },
+    );
+
+    expect(receipt.status).toBe("succeeded");
+    expect(fullChecks).toBe(1);
+  });
+
+  test("rejects concurrent task evidence when one task mutates the leased state", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-state-integrity-"));
+    const statePath = join(directory, "state.json");
+    writeFileSync(statePath, "original state\n");
+    const expected = readFileSync(statePath, "utf8");
+    const attacker = join(directory, "mutate.mjs");
+    const observer = join(directory, "observe.mjs");
+    writeFileSync(
+      attacker,
+      `import { writeFileSync } from "node:fs";\nimport { setTimeout as delay } from "node:timers/promises";\nawait delay(50); writeFileSync(${JSON.stringify(statePath)}, "mutated state\\n"); console.log("mutation attempted");\n`,
+    );
+    writeFileSync(
+      observer,
+      'import { setTimeout as delay } from "node:timers/promises"; await delay(250); console.log("observer completed");\n',
+    );
+    const graph = graphFor({
+      mutate: runtimeTarget("node mutate.mjs"),
+      observe: runtimeTarget("node observe.mjs"),
+    });
+    const executionContext = {
+      ...testExecutionContext(),
+      assertIdentity: () => undefined,
+      verifyIntegrity: () => {
+        if (readFileSync(statePath, "utf8") !== expected) {
+          throw new Error("bootstrap state content changed");
+        }
+      },
+    };
+    const receiptPath = join(directory, "run-receipt.json");
+    const observedEvents: Array<Record<string, unknown>> = [];
+    const receipt = await runGraphWithContext(
+      graph,
+      graph.tasks.map((task: { identity: string }) => task.identity),
+      {
+        cwd: directory,
+        receiptPath,
+        capacity: { cpu: 2, memoryMiB: 256 },
+        executionContext,
+        onEvent: (event: Record<string, unknown>) => observedEvents.push(event),
+      },
+    );
+
+    expect(receipt.status).toBe("failed");
+    expect(receipt.reason).toBe("bootstrap_state_changed");
+    expect(receipt.tasks.map((task: Record<string, unknown>) => task.status)).toEqual([
+      "failed",
+      "failed",
+    ]);
+    expect(receipt.tasks.map((task: Record<string, unknown>) => task.reason)).toEqual([
+      "bootstrap_state_changed",
+      "bootstrap_state_changed",
+    ]);
+    expect(readFileSync(receiptPath, "utf8")).toContain("bootstrap_state_changed");
+    expect(observedEvents.filter((event) => event.type === "terminal")).toEqual(
+      receipt.tasks.flatMap((task: Record<string, any>) =>
+        task.events.filter((event: Record<string, unknown>) => event.type === "terminal"),
+      ),
     );
   });
 
@@ -834,7 +1248,7 @@ console.log(process.argv[3]);
     const graph = graphFor({ check: runtimeTarget("node -e 'process.exit(0)'") });
 
     await expect(
-      (sdlc as Record<string, any>).runGraph(
+      runGraphWithContext(
         graph,
         [graph.tasks[0].identity],
         {

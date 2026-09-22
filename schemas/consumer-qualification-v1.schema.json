@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://three-cubes.github.io/tc-pipelines/schemas/consumer-qualification-v1.schema.json",
+  "title": "Three Cubes SDLC consumer qualification receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "status", "reason", "manifestDigest", "catalogueDigest", "package", "executableDigest", "environment", "fixtures"],
+  "properties": {
+    "schema": { "const": "tc.sdlc/consumer-qualification/v1" },
+    "status": { "enum": ["succeeded", "failed"] },
+    "reason": { "type": ["string", "null"] },
+    "manifestDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "catalogueDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": { "name": { "const": "@three-cubes/tc-sdlc" }, "version": { "type": "string", "minLength": 1 } }
+    },
+    "executableDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "platform", "architecture"],
+      "properties": {
+        "class": { "type": "string", "minLength": 1 },
+        "platform": { "type": "string", "minLength": 1 },
+        "architecture": { "type": "string", "minLength": 1 }
+      }
+    },
+    "fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "fixtureDigest", "expectedChangedPath", "status", "reason", "bootstrap", "preparation", "complete", "affected", "identityStable"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "fixtureDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+          "expectedChangedPath": { "type": ["string", "null"] },
+          "status": { "enum": ["succeeded", "failed"] },
+          "reason": { "type": ["string", "null"] },
+          "identityStable": { "type": ["boolean", "null"] },
+          "bootstrap": { "$ref": "#/$defs/receiptReference" },
+          "preparation": { "$ref": "#/$defs/receiptReference" },
+          "complete": { "$ref": "#/$defs/receiptReference" },
+          "affected": { "$ref": "#/$defs/receiptReference" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "succeeded" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "manifestDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "catalogueDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "fixtures": { "type": "array", "minItems": 1, "items": { "type": "object", "properties": { "status": { "const": "succeeded" }, "fixtureDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }, "identityStable": { "const": true } }, "required": ["status", "fixtureDigest", "identityStable"] } }
+        },
+        "required": ["manifestDigest", "catalogueDigest", "fixtures"]
+      }
+    }
+  ],
+  "$defs": {
+    "receiptReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest", "status", "taskIdentities"],
+      "properties": {
+        "path": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9][A-Za-z0-9._/-]*$" }] },
+        "digest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+        "status": { "enum": ["succeeded", "failed", "stalled", "cancelled", null] },
+        "taskIdentities": { "type": "array", "items": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } },
+        "firstPassTaskIdentities": { "type": "array", "items": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } },
+        "secondPassTaskIdentities": { "type": "array", "items": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } }
+      }
+    }
+  }
+}

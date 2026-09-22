@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://three-cubes.github.io/tc-pipelines/schemas/image-release-v1.schema.json",
+  "title": "tc-sdlc image production receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "reason",
+    "sourceCommit",
+    "sourceTree",
+    "sourceInputDigest",
+    "registryCandidate",
+    "imageDigest",
+    "image",
+    "platforms",
+    "reused",
+    "artifacts",
+    "lifecycle"
+  ],
+  "properties": {
+    "schema": { "const": "tc.sdlc/image-release/v1" },
+    "status": { "enum": ["succeeded", "failed"] },
+    "reason": { "type": ["string", "null"] },
+    "sourceCommit": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+    "sourceTree": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+    "sourceInputDigest": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" },
+    "registryCandidate": { "type": ["string", "null"], "minLength": 1 },
+    "imageDigest": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" },
+    "image": { "type": ["string", "null"] },
+    "platforms": {
+      "type": "array",
+      "items": { "enum": ["linux/amd64", "linux/arm64"] },
+      "uniqueItems": true
+    },
+    "reused": { "type": "boolean" },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "owner", "retain"],
+      "properties": {
+        "class": { "const": "release-artifact-evidence" },
+        "owner": { "const": "@three-cubes/tc-sdlc" },
+        "retain": { "const": "catalogue-current-predecessor-or-incident-reference" }
+      }
+    }
+  }
+}

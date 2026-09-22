@@ -24,6 +24,8 @@ except ModuleNotFoundError:  # Python 3.10; installed by the shared gate action.
 
 HERE = Path(__file__).resolve().parent
 CHECKOV_PROJECT = HERE / "checkov-tool"
+# Checkov has a separate 3.12 lock; never inherit the consumer's UV_PYTHON.
+CHECKOV_PYTHON = "3.12"
 SCANNER_CATALOGUE = HERE / "scanner-versions.json"
 SEMVER = re.compile(r"\d+\.\d+\.\d+\Z")
 MARKER = ".tc-pipelines-scanner"
@@ -64,7 +66,15 @@ def _checkov_version() -> tuple[str, str]:
     expected_version = _versions()["checkov"]["version"]
     try:
         result = subprocess.run(
-            ["uv", "lock", "--project", str(CHECKOV_PROJECT), "--check"],
+            [
+                "uv",
+                "lock",
+                "--project",
+                str(CHECKOV_PROJECT),
+                "--check",
+                "--python",
+                CHECKOV_PYTHON,
+            ],
             check=False,
             capture_output=True,
             text=True,
@@ -281,7 +291,7 @@ def _install_checkov(root: Path, bin_dir: Path) -> None:
             str(CHECKOV_PROJECT),
             "--locked",
             "--python",
-            "3.12",
+            CHECKOV_PYTHON,
             "--no-install-project",
         ],
         check=False,
