@@ -38,3 +38,6 @@ cases:
   action-actions-setup-uv-cached:
     jobs: [Adapter]
     steps: [Install locked environment, Verify observed outputs]
+  action-actions-python-preparation:
+    jobs: [Adapter]
+    steps: [Install locked environment, Prepare Python inputs, Verify observed outputs]

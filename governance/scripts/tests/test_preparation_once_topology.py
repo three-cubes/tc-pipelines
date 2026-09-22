@@ -81,7 +81,8 @@ def test_quality_lanes_do_not_repeat_the_trusted_preparation_policy() -> None:
     assert "Prepare candidate" not in combine_names
     preparation = gate["jobs"]["preparation"]
     prepare = next(step for step in _steps(preparation) if step["name"] == "Prepare candidate")
-    assert "ruff check --force-exclude" in prepare["run"]
+    assert prepare["uses"].startswith("three-cubes/tc-pipelines/actions/python-preparation@")
+    assert prepare["with"] == {"uv-version": "${{ inputs.uv-version }}"}
 
 
 @pytest.mark.parametrize(

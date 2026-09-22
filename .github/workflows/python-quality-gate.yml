@@ -299,7 +299,7 @@ jobs:
           version: "0.12.5"
           enable-cache: true
       - name: Capture committed candidate state
-        uses: three-cubes/tc-pipelines/actions/preparation-writeback@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@6f3d8aa097ea5a69cce477d52a2881e9b0d5ef5a
         with:
           mode: snapshot
           repository: ${{ github.repository }}
@@ -312,16 +312,11 @@ jobs:
           output: ${{ runner.temp }}/preparation-before.json
           root: ${{ github.workspace }}
       - name: Prepare candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ ! -f pyproject.toml ]] || uvx --from uv==0.12.5 uv lock
-          mapfile -d '' -t paths < <(git ls-files -z -- '*.py' '*.pyi')
-          (( ${#paths[@]} == 0 )) && exit 0
-          uvx --from ruff==0.16.8 ruff check --force-exclude --select E,F,I,UP,B,S,RUF --target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero -- "${paths[@]}"
-          uvx --from ruff==0.16.8 ruff format --force-exclude --line-length 110 --target-version py312 -- "${paths[@]}"
+        uses: three-cubes/tc-pipelines/actions/python-preparation@6f3d8aa097ea5a69cce477d52a2881e9b0d5ef5a
+        with:
+          uv-version: ${{ inputs.uv-version }}
       - name: Capture first prepared state
-        uses: three-cubes/tc-pipelines/actions/preparation-writeback@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@6f3d8aa097ea5a69cce477d52a2881e9b0d5ef5a
         with:
           mode: snapshot
           repository: ${{ github.repository }}
@@ -334,24 +329,20 @@ jobs:
           output: ${{ runner.temp }}/preparation-first.json
           root: ${{ github.workspace }}
       - name: Produce bounded preparation evidence
-        uses: three-cubes/tc-pipelines/actions/preparation-writeback@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@6f3d8aa097ea5a69cce477d52a2881e9b0d5ef5a
         with:
           mode: produce
+          uv-version: ${{ inputs.uv-version }}
           snapshot: ${{ runner.temp }}/preparation-before.json
           receipt: ${{ runner.temp }}/preparation-receipt.json
           patch: ${{ runner.temp }}/preparation-patch.json
           root: ${{ github.workspace }}
       - name: Prove preparation is a fixed point
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ ! -f pyproject.toml ]] || uvx --from uv==0.12.5 uv lock
-          mapfile -d '' -t paths < <(git ls-files -z -- '*.py' '*.pyi')
-          (( ${#paths[@]} == 0 )) && exit 0
-          uvx --from ruff==0.16.8 ruff check --force-exclude --select E,F,I,UP,B,S,RUF --target-version py312 --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero -- "${paths[@]}"
-          uvx --from ruff==0.16.8 ruff format --force-exclude --line-length 110 --target-version py312 -- "${paths[@]}"
+        uses: three-cubes/tc-pipelines/actions/python-preparation@6f3d8aa097ea5a69cce477d52a2881e9b0d5ef5a
+        with:
+          uv-version: ${{ inputs.uv-version }}
       - name: Capture second prepared state
-        uses: three-cubes/tc-pipelines/actions/preparation-writeback@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@6f3d8aa097ea5a69cce477d52a2881e9b0d5ef5a
         with:
           mode: snapshot
           repository: ${{ github.repository }}

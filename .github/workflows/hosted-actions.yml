@@ -49,6 +49,17 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
           sync-args: --locked
+      - name: Install locked environment
+        if: inputs.case == 'action-actions-python-preparation'
+        uses: ./actions/setup-uv-cached
+        with:
+          python-version: ${{ inputs.python-version }}
+          sync-args: --locked
+      - name: Prepare Python inputs
+        if: inputs.case == 'action-actions-python-preparation'
+        uses: ./actions/python-preparation
+        with:
+          uv-version: '0.12.5'
       - name: Run Python gate body
         if: inputs.case == 'action-actions-python-gate-body'
         uses: ./actions/python-gate-body
