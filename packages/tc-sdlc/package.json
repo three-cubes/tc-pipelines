@@ -19,7 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-schemas.mjs",
     "release:image": "pnpm build && node ../../images/sdlc/build-release.mjs",
-    "test": "vitest run --exclude test/**/*.integration.test.ts",
+    "test": "pnpm build && vitest run --exclude test/**/*.integration.test.ts",
     "test:integration:bootstrap": "pnpm build && vitest run test/bootstrap.integration.test.ts",
     "test:integration:consumers": "vitest run test/consumer-qualification.integration.test.ts",
     "test:integration:fitness": "pnpm build && vitest run test/fitness.integration.test.ts",
