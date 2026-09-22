@@ -1,0 +1,52 @@
+name: python-preparation
+description: Apply the trusted, deterministic Python lock and Ruff preparation policy.
+inputs:
+  uv-version:
+    description: Explicit uv version override; empty uses the repository .uv-version or the compatibility fallback.
+    required: false
+    default: ""
+  ruff-version:
+    description: Pinned Ruff release used by the preparation policy.
+    required: false
+    default: "0.16.8"
+  target-version:
+    description: Ruff target Python version for the compatibility policy.
+    required: false
+    default: "py312"
+  line-length:
+    description: Ruff formatter line length.
+    required: false
+    default: "110"
+runs:
+  using: composite
+  steps:
+    - name: Prepare Python lock and formatting inputs
+      shell: bash
+      env:
+        UV_VERSION: ${{ inputs.uv-version }}
+        RUFF_VERSION: ${{ inputs.ruff-version }}
+        TARGET_VERSION: ${{ inputs.target-version }}
+        LINE_LENGTH: ${{ inputs.line-length }}
+      run: |
+        set -euo pipefail
+
+        if [[ -f pyproject.toml ]]; then
+          if [[ -n "$UV_VERSION" ]]; then
+            uvx --from "uv==${UV_VERSION}" uv lock
+          elif [[ -f .uv-version ]]; then
+            IFS= read -r UV_VERSION < .uv-version
+            uvx --from "uv==${UV_VERSION%$'\r'}" uv lock
+          else
+            uvx --from uv==0.12.5 uv lock
+          fi
+        fi
+
+        mapfile -d '' -t paths < <(git ls-files -z -- '*.py' '*.pyi')
+        (( ${#paths[@]} == 0 )) && exit 0
+        uvx --from "ruff==${RUFF_VERSION}" ruff check \
+          --force-exclude --select E,F,I,UP,B,S,RUF \
+          --target-version "$TARGET_VERSION" \
+          --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero -- "${paths[@]}"
+        uvx --from "ruff==${RUFF_VERSION}" ruff format \
+          --force-exclude --line-length "$LINE_LENGTH" \
+          --target-version "$TARGET_VERSION" -- "${paths[@]}"

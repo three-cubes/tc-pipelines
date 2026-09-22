@@ -40,11 +40,8 @@ def test_preparation_uses_only_the_closed_trusted_ruff_policy() -> None:
     prepare = next(
         step for step in workflow["jobs"]["preparation"]["steps"] if step["name"] == "Prepare candidate"
     )
-    assert "ruff check --force-exclude --select E,F,I,UP,B,S,RUF" in prepare["run"]
-    assert "[[ ! -f pyproject.toml ]] || uvx --from uv==0.12.5 uv lock" in prepare["run"]
-    assert "--ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero" in prepare["run"]
-    assert "ruff format --force-exclude --line-length 110 --target-version py312" in prepare["run"]
-    assert prepare["run"].count("uvx --from ruff==0.16.8 ruff") == 2
+    assert prepare["uses"].startswith("three-cubes/tc-pipelines/actions/python-preparation@")
+    assert prepare["with"] == {"uv-version": "${{ inputs.uv-version }}"}
     names = [step.get("name") for step in workflow["jobs"]["preparation"]["steps"]]
     assert "Install trusted uv for formatter preparation" in names
     assert "Locked uv install" not in names
