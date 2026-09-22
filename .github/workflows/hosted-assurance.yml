@@ -131,7 +131,7 @@ jobs:
     with:
       run-codeql: false
       sarif-upload: false
-      gitleaks-baseline: assurance/fixtures/hosted/no-baseline.json
+      gitleaks-config: governance/.gitleaks.toml
       semgrep-configs: assurance/fixtures/hosted/semgrep.yaml
   canary:
     name: workflow-fitness-engine-canary

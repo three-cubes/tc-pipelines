@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -20,6 +21,17 @@ FITNESS_VERSION = next(
     for package in tomllib.loads((ROOT / "assurance/fixtures/sdlc/python/uv.lock").read_text())["package"]
     if package["name"] == "three-cubes-fitness"
 )
+
+pytestmark = [
+    pytest.mark.contract,
+    pytest.mark.skipif(
+        sys.platform != "darwin",
+        reason=(
+            "native disposable-consumer qualification requires the reviewed macOS "
+            "toolchain; Linux qualification runs inside the canonical image"
+        ),
+    ),
+]
 
 
 def command(
