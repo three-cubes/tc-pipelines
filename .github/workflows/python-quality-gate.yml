@@ -329,7 +329,7 @@ jobs:
           output: ${{ runner.temp }}/preparation-first.json
           root: ${{ github.workspace }}
       - name: Produce bounded preparation evidence
-        uses: three-cubes/tc-pipelines/actions/preparation-writeback@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@6f3d8aa097ea5a69cce477d52a2881e9b0d5ef5a
         with:
           mode: produce
           uv-version: ${{ inputs.uv-version }}
