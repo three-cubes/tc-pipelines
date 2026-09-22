@@ -850,6 +850,22 @@ surfaces:
       hermetic: [governance/scripts/tests/test_setup_uv_cached_action.py]
       hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
+  - id: action.actions.python-preparation
+    path: actions/python-preparation/action.yml
+    hosted:
+      boundary: safe-hosted
+      case: action-actions-python-preparation
+      dependencies: ['actions/python-preparation/**', 'actions/**', '.github/actions/**', 'assurance/**', '.github/workflows/hosted*.yml', 'uv.lock', 'pyproject.toml']
+      release_probe: null
+    risk: control-plane
+    required:
+      pr: [structural, hermetic]
+      release: [structural, hermetic, hosted]
+    evidence:
+      structural: [governance/scripts/tests/test_preparation_topology_hardening.py]
+      hermetic: [governance/scripts/tests/test_pre_evaluation_normalization.py]
+      hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
+    sabotage: [missing-required-output]
   - id: action.github.actions.apply-on-vm-via-runcommand
     path: .github/actions/apply-on-vm-via-runcommand/action.yml
     hosted:

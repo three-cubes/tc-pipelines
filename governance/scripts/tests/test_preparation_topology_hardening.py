@@ -46,6 +46,8 @@ def test_preparation_uses_only_the_closed_trusted_ruff_policy() -> None:
     assert "Install trusted uv for formatter preparation" in names
     assert "Locked uv install" not in names
     assert "pnpm install" not in names
+    action_text = (ROOT / "actions/python-preparation/action.yml").read_text()
+    assert "if [[ -f pyproject.toml ]]; then" in action_text
 
 
 def test_writer_bootstraps_private_tools_and_uses_only_the_fixed_policy() -> None:
