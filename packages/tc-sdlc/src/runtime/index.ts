@@ -313,22 +313,30 @@ function utf8Prefix(value: string, maximumBytes: number): string {
 }
 
 function redacted(value: string, redactions: readonly string[]): string {
-  return redactions.reduce(
+  return redactionVariants(redactions).reduce(
     (text, secret) => text.replaceAll(secret, "[REDACTED]"),
     value,
   );
+}
+
+function redactionVariants(redactions: readonly string[]): readonly string[] {
+  return [...new Set(redactions.flatMap((secret) => [
+    secret,
+    JSON.stringify(secret).slice(1, -1),
+  ]))].sort((left, right) => right.length - left.length);
 }
 
 function safeBoundary(
   value: string,
   redactions: readonly string[],
 ): number {
-  const longest = redactions.reduce(
+  const variants = redactionVariants(redactions);
+  const longest = variants.reduce(
     (maximum, secret) => Math.max(maximum, secret.length),
     0,
   );
   let boundary = Math.max(0, value.length - Math.max(0, longest - 1));
-  for (const secret of redactions) {
+  for (const secret of variants) {
     let offset = value.indexOf(secret);
     while (offset >= 0) {
       if (offset < boundary && offset + secret.length > boundary) {

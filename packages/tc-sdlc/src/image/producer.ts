@@ -10,6 +10,7 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
@@ -37,6 +38,7 @@ const LIFECYCLE = {
 const PROCESS_TIMEOUT_MS = 30_000;
 const BUILD_TIMEOUT_MS = 300_000;
 const PLATFORMS = ["linux/amd64", "linux/arm64"] as const;
+const SUCCESS_ARTIFACTS = ["attestations.json", "build.log", "metadata.json", "remote-index.json"] as const;
 
 type JsonObject = Record<string, unknown>;
 
@@ -228,10 +230,13 @@ function materialiseTrackedSource(
 
 function sourceInputDigest(gitExecutable: string, sourceRoot: string): string {
   const paths = git(gitExecutable, sourceRoot, ["ls-files", "-z"]).split("\0").filter(Boolean).sort();
-  const inputs = Object.fromEntries(paths.map((path) => [
-    path,
-    `sha256:${createHash("sha256").update(readFileSync(join(sourceRoot, path))).digest("hex")}`,
-  ]));
+  const inputs = Object.fromEntries(paths.map((path) => {
+    const absolute = join(sourceRoot, path);
+    const bytes = lstatSync(absolute).isSymbolicLink()
+      ? readlinkSync(absolute, { encoding: "buffer" })
+      : readFileSync(absolute);
+    return [path, `sha256:${createHash("sha256").update(bytes).digest("hex")}`];
+  }));
   return digest(inputs);
 }
 
@@ -519,7 +524,17 @@ function validateInputs(options: ProduceImageOptions): Readonly<{ sourceCommit: 
 export function validateImageReleaseReceipt(value: unknown): asserts value is ImageReleaseReceipt {
   assertSchema<ImageReleaseReceipt>("image-release-v1.schema.json", value, "image release receipt");
   if (value.status === "succeeded") {
-    if (value.reason !== null || value.imageDigest === null || value.image === null || value.platforms.length !== 2) {
+    if (
+      value.reason !== null ||
+      value.sourceCommit === null ||
+      value.sourceTree === null ||
+      value.sourceInputDigest === null ||
+      value.registryCandidate === null ||
+      value.imageDigest === null ||
+      value.image === null ||
+      value.platforms.length !== 2 ||
+      JSON.stringify(Object.keys(value.artifacts).sort()) !== JSON.stringify([...SUCCESS_ARTIFACTS].sort())
+    ) {
       throw new SdlcError("IMAGE_RELEASE_INVALID", "succeeded image release receipt is incomplete");
     }
   } else if (value.reason === null || value.imageDigest !== null || value.image !== null || value.platforms.length !== 0) {

@@ -63,12 +63,14 @@ export function buildPresetTasks(
         ...(target.executor === undefined ? {} : { executor: target.executor }),
         ...(target.profile === undefined ? {} : { profile: target.profile }),
         dependsOn: sorted([
-          ...(target.dependsOn ?? []).map(
-            (dependency) =>
-              declaration.targets[dependency]?.scope === "repository"
-                ? `${declaration.project}:${dependency}`
-                : `${taskProject.name}:${dependency}`,
-          ),
+          ...(target.dependsOn ?? []).flatMap((dependency) => {
+            if (declaration.targets[dependency]?.scope === "repository") {
+              return [`${declaration.project}:${dependency}`];
+            }
+            return scope === "repository"
+              ? projects.map((dependencyProject) => `${dependencyProject.name}:${dependency}`)
+              : [`${taskProject.name}:${dependency}`];
+          }),
           ...(scope === "repository" ? [] : taskProject.dependsOn.map(
             (dependency) => `${dependency}:${targetName}`,
           )),

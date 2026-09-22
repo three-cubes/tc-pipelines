@@ -72,11 +72,19 @@ export async function fitness(options: FitnessOptions): Promise<FitnessReceipt> 
       publicReceiptWritten = true;
       throw new SdlcError("FITNESS_EVIDENCE_INVALID", "fitness executor did not retain fitness.json evidence");
     }
-    const receipt = bindReceipt(
+    const nestedReceipt = bindReceipt(
       parseFitnessReceipt(evidence.content),
       options,
       bytesDigest(readFileSync(runReceiptPath, "utf8")),
     );
+    const receipt = run.status === "succeeded"
+      ? nestedReceipt
+      : finaliseFitnessReceipt(
+          nestedReceipt,
+          run.status,
+          run.reason ?? executed?.reason ?? nestedReceipt.reason ?? "fitness_runtime_failed",
+          executed?.exitCode ?? nestedReceipt.exitCode,
+        );
     writeFitnessReceipt(options.receiptPath, receipt);
     publicReceiptWritten = true;
     if (run.status !== "succeeded" || receipt.gateOutcome !== "passed") {

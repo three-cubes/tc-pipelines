@@ -1,6 +1,6 @@
 import * as sdlc from "../dist/index.js";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -190,6 +190,55 @@ describe("tc-sdlc runtime", () => {
     expect(receipt.tasks[0].stdout).not.toContain("executed");
   });
 
+  test("resolves workspace packages from the prepared checkout and external packages from managed state", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-workspace-resolution-"));
+    const stateEnvironment = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-workspace-state-"));
+    const nodeModules = join(stateEnvironment, "node_modules");
+    mkdirSync(join(directory, "packages", "workspace-b"), { recursive: true });
+    mkdirSync(join(stateEnvironment, "packages", "workspace-b"), { recursive: true });
+    mkdirSync(join(nodeModules, "external-package"), { recursive: true });
+    for (const root of [join(directory, "packages", "workspace-b"), join(stateEnvironment, "packages", "workspace-b")]) {
+      writeFileSync(join(root, "package.json"), JSON.stringify({ name: "workspace-b", type: "commonjs", exports: "./index.js" }));
+    }
+    writeFileSync(join(directory, "packages", "workspace-b", "index.js"), 'module.exports = "prepared";\n');
+    writeFileSync(join(stateEnvironment, "packages", "workspace-b", "index.js"), 'module.exports = "stale";\n');
+    symlinkSync("../packages/workspace-b", join(nodeModules, "workspace-b"), "dir");
+    writeFileSync(join(nodeModules, "external-package", "package.json"), JSON.stringify({ name: "external-package", type: "commonjs", exports: "./index.js" }));
+    writeFileSync(join(nodeModules, "external-package", "index.js"), 'module.exports = "managed";\n');
+    writeFileSync(
+      join(directory, "esm.mjs"),
+      'import workspace from "workspace-b"; import external from "external-package"; console.log(`${workspace}:${external}`);\n',
+    );
+    writeFileSync(
+      join(directory, "commonjs.cjs"),
+      'console.log(`${require("workspace-b")}:${require("external-package")}`);\n',
+    );
+    const graph = graphFor({
+      commonjs: runtimeTarget("node commonjs.cjs"),
+      esm: runtimeTarget("node esm.mjs"),
+    });
+    const context = testExecutionContext();
+    const receipt = await runGraphWithContext(graph, graph.tasks.map((task) => task.identity), {
+      cwd: directory,
+      receiptPath: join(directory, "receipt.json"),
+      capacity: { cpu: 1, memoryMiB: 256 },
+      executionContext: {
+        ...context,
+        environment: {
+          ...context.environment,
+          TC_SDLC_NODE_LAUNCHER: process.execPath,
+          TC_SDLC_NODE_MODULES: nodeModules,
+        },
+      },
+    });
+
+    expect(receipt.status).toBe("succeeded");
+    expect(receipt.tasks.map((task) => task.stdout.trim())).toEqual([
+      "prepared:managed",
+      "prepared:managed",
+    ]);
+  });
+
   test("redacts retained task evidence and binds source and retained digests", async () => {
     const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-evidence-redaction-"));
     const token = "consumer-secret-7f3a";
@@ -224,6 +273,30 @@ describe("tc-sdlc runtime", () => {
     expect(evidence.sourceDigest).toBe(`sha256:${createHash("sha256").update(raw).digest("hex")}`);
     expect(evidence.contentDigest).toBe(`sha256:${createHash("sha256").update(retained).digest("hex")}`);
     expect(readFileSync(join(directory, "receipt.json"), "utf8")).not.toContain(token);
+  });
+
+  test("redacts JSON-escaped secret values from retained evidence", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "tc-sdlc-runtime-json-redaction-"));
+    const token = 'line-one"\\line-two\nline-three';
+    writeFileSync(
+      join(directory, "evidence.mjs"),
+      'import { writeFileSync } from "node:fs"; writeFileSync(`${process.env.TC_SDLC_TASK_EVIDENCE_DIR}/result.json`, `${JSON.stringify({ token: process.env.TEST_API_TOKEN })}\\n`);\n',
+    );
+    const graph = graphFor({
+      check: runtimeTarget("node evidence.mjs", {
+        evidence: [{ path: "result.json", mediaType: "application/json" }],
+      }),
+    });
+    const receipt = await runGraphWithContext(graph, [graph.tasks[0].identity], {
+      cwd: directory,
+      receiptPath: join(directory, "receipt.json"),
+      capacity: { cpu: 1, memoryMiB: 256 },
+      environment: { TEST_API_TOKEN: token },
+    });
+
+    expect(receipt.status).toBe("succeeded");
+    expect(JSON.parse(receipt.tasks[0].evidence[0].content)).toEqual({ token: "[REDACTED]" });
+    expect(readFileSync(join(directory, "receipt.json"), "utf8")).not.toContain(JSON.stringify(token).slice(1, -1));
   });
 
   test("rejects binary, symlinked and oversized declared task evidence without retaining bytes", async () => {

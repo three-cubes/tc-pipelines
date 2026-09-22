@@ -119,6 +119,40 @@ describe("tc-sdlc graph", () => {
     ]);
   });
 
+  test("fans a repository-scoped dependency into every project-scoped task", () => {
+    const input = {
+      ...declaration([
+        { name: "api", root: "services/api" },
+        { name: "web", root: "apps/web" },
+      ]),
+      targets: {
+        prepare: {
+          command: "make prepare",
+          mode: "prepare",
+          trustBoundary: "portable",
+        },
+        aggregate: {
+          command: "make aggregate",
+          mode: "evaluate",
+          trustBoundary: "portable",
+          scope: "repository",
+          dependsOn: ["prepare"],
+        },
+      },
+    } as const;
+
+    const { graph } = lockedGraph(input as never, {
+      "api:prepare": [],
+      "web:prepare": [],
+      "graph-fixture:aggregate": [],
+    });
+
+    expect(graph.tasks.find((task) => task.key === "graph-fixture:aggregate")?.dependsOn).toEqual([
+      "api:prepare",
+      "web:prepare",
+    ]);
+  });
+
   test("requires task mode and trust boundary and binds both into identity", () => {
     const input = {
       ...declaration([{ name: "api", root: "services/api" }]),

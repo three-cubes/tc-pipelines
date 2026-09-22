@@ -160,3 +160,59 @@ test("the packed fitness command runs only its genuine bootstrapped fitness task
   expect(existsSync(`${failedPath}.run`)).toBe(false);
   expect(inventory(root)).toEqual(before);
 }, 180_000);
+
+test("marks the public fitness receipt failed when run finalisation detects state mutation", () => {
+  const { cli } = installPackedCli();
+  const directory = mkdtempSync(join(tmpdir(), "fitness-finalisation-failure-"));
+  const root = join(directory, "checkout");
+  cpSync(fixtureRoot, root, { recursive: true });
+  const declarationPath = join(root, "sdlc.yaml");
+  const declaration = parse(readFileSync(declarationPath, "utf8"));
+  for (const target of Object.values(declaration.targets) as { inputs: string[] }[]) target.inputs.sort();
+  writeFileSync(declarationPath, stringify(declaration));
+  const pyproject = join(root, "pyproject.toml");
+  writeFileSync(
+    pyproject,
+    readFileSync(pyproject, "utf8").replace(
+      'run = ["python", "-B", "-c", "import idna"]',
+      'run = ["python", "-B", "-c", "import os; from pathlib import Path; path = Path(os.environ[\'VIRTUAL_ENV\']) / \'pyvenv.cfg\'; path.write_text(path.read_text() + \'# mutated\\\\n\')"]',
+    ),
+  );
+  const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
+  environment.GIT_CONFIG_NOSYSTEM = "1";
+  environment.GIT_CONFIG_GLOBAL = "/dev/null";
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env: environment, encoding: "utf8" });
+  git("init", "--quiet");
+  git("config", "user.name", "SDLC fixture");
+  git("config", "user.email", "fixture@example.invalid");
+  git("config", "commit.gpgsign", "false");
+  git("config", "core.hooksPath", "/dev/null");
+  const invoke = (command: string, args: string[]) => spawnSync(cli, [command, ...args], {
+    cwd: root, env: environment, encoding: "utf8", timeout: 120_000,
+  });
+  const cataloguePath = join(directory, "catalogue.json");
+  const lockPath = join(root, "tc-sdlc.lock");
+  expect(invoke("catalogue", ["--input", candidateCatalogue, "--output", cataloguePath]).status).toBe(0);
+  expect(invoke("lock", ["--declaration", declarationPath, "--catalogue", cataloguePath, "--output", lockPath]).status).toBe(0);
+  git("add", ".");
+  git("commit", "--quiet", "-m", "fixture inputs");
+  const stateRoot = join(directory, "state");
+  const bootstrapPath = join(directory, "bootstrap.json");
+  const common = ["--declaration", declarationPath, "--catalogue", cataloguePath, "--lock", lockPath,
+    "--root", root, "--state-root", stateRoot];
+  expect(invoke("bootstrap", [...common, "--receipt", bootstrapPath]).status).toBe(0);
+  const receiptPath = join(directory, "fitness.json");
+
+  const result = invoke("fitness", [...common, "--bootstrap-receipt", bootstrapPath, "--receipt", receiptPath]);
+  expect(result.status).toBe(1);
+  const runReceipt = JSON.parse(readFileSync(`${receiptPath}.run`, "utf8"));
+  expect(runReceipt, JSON.stringify(runReceipt, null, 2)).toMatchObject({
+    status: "failed",
+    reason: "bootstrap_state_changed",
+  });
+  expect(JSON.parse(readFileSync(receiptPath, "utf8"))).toMatchObject({
+    status: "failed",
+    reason: "bootstrap_state_changed",
+    gateOutcome: "failed",
+  });
+}, 180_000);

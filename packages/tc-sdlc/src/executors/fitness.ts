@@ -85,7 +85,11 @@ export function finaliseFitnessReceipt(
     ...receipt,
     status,
     reason,
-    gateOutcome: status === "succeeded" ? "passed" : receipt.gateOutcome === "notRun" ? "failed" : receipt.gateOutcome,
+    gateOutcome: status === "succeeded"
+      ? "passed"
+      : receipt.gateOutcome === "notRun" || receipt.gateOutcome === "passed"
+        ? "failed"
+        : receipt.gateOutcome,
     exitCode,
   };
 }

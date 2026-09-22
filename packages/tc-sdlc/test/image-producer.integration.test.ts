@@ -1,11 +1,13 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { beforeEach, describe, expect, test } from "vitest";
+
+import * as sdlc from "../dist/index.js";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const TIMEOUT_MS = 120_000;
@@ -40,6 +42,8 @@ function sourceFixture() {
   mkdirSync(join(root, "images", "sdlc"), { recursive: true });
   writeFileSync(join(root, "packages", "tc-sdlc", "package.json"), JSON.stringify({ name: "@three-cubes/tc-sdlc", version: "3.0.0" }));
   writeFileSync(join(root, "images", "sdlc", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(join(root, "source-target.txt"), "tracked target bytes\n");
+  symlinkSync("source-target.txt", join(root, "source-link.txt"));
   writeFileSync(join(root, ".gitignore"), "ignored.txt\n");
   execFileSync("git", ["init", "-q"], { cwd: root });
   execFileSync("git", ["add", "."], { cwd: root });
@@ -57,13 +61,58 @@ function sourceInputDigest(root: string, gitExecutable: string): string {
     encoding: "utf8",
     timeout: TIMEOUT_MS,
   }).split("\0").filter(Boolean).sort();
-  return sha256(canonical(Object.fromEntries(paths.map((path) => [path, sha256(readFileSync(join(root, path)))]))));
+  return sha256(canonical(Object.fromEntries(paths.map((path) => {
+    const absolute = join(root, path);
+    return [path, sha256(lstatSync(absolute).isSymbolicLink()
+      ? readlinkSync(absolute, { encoding: "buffer" })
+      : readFileSync(absolute))];
+  }))));
 }
 
 describe("tc-sdlc produce-image", () => {
   let cli: string;
 
   beforeEach(() => { cli = installPackedCli(); }, 30_000);
+
+  test("rejects successful receipts without complete source identity and artifact evidence", () => {
+    const valid = {
+      schema: "tc.sdlc/image-release/v1",
+      status: "succeeded",
+      reason: null,
+      sourceCommit: "1".repeat(40),
+      sourceTree: "2".repeat(40),
+      sourceInputDigest: `sha256:${"3".repeat(64)}`,
+      registryCandidate: "ghcr.io/three-cubes/tc-sdlc:candidate",
+      imageDigest: `sha256:${"4".repeat(64)}`,
+      image: `ghcr.io/three-cubes/tc-sdlc@sha256:${"4".repeat(64)}`,
+      platforms: ["linux/amd64", "linux/arm64"],
+      reused: false,
+      artifacts: Object.fromEntries(
+        ["attestations.json", "build.log", "metadata.json", "remote-index.json"].map((name, index) => [
+          name,
+          `sha256:${String(index + 5).repeat(64)}`,
+        ]),
+      ),
+      lifecycle: {
+        class: "release-artifact-evidence",
+        owner: "@three-cubes/tc-sdlc",
+        retain: "catalogue-current-predecessor-or-incident-reference",
+      },
+    } as const;
+
+    expect(sdlc.parseImageReleaseReceipt(JSON.stringify(valid))).toEqual(valid);
+    for (const invalid of [
+      { ...valid, sourceCommit: null },
+      { ...valid, sourceTree: null },
+      { ...valid, sourceInputDigest: null },
+      { ...valid, registryCandidate: null },
+      { ...valid, artifacts: {} },
+    ]) {
+      expect(() => sdlc.parseImageReleaseReceipt(JSON.stringify(invalid))).toThrowError(
+        expect.objectContaining({ code: "IMAGE_RELEASE_INVALID" }),
+      );
+    }
+  });
 
   test("retains terminal producer evidence when preflight rejects the source identity", () => {
     const source = sourceFixture();

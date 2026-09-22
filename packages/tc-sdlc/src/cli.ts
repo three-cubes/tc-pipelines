@@ -401,12 +401,12 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
     loaded.lock,
     catalogue,
   );
-  const preparationReceipt =
-    command === "prepare"
-      ? undefined
-      : readFileSync(options["preparation-receipt"]!, "utf8");
   const receipt = await (async () => {
     try {
+      const preparationReceipt =
+        command === "prepare"
+          ? undefined
+          : readFileSync(options["preparation-receipt"]!, "utf8");
       return command === "prepare"
         ? await prepare({
             root: options.root!,

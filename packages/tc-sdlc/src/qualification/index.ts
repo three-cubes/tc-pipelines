@@ -96,6 +96,26 @@ function sha256File(path: string): string {
   return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
 }
 
+function packageDigest(executablePath: string): string {
+  const packageRoot = dirname(dirname(realpathSync(executablePath)));
+  const manifest = join(packageRoot, "package.json");
+  const inventory = [
+    {
+      path: "package.json",
+      digest: sha256File(manifest),
+      mode: statSync(manifest).mode & 0o777,
+      symlink: null,
+    },
+    ...["bin", "dist"].flatMap((directory) =>
+      snapshotFiles(join(packageRoot, directory)).map((entry) => ({
+        ...entry,
+        path: `${directory}/${entry.path}`,
+      })),
+    ),
+  ].sort((left, right) => left.path.localeCompare(right.path));
+  return digest(inventory);
+}
+
 function ownRelative(root: string, path: string): string {
   const resolvedRoot = resolve(root);
   const resolvedPath = resolve(path);
@@ -591,7 +611,7 @@ export async function qualifyConsumers(options: QualifyConsumersOptions): Promis
     manifestDigest,
     catalogueDigest,
     package: packageInfo,
-    executableDigest: sha256File(options.executablePath),
+    executableDigest: packageDigest(options.executablePath),
     environment,
     fixtures,
   };

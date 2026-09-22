@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -161,6 +161,18 @@ describe("packed preparation and evaluation components", () => {
     expect(receipt(affected).tasks.map((task: { key: string }) => task.key)).toEqual([
       "python-service:check",
     ]);
+
+    const missingPreparation = run(cli, "check-all", [
+      ...bound,
+      "--preparation-receipt", join(root, "missing-preparation.json"),
+      "--environment", "native-test",
+      "--producer", "evaluation-component-test",
+      "--receipt", join(root, "missing-preparation-rejected.json"),
+    ]);
+    expect(missingPreparation.status).toBe(1);
+    const leases = join(state, "references", "leases");
+    expect(existsSync(leases)).toBe(true);
+    expect(readdirSync(leases)).toEqual([]);
 
     const sabotages = [
       ["missing-schedulers", (value: Record<string, any>) => {

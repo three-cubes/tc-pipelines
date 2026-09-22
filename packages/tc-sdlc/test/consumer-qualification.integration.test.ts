@@ -1,11 +1,13 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, lstatSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { beforeEach, describe, expect, test } from "vitest";
+
+import * as sdlc from "../dist/index.js";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const fixtureManifest = fileURLToPath(
@@ -165,6 +167,19 @@ describe("tc-sdlc qualify-consumers", () => {
     });
     expect(receiptValue.manifestDigest).toBe(sha256(fixtureManifest));
     expect(receiptValue.catalogueDigest).toBe(sha256(candidateCatalogue));
+    const installedPackage = realpathSync(join(dirname(dirname(cli)), "@three-cubes", "tc-sdlc"));
+    const manifest = join(installedPackage, "package.json");
+    const packageInventory = [
+      { path: "package.json", digest: sha256(manifest), mode: lstatSync(manifest).mode & 0o777, symlink: null },
+      ...["bin", "dist"].flatMap((directory) =>
+        sdlc.snapshotFiles(join(installedPackage, directory)).map((entry) => ({
+          ...entry,
+          path: `${directory}/${entry.path}`,
+        })),
+      ),
+    ].sort((left, right) => left.path.localeCompare(right.path));
+    expect(receiptValue.executableDigest).toBe(sdlc.digest(packageInventory));
+    expect(receiptValue.executableDigest).not.toBe(sha256(realpathSync(cli)));
     expect(JSON.parse(readFileSync(join(output, "candidate-catalogue.json"), "utf8"))).toEqual(JSON.parse(readFileSync(candidateCatalogue, "utf8")));
     for (const fixture of receiptValue.fixtures) {
       expect(fixture.fixtureDigest).toBe(independentlyDigestedFixture(join(dirname(fixtureManifest), fixture.id)));
