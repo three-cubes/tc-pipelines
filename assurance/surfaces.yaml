@@ -863,7 +863,7 @@ surfaces:
       release: [structural, hermetic, hosted]
     evidence:
       structural: [governance/scripts/tests/test_preparation_topology_hardening.py]
-      hermetic: [governance/scripts/tests/test_pre_evaluation_normalization.py]
+      hermetic: [governance/scripts/tests/test_python_preparation_action.py]
       hosted: [.github/workflows/hosted-assurance.yml, assurance/hosted-cases.yaml]
     sabotage: [missing-required-output]
   - id: action.github.actions.apply-on-vm-via-runcommand
