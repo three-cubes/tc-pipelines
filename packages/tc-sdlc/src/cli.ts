@@ -18,7 +18,7 @@ import {
 } from "./executors/fitness.js";
 import { assertCurrentLock, loadLock, resolveLock, writeLock } from "./lock/index.js";
 import { maintain } from "./maintenance/index.js";
-import { produceImage } from "./image/producer.js";
+import { produceImage, retainImageUsageFailure } from "./image/producer.js";
 import { loadDeclaration } from "./schema/declaration.js";
 import { qualifyConsumers } from "./qualification/index.js";
 import { detectedHostCapacity } from "./runtime/index.js";
@@ -83,10 +83,16 @@ function requestedReceipt(args: readonly string[]): string | undefined {
 
 async function run(command: Command, args: readonly string[]): Promise<void> {
   if (command === "produce-image") {
-    const options = parseOptions(args, [
-      "source-root", "source-commit", "dockerfile", "registry-candidate", "docker-endpoint",
-      "buildx-executable", "state-root", "output", "receipt",
-    ]);
+    let options: Record<string, string>;
+    try {
+      options = parseOptions(args, [
+        "source-root", "source-commit", "dockerfile", "registry-candidate", "docker-endpoint",
+        "buildx-executable", "git-executable", "state-root", "output", "receipt",
+      ]);
+    } catch (error) {
+      retainImageUsageFailure(args);
+      throw error;
+    }
     const receipt = await produceImage({
       sourceRoot: options["source-root"]!,
       sourceCommit: options["source-commit"]!,
@@ -94,6 +100,7 @@ async function run(command: Command, args: readonly string[]): Promise<void> {
       registryCandidate: options["registry-candidate"]!,
       dockerEndpoint: options["docker-endpoint"]!,
       buildxExecutable: options["buildx-executable"]!,
+      gitExecutable: options["git-executable"]!,
       stateRoot: options["state-root"]!,
       outputDirectory: options.output!,
       receiptPath: options.receipt!,

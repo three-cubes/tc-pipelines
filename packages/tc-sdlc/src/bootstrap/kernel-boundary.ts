@@ -10,7 +10,8 @@ const RETRY_MILLISECONDS = 25;
 
 export type BootstrapKernelBoundaryDomain =
   | "bootstrap-reference-recovery"
-  | "bootstrap-state-materialization";
+  | "bootstrap-state-materialization"
+  | "image-production";
 
 export type BootstrapKernelBoundary = Readonly<{
   server: Server;
@@ -37,7 +38,7 @@ export function bootstrapKernelBoundaryPort(
   const canonicalRoot = realpathSync(stateRoot);
   const hexadecimal = digest({
     boundary: domain,
-    stateRoot: canonicalRoot,
+    ...(domain === "image-production" ? {} : { stateRoot: canonicalRoot }),
     identity,
   }).slice("sha256:".length, "sha256:".length + 8);
   return PORT_BASE + Number.parseInt(hexadecimal, 16) % PORT_COUNT;

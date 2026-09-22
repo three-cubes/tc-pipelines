@@ -320,6 +320,14 @@ their owning trust boundary.
 `896bd4c`; immutable image publication remains in progress and cannot publish
 the release catalogue until Task 6 functional qualification succeeds.
 
+The canonical `produce-image` component is complete and independently reviewed
+with packed-CLI failure-contract and disposable-registry acceptance. It publishes one
+multi-platform candidate, verifies the remote digest plus subject-bound
+provenance/SBOM, and reuses only source-matching registry evidence. Independent
+review found no remaining Critical or Important issues, and the exact clean-head
+repository gate passes with the image suites inside the canonical fitness graph.
+Image qualification and release admission stay separate Task 6 boundaries.
+
 **Files**
 
 - `packages/tc-sdlc/src/bootstrap/` resolves capabilities and materialises the

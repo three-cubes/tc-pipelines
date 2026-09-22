@@ -106,6 +106,15 @@ describe("bootstrap kernel boundary", () => {
     expect(port).not.toBe(forgedAuthorityPort);
   });
 
+  test("serializes one image candidate across distinct owned state roots", () => {
+    const firstRoot = tempRoot();
+    const secondRoot = tempRoot();
+    const identity = { registryCandidate: "ghcr.io/three-cubes/tc-sdlc:candidate" };
+    expect(bootstrapKernelBoundaryPort(firstRoot, "image-production", identity)).toBe(
+      bootstrapKernelBoundaryPort(secondRoot, "image-production", identity),
+    );
+  });
+
   test("an unrelated listener on the deterministic port fails closed", async () => {
     const root = tempRoot();
     const domain = "bootstrap-state-materialization";

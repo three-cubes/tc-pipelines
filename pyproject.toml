@@ -40,6 +40,11 @@ summary = "workflow and action contract tests"
 run = ["pytest", "-q"]
 
 [[tool.tc_fitness.steps]]
+id = "sdlc-package"
+summary = "shared SDLC package and image producer"
+run = ["pnpm", "test:sdlc"]
+
+[[tool.tc_fitness.steps]]
 id = "actionlint"
 summary = "GitHub Actions workflow lint"
 run = ["actionlint", "-color=false"]
