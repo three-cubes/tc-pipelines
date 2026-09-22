@@ -27,6 +27,10 @@ inputs:
   expected-policy:
     description: "Closed preparation policy expected in apply mode."
     default: "python-ruff-v1"
+  uv-version:
+    description: "Explicit uv version used by the trusted preparation replay."
+    required: false
+    default: ""
   output:
     required: false
   archive:
@@ -54,6 +58,7 @@ runs:
         RECEIPT: ${{ inputs.receipt }}
         PATCH: ${{ inputs.patch }}
         EXPECTED_POLICY: ${{ inputs.expected-policy }}
+        UV_VERSION: ${{ inputs.uv-version }}
         OUTPUT: ${{ inputs.output }}
         ARCHIVE: ${{ inputs.archive }}
         ROOT: ${{ inputs.root }}
@@ -67,7 +72,7 @@ runs:
             exec python3 "$script" snapshot --repository "$REPOSITORY" --pull-request "$PULL_REQUEST" --head-sha "$HEAD_SHA" --head-repository "$HEAD_REPOSITORY" --head-ref "$HEAD_REF" --workflow-run-id "$WORKFLOW_RUN_ID" --workflow-run-attempt "$WORKFLOW_RUN_ATTEMPT" --output "$OUTPUT" --root "$ROOT"
             ;;
           produce)
-            exec python3 "$script" produce --snapshot "$SNAPSHOT" --receipt "$RECEIPT" --patch "$PATCH" --root "$ROOT"
+            exec python3 "$script" produce --snapshot "$SNAPSHOT" --receipt "$RECEIPT" --patch "$PATCH" --root "$ROOT" --uv-version "$UV_VERSION"
             ;;
           apply)
             exec python3 "$script" apply --receipt "$RECEIPT" --patch "$PATCH" --repository "$REPOSITORY" --pull-request "$PULL_REQUEST" --expected-head "$HEAD_SHA" --expected-policy "$EXPECTED_POLICY" --expected-head-ref "$HEAD_REF" --workflow-run-id "$WORKFLOW_RUN_ID" --workflow-run-attempt "$WORKFLOW_RUN_ATTEMPT" --root "$ROOT"

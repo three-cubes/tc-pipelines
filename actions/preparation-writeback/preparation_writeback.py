@@ -34,7 +34,7 @@ ALLOWED_MODES = {0o644, 0o755}
 # exact tool version are owned here, never by a candidate's workflow command.
 POLICY = "python-ruff-v1"
 RUFF_VERSION = "0.16.8"
-UV_VERSION = "0.12.5"
+DEFAULT_UV_VERSION = "0.12.5"
 
 
 def permitted_policy_path(path: str) -> bool:
@@ -48,7 +48,17 @@ def permitted_policy_path(path: str) -> bool:
     )
 
 
-def replay_trusted_policy(root: Path) -> tuple[list[dict[str, Any]], str]:
+def resolve_uv_version(root: Path, requested: str) -> str:
+    value = requested
+    if not value and (root / ".uv-version").is_file():
+        value = (root / ".uv-version").read_text(encoding="utf-8").splitlines()[0]
+    value = value.rstrip("\r") or DEFAULT_UV_VERSION
+    if not re.fullmatch(r"[0-9][0-9A-Za-z.+-]*", value):
+        fail("trusted uv version is malformed")
+    return value
+
+
+def replay_trusted_policy(root: Path, uv_version: str) -> tuple[list[dict[str, Any]], str]:
     """Replay pinned Ruff over tracked Python without executing candidate code."""
     paths = [
         os.fsdecode(path)
@@ -64,7 +74,7 @@ def replay_trusted_policy(root: Path) -> tuple[list[dict[str, Any]], str]:
     }
     if (root / "pyproject.toml").is_file():
         locked = subprocess.run(
-            ["uvx", "--from", f"uv=={UV_VERSION}", "uv", "lock"],
+            ["uvx", "--from", f"uv=={uv_version}", "uv", "lock"],
             cwd=root,
             text=True,
             capture_output=True,
@@ -293,6 +303,7 @@ def produce(arguments: argparse.Namespace) -> None:
     if snapshot_document["schema"] != "tc.sdlc/preparation-snapshot/v1":
         fail("unsupported snapshot schema")
     root = arguments.root.resolve()
+    uv_version = resolve_uv_version(root, arguments.uv_version)
     if run_git(root, "rev-parse", "HEAD") != snapshot_document["head_sha"]:
         fail("head moved while producing preparation evidence")
     if run_git(root, "rev-parse", "HEAD^{tree}") != snapshot_document["head_tree"]:
@@ -348,6 +359,7 @@ def produce(arguments: argparse.Namespace) -> None:
         "patch_digest": sha256(patch_bytes),
         "patch_bytes": len(patch_bytes),
         "issued_at": datetime.now(UTC).isoformat(),
+        "uv_version": uv_version,
     }
     write_document(arguments.receipt, receipt)
 
@@ -374,12 +386,16 @@ def validate_receipt(
         "patch_digest",
         "patch_bytes",
         "issued_at",
+        "uv_version",
     }
     required(document, fields, "receipt")
     if document["schema"] != RECEIPT_SCHEMA:
         fail("unsupported receipt schema")
     if document["policy"] != POLICY or document["policy"] != arguments.expected_policy:
         fail("receipt policy is not trusted")
+    uv_version = resolve_uv_version(root, str(document["uv_version"]))
+    if uv_version != document["uv_version"]:
+        fail("receipt uv version is malformed")
     if document["repository"] != arguments.repository:
         fail("receipt repository does not match consumer repository")
     if document["pull_request"] != arguments.pull_request:
@@ -520,12 +536,13 @@ def apply(arguments: argparse.Namespace) -> None:
         fail(f"cannot read patch artifact: {error}")
     root = arguments.root.resolve()
     validate_receipt(receipt, arguments, root, patch_bytes)
+    uv_version = resolve_uv_version(root, str(receipt["uv_version"]))
     entries = validate_patch(patch_bytes)
     before_entries, current_tree = manifest(root, include_content=True)
     if current_tree != receipt["pre_tree"]:
         fail("temporary checkout is not the receipt pre-preparation tree")
     validate_policy_entries(root, entries)
-    replayed_entries, replayed_tree = replay_trusted_policy(root)
+    replayed_entries, replayed_tree = replay_trusted_policy(root, uv_version)
     if replayed_tree != receipt["post_tree"]:
         fail("receipt post tree is not the trusted Ruff replay")
     if entries != expected_replay_entries(before_entries, replayed_entries):
@@ -691,6 +708,7 @@ def parser() -> argparse.ArgumentParser:
     produce_parser.add_argument("--receipt", type=Path, required=True)
     produce_parser.add_argument("--patch", type=Path, required=True)
     produce_parser.add_argument("--root", type=Path, required=True)
+    produce_parser.add_argument("--uv-version", default="")
     produce_parser.set_defaults(handler=produce)
     apply_parser = subparsers.add_parser("apply")
     apply_parser.add_argument("--receipt", type=Path, required=True)

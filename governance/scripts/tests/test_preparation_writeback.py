@@ -153,6 +153,7 @@ def test_credential_free_producer_and_apply_round_trip_use_real_git(
     receipt, patch = produce(source, head, out)
     document = json.loads(receipt.read_text())
     assert document["schema"] == "tc.sdlc/preparation-receipt/v1"
+    assert document["uv_version"] == "0.12.5"
     assert document["head_sha"] == head
     assert document["head_tree"] == git(source, "rev-parse", f"{head}^{{tree}}")
     assert document["pre_tree"] != document["post_tree"]

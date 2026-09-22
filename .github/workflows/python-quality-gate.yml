@@ -332,6 +332,7 @@ jobs:
         uses: three-cubes/tc-pipelines/actions/preparation-writeback@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
         with:
           mode: produce
+          uv-version: ${{ inputs.uv-version }}
           snapshot: ${{ runner.temp }}/preparation-before.json
           receipt: ${{ runner.temp }}/preparation-receipt.json
           patch: ${{ runner.temp }}/preparation-patch.json

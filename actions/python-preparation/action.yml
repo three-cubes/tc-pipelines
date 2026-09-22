@@ -34,7 +34,7 @@ runs:
           if [[ -n "$UV_VERSION" ]]; then
             uvx --from "uv==${UV_VERSION}" uv lock
           elif [[ -f .uv-version ]]; then
-            IFS= read -r UV_VERSION < .uv-version
+            UV_VERSION="$(head -n 1 .uv-version)"
             uvx --from "uv==${UV_VERSION%$'\r'}" uv lock
           else
             uvx --from uv==0.12.5 uv lock
