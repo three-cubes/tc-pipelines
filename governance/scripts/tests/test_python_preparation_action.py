@@ -16,17 +16,13 @@ pytestmark = pytest.mark.contract
 def test_preparation_action_reads_non_newline_version_and_only_tracked_python(
     tmp_path: Path,
 ) -> None:
-    document = yaml.safe_load(
-        (ROOT / "actions/python-preparation/action.yml").read_text()
-    )
+    document = yaml.safe_load((ROOT / "actions/python-preparation/action.yml").read_text())
     script = document["runs"]["steps"][0]["run"]
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     (repo / ".uv-version").write_text("0.12.5", encoding="utf-8")
-    (repo / "pyproject.toml").write_text(
-        '[project]\nname = "fixture"\nversion = "0.1.0"\n', encoding="utf-8"
-    )
+    (repo / "pyproject.toml").write_text('[project]\nname = "fixture"\nversion = "0.1.0"\n', encoding="utf-8")
     (repo / "tracked.py").write_text("value = 1\n", encoding="utf-8")
     (repo / "ignored.py").write_text("value = 2\n", encoding="utf-8")
     subprocess.run(
@@ -51,9 +47,7 @@ def test_preparation_action_reads_non_newline_version_and_only_tracked_python(
         "TARGET_VERSION": "py312",
         "LINE_LENGTH": "110",
     }
-    result = subprocess.run(
-        ["bash", "-euo", "pipefail", "-c", script], cwd=repo, env=environment
-    )
+    result = subprocess.run(["bash", "-euo", "pipefail", "-c", script], cwd=repo, env=environment)
     assert result.returncode == 0
     calls = log.read_text(encoding="utf-8").splitlines()
     assert any("uv==0.12.5" in call and " uv lock" in call for call in calls)
