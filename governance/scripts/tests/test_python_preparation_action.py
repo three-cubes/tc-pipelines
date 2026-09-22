@@ -13,8 +13,12 @@ ROOT = Path(__file__).resolve().parents[3]
 pytestmark = pytest.mark.contract
 
 
-def test_preparation_action_reads_non_newline_version_and_only_tracked_python(tmp_path: Path) -> None:
-    document = yaml.safe_load((ROOT / "actions/python-preparation/action.yml").read_text())
+def test_preparation_action_reads_non_newline_version_and_only_tracked_python(
+    tmp_path: Path,
+) -> None:
+    document = yaml.safe_load(
+        (ROOT / "actions/python-preparation/action.yml").read_text()
+    )
     script = document["runs"]["steps"][0]["run"]
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -25,12 +29,16 @@ def test_preparation_action_reads_non_newline_version_and_only_tracked_python(tm
     )
     (repo / "tracked.py").write_text("value = 1\n", encoding="utf-8")
     (repo / "ignored.py").write_text("value = 2\n", encoding="utf-8")
-    subprocess.run(["git", "add", ".uv-version", "pyproject.toml", "tracked.py"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "add", ".uv-version", "pyproject.toml", "tracked.py"],
+        cwd=repo,
+        check=True,
+    )
     log = tmp_path / "uvx.log"
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     (fake_bin / "uvx").write_text(
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$UVX_LOG\"\n",
+        '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$UVX_LOG"\n',
         encoding="utf-8",
     )
     (fake_bin / "uvx").chmod(0o755)
@@ -43,7 +51,9 @@ def test_preparation_action_reads_non_newline_version_and_only_tracked_python(tm
         "TARGET_VERSION": "py312",
         "LINE_LENGTH": "110",
     }
-    result = subprocess.run(["bash", "-euo", "pipefail", "-c", script], cwd=repo, env=environment)
+    result = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", script], cwd=repo, env=environment
+    )
     assert result.returncode == 0
     calls = log.read_text(encoding="utf-8").splitlines()
     assert any("uv==0.12.5" in call and " uv lock" in call for call in calls)
