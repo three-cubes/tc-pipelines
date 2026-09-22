@@ -1,0 +1,47 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+patchedDependencies:
+  is-number@7.0.0: 89abeef5bb11057c42e5e481bc554e3d58b8907baf2e8996717d5bd3d18723d3
+
+importers:
+
+  .:
+    dependencies:
+      is-number:
+        specifier: 7.0.0
+        version: 7.0.0(patch_hash=89abeef5bb11057c42e5e481bc554e3d58b8907baf2e8996717d5bd3d18723d3)
+      workspace-a:
+        specifier: workspace:*
+        version: link:packages/a
+
+  packages/a:
+    dependencies:
+      workspace-b:
+        specifier: workspace:*
+        version: link:../b
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
+
+  packages/b: {}
+
+packages:
+
+  is-number@7.0.0:
+    resolution: {integrity: sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==}
+    engines: {node: '>=0.12.0'}
+
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
+snapshots:
+
+  is-number@7.0.0(patch_hash=89abeef5bb11057c42e5e481bc554e3d58b8907baf2e8996717d5bd3d18723d3): {}
+
+  yaml@2.9.1: {}

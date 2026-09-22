@@ -120,6 +120,55 @@ The default operational cleanup window is 48 hours. Product or incident policy
 may retain named evidence longer. Cleanup is a deployment outcome with a receipt,
 not an operator memory task.
 
+## Developer-environment lifecycle
+
+`tc-sdlc` classifies local state before reclaiming it:
+
+- ephemeral run scratch is removed in `finally`; interrupted, owner-marked
+  scratch is recovered after 48 hours by routine bootstrap, preparation and
+  evaluation, with the recovery outcome embedded in the command receipt;
+- rebuildable caches are pruned only through the owning tool's public command
+  (`uv cache prune`, `pnpm store prune`, or named BuildKit `prune`) and only
+  beneath tc-sdlc-owned roots or builders;
+- materialised toolchain and dependency states are retained while referenced as
+  a consumer's current state or immediate predecessor; only old states made
+  explicitly unreferenced by canonical producer metadata can expire;
+- release artefacts and evidence retain catalogue, current, predecessor and
+  incident references. Failed staging is removed immediately, while successful
+  outputs cannot expire until their producer emits sufficient reference
+  metadata; and
+- deployment and VM data belongs to the deployment lifecycle and is never
+  scanned by local developer maintenance.
+
+Maintenance uses a bounded worker pool across independent owner roots and first
+atomically moves each identity-checked candidate into a private same-filesystem
+quarantine. This avoids serial permission walks over large read-only fixtures and
+prevents path replacement races from deleting foreign bytes. Restoring parent
+directory ownership is sufficient; cleanup does not recursively chmod content.
+Each quarantine has canonical owner and payload-identity metadata. A later
+routine recovery or explicit maintenance run inventories expired interrupted
+quarantines in the identity-bound `candidate`, `deleting` or marker-only phase.
+Before recursive deletion, a bounded worker thread revalidates and atomically
+envelopes the entire quarantine under a new owner-bound root, then deletes
+synchronously without yielding. Foreign, mixed or changed layouts remain
+preserved. A markerless empty directory is also retained: its name and emptiness
+alone are not ownership authority. Each worker has a receipt-bound terminal
+budget so a crash or non-response becomes a cleanup failure instead of hanging
+the command.
+
+The persistent bootstrap inventory consists of referenced release states
+(including their dependency environments and toolchain launchers), managed
+capability-probe state, and pnpm/uv caches. Probe state remains required for warm
+offline prerequisite validation. Release builds use the state-owned Docker
+configuration and named `tc-sdlc-release` builder; ambient Docker context,
+daemon and BuildKit routing variables are not inherited. `tc-sdlc maintain`
+accepts an explicit managed pnpm or uv executable and an explicit named BuildKit
+builder, records reclaimed bytes, and never falls back to binaries discovered on
+ambient `PATH`. Successful release artefacts currently have a safe-retention
+contract, not an automated collector: failed staging is removed, while
+successful outputs remain until the producer supplies a complete canonical
+reference inventory.
+
 ## Snapshot and rollback cost
 
 Container-only releases use the predecessor digest plus a protected-state

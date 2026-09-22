@@ -1,0 +1,10 @@
+{
+  "release": "3.0.0",
+  "schema": "tc.sdlc/image-marker/v1",
+  "toolchains": {
+    "node": "24",
+    "packageManager": "pnpm@11.22.0",
+    "python": "3.13",
+    "uv": "0.12.5"
+  }
+}

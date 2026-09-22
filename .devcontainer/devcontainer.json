@@ -1,0 +1,14 @@
+{
+  "containerEnv": {
+    "TC_SDLC_IMAGE_DIGEST": "sha256:734ca688cb22b078b2e684b1ec72aec5eafcf872ea5d1a4b2c4deda2c0e7f0a9",
+    "TC_SDLC_RELEASE": "3.0.0"
+  },
+  "image": "ghcr.io/three-cubes/tc-sdlc@sha256:734ca688cb22b078b2e684b1ec72aec5eafcf872ea5d1a4b2c4deda2c0e7f0a9",
+  "mounts": [
+    "source=tc-sdlc-state,target=/state,type=volume"
+  ],
+  "name": "Three Cubes SDLC 3.0.0",
+  "remoteUser": "sdlc",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached"
+}

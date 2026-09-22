@@ -1,0 +1,16 @@
+{
+  "name": "tc-pipelines",
+  "private": true,
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": "24"
+  },
+  "scripts": {
+    "build": "pnpm --filter @three-cubes/tc-sdlc build",
+    "test": "pnpm --filter @three-cubes/tc-sdlc test"
+  },
+  "devDependencies": {
+    "@nx/devkit": "23.2.1",
+    "nx": "23.2.1"
+  }
+}

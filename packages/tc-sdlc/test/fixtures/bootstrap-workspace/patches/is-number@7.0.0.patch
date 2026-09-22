@@ -1,0 +1,10 @@
+diff --git a/index.js b/index.js
+index 27f19b757f7c1186b92c405a213bf0dd9b6cbe95..3ed7368cce485b4d8520a086ab5d9d2c8c3b89c5 100644
+--- a/index.js
++++ b/index.js
+@@ -16,3 +16,5 @@ module.exports = function(num) {
+   }
+   return false;
+ };
++
++module.exports.tcSdlcPatched = true;

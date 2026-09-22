@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://three-cubes.github.io/tc-pipelines/schemas/sdlc-v1.schema.json",
+  "title": "Three Cubes SDLC declaration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "project", "toolchains", "fitness", "projects", "targets"],
+  "properties": {
+    "schema": { "const": "tc.sdlc/v1" },
+    "project": { "type": "string", "minLength": 1 },
+    "toolchains": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python", "node", "packageManager", "uv"],
+      "properties": {
+        "python": { "const": "3.13" },
+        "node": { "const": "24" },
+        "packageManager": { "const": "pnpm@11.22.0" },
+        "uv": { "const": "0.12.5" }
+      }
+    },
+    "fitness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package", "version"],
+      "properties": {
+        "package": { "const": "three-cubes-fitness" },
+        "version": { "const": "0.17.0" }
+      }
+    },
+    "projects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "root"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "root": { "type": "string", "minLength": 1 },
+          "dependsOn": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "targets": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode", "trustBoundary"],
+        "anyOf": [
+          { "required": ["command"], "properties": { "command": {} } },
+          { "required": ["executor"], "properties": { "executor": {} } }
+        ],
+        "properties": {
+          "mode": { "enum": ["prepare", "evaluate"] },
+          "trustBoundary": {
+            "enum": ["portable", "hosted", "live", "deployment"]
+          },
+          "command": { "type": "string", "minLength": 1 },
+          "executor": { "type": "string", "minLength": 1 },
+          "dependsOn": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "inputs": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "sharedInputs": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "outputs": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "resources": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cpu", "memoryMiB", "ports", "exclusive"],
+            "properties": {
+              "cpu": { "type": "number", "exclusiveMinimum": 0 },
+              "memoryMiB": { "type": "integer", "minimum": 1 },
+              "ports": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "type": "integer", "minimum": 1, "maximum": 65535 }
+              },
+              "exclusive": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "budget": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["phaseMs", "noProgressMs", "heartbeatMs"],
+            "properties": {
+              "phaseMs": { "type": "integer", "minimum": 1 },
+              "noProgressMs": { "type": "integer", "minimum": 1 },
+              "heartbeatMs": { "type": "integer", "minimum": 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://three-cubes.github.io/tc-pipelines/schemas/release-catalogue-v1.schema.json",
+  "title": "Three Cubes SDLC release catalogue",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "release"],
+  "properties": {
+    "schema": { "const": "tc.sdlc/release-catalogue/v1" },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "package",
+        "workflowCommit",
+        "imageDigest",
+        "declarationSchema",
+        "lockSchema",
+        "fitness",
+        "toolchains",
+        "bootstrap"
+      ],
+      "properties": {
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "package": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "const": "@three-cubes/tc-sdlc" },
+            "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+          }
+        },
+        "workflowCommit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "imageDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "declarationSchema": { "const": "tc.sdlc/v1" },
+        "lockSchema": { "const": "tc.sdlc/lock/v1" },
+        "fitness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["package", "version"],
+          "properties": {
+            "package": { "const": "three-cubes-fitness" },
+            "version": { "const": "0.17.0" }
+          }
+        },
+        "toolchains": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["python", "node", "packageManager", "uv"],
+          "properties": {
+            "python": { "const": "3.13" },
+            "node": { "const": "24" },
+            "packageManager": { "const": "pnpm@11.22.0" },
+            "uv": { "const": "0.12.5" }
+          }
+        },
+        "bootstrap": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["uv"],
+          "properties": {
+            "uv": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["package", "version", "wheels"],
+              "properties": {
+                "package": { "const": "uv" },
+                "version": { "const": "0.12.5" },
+                "wheels": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"],
+                  "properties": {
+                    "darwin-arm64": { "$ref": "#/$defs/distribution" },
+                    "darwin-x64": { "$ref": "#/$defs/distribution" },
+                    "linux-arm64": { "$ref": "#/$defs/distribution" },
+                    "linux-x64": { "$ref": "#/$defs/distribution" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sha256"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^https://files\\.pythonhosted\\.org/packages/[a-f0-9/]+/uv-0\\.12\\.5-[A-Za-z0-9_.-]+\\.whl$"
+        },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

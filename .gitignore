@@ -11,6 +11,11 @@ __pycache__/
 .pytest_cache/
 .assurance-build/
 .assurance-hosted/
+artifacts/
+
+# pnpm workspace dependencies and TypeScript build output
+node_modules/
+packages/*/dist/
 
 # macOS Finder metadata
 .DS_Store

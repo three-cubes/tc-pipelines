@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 MAKEFILE = REPO_ROOT / "Makefile"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+FITNESS_COMMIT = "73d7ffc4b563849edcd607b377fbb3ee4ba6da32"
 
 
 def _project_config() -> dict:
@@ -99,31 +100,32 @@ def test_ci_contract_tests_run_make_check() -> None:
     )
 
 
-def test_every_direct_ci_fitness_install_matches_the_locked_engine_tag() -> None:
+def test_every_direct_ci_fitness_install_matches_the_locked_engine_commit() -> None:
     """A standalone CI job must not retain an older fitness implementation."""
     dependencies = _project_config()["project"]["dependencies"]
     locked_refs = [
-        match.group("tag")
+        match.group("commit")
         for dependency in dependencies
         if (
             match := re.fullmatch(
                 r"three-cubes-fitness @ git\+https://github\.com/three-cubes/"
-                r"tc-fitness\.git@(?P<tag>v[0-9]+\.[0-9]+\.[0-9]+)",
+                r"tc-fitness\.git@(?P<commit>[a-f0-9]{40})",
                 dependency,
             )
         )
     ]
-    assert len(locked_refs) == 1, (
-        f"{PYPROJECT.name}: expected one immutable three-cubes-fitness dependency, found {locked_refs!r}."
+    assert locked_refs == [FITNESS_COMMIT], (
+        f"{PYPROJECT.name}: expected the approved immutable three-cubes-fitness "
+        f"commit {FITNESS_COMMIT}, found {locked_refs!r}."
     )
     direct_refs = re.findall(
         r"git\+https://github\.com/three-cubes/tc-fitness@"
-        r"(v[0-9]+\.[0-9]+\.[0-9]+)",
+        r"([a-f0-9]{40})",
         CI_WORKFLOW.read_text(encoding="utf-8"),
     )
-    assert direct_refs and set(direct_refs) == set(locked_refs), (
+    assert direct_refs and set(direct_refs) == {FITNESS_COMMIT}, (
         f"{CI_WORKFLOW.name}: direct fitness installs {direct_refs!r}, not the "
-        f"locked engine {locked_refs[0]}. fix: repin every executable fitness "
+        f"locked engine {FITNESS_COMMIT}. fix: repin every executable fitness "
         "reference with pyproject.toml and regenerate uv.lock."
     )
 
