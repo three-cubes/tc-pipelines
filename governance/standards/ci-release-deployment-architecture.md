@@ -62,9 +62,12 @@ release evidence. Deterministic preparation runs before evaluation. If it
 changes the candidate, an unprivileged producer emits a bounded patch for the
 trusted writeback workflow; no evaluator or release receipt may attest those
 bytes under the old commit identity. The bot commit triggers a fresh gate over
-the exact committed tree. After the merge queue is enabled in the GitHub UI and a queue
-run has emitted every required context, render with `--merge-queue`; that
-profile keeps PR and `merge_group` triggers and removes post-merge promotion.
+the exact committed tree. After a queue-eligible repository applies
+[`merge-queue.json`](../rulesets/merge-queue.json) through the repository rulesets API
+and a queue run has emitted every required context, render with
+`--merge-queue`; that profile keeps PR and `merge_group` triggers and removes
+post-merge promotion. Private Team-plan repositories without merge-queue support
+retain the queue-less strict-status-check and post-merge evidence profile.
 
 Release repositories apply `release-tags.json`. It protects release tags from
 updates and deletion, records bypasses, and lets the publish job verify the

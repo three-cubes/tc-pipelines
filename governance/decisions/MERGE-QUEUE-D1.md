@@ -1,7 +1,7 @@
 # MERGE-QUEUE-D1 — GitHub merge queue for PRODUCT repos (re-test vs latest tip)
 
 Status: Accepted (canonical REST-importable template)
-Scope: tc-pipelines (CORE governance templates), product repositories
+Scope: tc-pipelines (CORE governance templates), queue-eligible product repositories
 Supersedes (for product repos): kata `docs/adr/ADR-013` (which removed
 `merge_group` for "auto-merge, no queue"). See "Reconciliation" below.
 Related: SGO-166 (auto-merge-on-green), SGO-168 (this note), SGO-180 (two-profile
@@ -13,7 +13,9 @@ Product repos merge to `main` through a **GitHub merge queue** so every PR is
 **re-tested against the latest tip** before it lands (the "not-rocket-science"
 rule: never merge a green-against-a-stale-base PR that would red `main`). Small
 config/data repos may keep **auto-merge, no queue** — their change shape doesn't
-carry the semantic-conflict risk a queue exists to catch.
+carry the semantic-conflict risk a queue exists to catch. Private Team-plan
+repositories that cannot enable GitHub merge queues use the documented
+**queue-less** strict-status-check profile instead.
 
 The canonical queue configuration lives in
 [`governance/rulesets/merge-queue.json`](../rulesets/merge-queue.json):
@@ -23,7 +25,8 @@ The canonical queue configuration lives in
 - **group size** — `min_entries_to_merge: 1`, `max_entries_to_merge: 1`,
   `min_entries_to_merge_wait_minutes: 0`, `max_entries_to_build: 3`.
 - **allowed merge method** — `MERGE` (the repository's merge-commit policy).
-- **check-response timeout** — `check_response_timeout_minutes: 30` (a required
+- **check-response timeout** — `check_response_timeout_minutes: 45`, matching
+  the longest required shared-gate lane (a required
   check that never reports within the window fails the entry, not hangs the queue).
 - **human break-glass** — the `three-cubes/maintainers` team may bypass for a
   pull request only. GitHub Apps and integrations are not bypass actors, and a
@@ -78,6 +81,9 @@ it **scopes** it:
    reports on it.
 2. Harden the gate to `governance/gate-hardening.md` and verify it runs green and
    deterministic (never flip a queue on top of a flaky gate).
-3. Apply `governance/rulesets/merge-queue.json` via the repository rulesets API.
+3. For a queue-eligible repository, apply
+   `governance/rulesets/merge-queue.json` via the repository rulesets API. For a
+   private Team-plan repository without merge-queue support, retain the
+   queue-less strict-status-check profile.
 4. Apply `governance/rulesets/main-product.json` (0-review) via the API.
 5. Verify two stacked PRs are each re-tested against the updated tip before merge.

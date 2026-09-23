@@ -1,7 +1,4 @@
 {
-  "_comment": "Canonical GitHub merge-queue ruleset for PRODUCT repos (SGO-168). This payload is importable through the repository rulesets REST API. See governance/decisions/MERGE-QUEUE-D1.md.",
-  "_comment_scope": "Applies to PRODUCT repos only (re-test-vs-tip / not-rocket-science). Small config/data repos may keep auto-merge-no-queue — see MERGE-QUEUE-D1.md and its reconciliation with kata ADR-013.",
-  "_comment_merge_group_trigger": "A product repo's fan-in 'CI gate' job MUST also report on `merge_group` events, or the queue can never go green. Add `merge_group:` to the `on:` of the repo's ci.yml (snippet in MERGE-QUEUE-D1.md).",
   "name": "main-merge-queue",
   "target": "branch",
   "enforcement": "active",
@@ -28,7 +25,7 @@
         "min_entries_to_merge_wait_minutes": 0,
         "max_entries_to_build": 3,
         "merge_method": "MERGE",
-        "check_response_timeout_minutes": 30
+        "check_response_timeout_minutes": 45
       }
     }
   ]
