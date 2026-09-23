@@ -1,7 +1,7 @@
 # MERGE-QUEUE-D1 — GitHub merge queue for PRODUCT repos (re-test vs latest tip)
 
-Status: Accepted (template — inert until a repo adopts + flips it)
-Scope: tc-pipelines (CORE governance templates), kairix (product pilot)
+Status: Accepted (canonical REST-importable template)
+Scope: tc-pipelines (CORE governance templates), product repositories
 Supersedes (for product repos): kata `docs/adr/ADR-013` (which removed
 `merge_group` for "auto-merge, no queue"). See "Reconciliation" below.
 Related: SGO-166 (auto-merge-on-green), SGO-168 (this note), SGO-180 (two-profile
@@ -15,35 +15,35 @@ rule: never merge a green-against-a-stale-base PR that would red `main`). Small
 config/data repos may keep **auto-merge, no queue** — their change shape doesn't
 carry the semantic-conflict risk a queue exists to catch.
 
-The queue configuration snapshot lives in
+The canonical queue configuration lives in
 [`governance/rulesets/merge-queue.json`](../rulesets/merge-queue.json):
 
 - **grouping = ALLGREEN** — a group merges only if the whole group is green
   (one red entry fails the group, not just itself).
-- **group size** — `min_entries_to_merge: 1`, `max_entries_to_merge: 5`,
-  `min_entries_to_merge_wait_minutes: 5`, `max_entries_to_build: 5`.
-- **allowed merge method** — `SQUASH`.
-- **check-response timeout** — `check_response_timeout_minutes: 60` (a required
+- **group size** — `min_entries_to_merge: 1`, `max_entries_to_merge: 1`,
+  `min_entries_to_merge_wait_minutes: 0`, `max_entries_to_build: 3`.
+- **allowed merge method** — `MERGE` (the repository's merge-commit policy).
+- **check-response timeout** — `check_response_timeout_minutes: 30` (a required
   check that never reports within the window fails the entry, not hangs the queue).
+- **human break-glass** — the `three-cubes/maintainers` team may bypass for a
+  pull request only. GitHub Apps and integrations are not bypass actors, and a
+  bypass remains visible in the pull-request audit trail.
 
-## ⚠️ The REST 422 gotcha — the `merge_queue` rule is WEB-UI-ONLY
+## REST application
 
-The `merge_queue` **ruleset rule cannot be created via the REST rulesets API** —
-`POST`/`PUT /repos/{owner}/{repo}/rulesets` returns **HTTP 422** when the payload
-contains a `merge_queue` rule. It **must** be enabled via
-**Settings → Rules → Rulesets** in the web UI.
+GitHub supports the `merge_queue` rule in the repository rulesets REST API. Apply
+the canonical payload with an installation token that has repository
+administration permission:
 
-Consequences, and the guardrail:
+```sh
+gh api "repos/${OWNER}/${REPOSITORY}/rulesets" \
+  --method POST \
+  --input governance/rulesets/merge-queue.json
+```
 
-- `merge-queue.json` is a **documentation snapshot** of the web-UI settings, not
-  an `--input` payload. Do **not** `gh api ... --input merge-queue.json`.
-- For the same reason, the `merge_queue` rule is deliberately **absent** from
-  [`governance/rulesets/main-product.json`](../rulesets/main-product.json)
-  (which IS API-appliable). Enabling the queue is a separate, manual web-UI step.
-- This mirrors the `_comment` convention carried in the org
-  [`main-product.json`](../rulesets/main-product.json), so that **re-applying a
-  JSON snapshot never silently drops the queue** — the operator is reminded the
-  rule lives only in the UI.
+For an existing ruleset, read its ID by name and use `PUT` with the same payload.
+The source file intentionally contains no live numeric ruleset or repository IDs;
+those are deployment state and must be discovered from the API at apply time.
 
 ## `on: merge_group` — the fan-in check must report on queue events
 
@@ -78,7 +78,6 @@ it **scopes** it:
    reports on it.
 2. Harden the gate to `governance/gate-hardening.md` and verify it runs green and
    deterministic (never flip a queue on top of a flaky gate).
-3. Enable the merge queue in **Settings → Rules → Rulesets** using
-   `governance/rulesets/merge-queue.json` as the snapshot (web-UI only — 422).
+3. Apply `governance/rulesets/merge-queue.json` via the repository rulesets API.
 4. Apply `governance/rulesets/main-product.json` (0-review) via the API.
 5. Verify two stacked PRs are each re-tested against the updated tip before merge.

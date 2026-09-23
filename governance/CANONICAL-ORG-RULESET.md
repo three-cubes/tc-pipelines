@@ -30,7 +30,7 @@ repo set. Three target `main`; the fourth targets every non-`main` branch. Snaps
 | Merge method | squash / merge / rebase (each repo decides) | squash / merge / rebase | — |
 | Required checks | `Quality gate`, `no-attribution` | `Quality gate`, `no-attribution` | none |
 | Block deletion + non-fast-forward | yes | yes | yes |
-| Bypass | none (`bypass_actors: []`); owner `--admin` is the sole logged break-glass | | |
+| Bypass | org ruleset has no agent bypass; owner `--admin` is the sole logged break-glass for branch protection. The separate merge-queue ruleset permits the human maintainers team for pull-request-only bypasses; Apps remain excluded. | | |
 
 A fourth ruleset — [`rulesets/branch-naming.json`](rulesets/branch-naming.json) →
 **`org-branch-naming`** — applies to **all repos, every non-`main` branch**. Its native
