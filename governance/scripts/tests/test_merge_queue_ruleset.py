@@ -30,9 +30,7 @@ def test_merge_queue_payload_is_rest_importable_and_fast_path() -> None:
     }
     assert payload["target"] == "branch"
     assert payload["enforcement"] == "active"
-    assert payload["conditions"] == {
-        "ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}
-    }
+    assert payload["conditions"] == {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}
     assert parameters == {
         "grouping_strategy": "ALLGREEN",
         "min_entries_to_merge": 1,
@@ -54,9 +52,7 @@ def test_merge_queue_bypass_is_human_pull_request_only() -> None:
             "bypass_mode": "pull_request",
         }
     ]
-    assert all(
-        actor["actor_type"] != "Integration" for actor in payload["bypass_actors"]
-    )
+    assert all(actor["actor_type"] != "Integration" for actor in payload["bypass_actors"])
 
 
 def test_template_does_not_claim_the_removed_rest_limitation() -> None:
@@ -67,12 +63,10 @@ def test_template_does_not_claim_the_removed_rest_limitation() -> None:
 
 
 def test_canonical_docs_use_rest_and_keep_the_queue_less_fallback() -> None:
-    architecture = (
-        GOVERNANCE / "standards" / "ci-release-deployment-architecture.md"
-    ).read_text(encoding="utf-8")
-    decision = (GOVERNANCE / "decisions" / "MERGE-QUEUE-D1.md").read_text(
+    architecture = (GOVERNANCE / "standards" / "ci-release-deployment-architecture.md").read_text(
         encoding="utf-8"
     )
+    decision = (GOVERNANCE / "decisions" / "MERGE-QUEUE-D1.md").read_text(encoding="utf-8")
 
     assert "merge queue is enabled in the GitHub UI" not in architecture
     assert "repository rulesets API" in architecture
