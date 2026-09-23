@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "repositories": [
+    "/absolute/path/to/repository"
+  ],
+  "safe_cache_roots": [
+    "/absolute/path/to/a/dedicated/cache-parent"
+  ],
+  "worktrees": [
+    {
+      "path": "/absolute/path/to/a/worktree",
+      "disposable": true,
+      "expires_at": "2026-10-01T00:00:00Z",
+      "evidence": false,
+      "qualification": false,
+      "release": false
+    }
+  ],
+  "caches": [
+    {
+      "path": "/absolute/path/to/a/cache",
+      "disposable": true,
+      "expires_at": "2026-10-01T00:00:00Z",
+      "evidence": false,
+      "qualification": false,
+      "release": false
+    }
+  ]
+}
