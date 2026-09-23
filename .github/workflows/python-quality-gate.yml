@@ -198,7 +198,7 @@ on:
           for a consumer whose pytest uses many `--cov` roots to normalise the
           multi-source paths so Sonar resolves them (same trust model as
           pre-steps/post-steps: repo-owned config, never external input). Runs only
-          when the combined XML exists; non-blocking. Only relevant when
+          when the combined XML exists; a non-zero exit fails the job. Only relevant when
           pytest-shards > 1.
         type: string
         default: ""
@@ -221,7 +221,8 @@ on:
       enforce-new-code-coverage:
         description: >-
           Enforce the changed-line coverage floor in CI — the org backstop for
-          SonarCloud's "Coverage on New Code >= 80%". The engine's
+          SonarCloud's changed-code condition. This reusable contract
+          requires 100% coverage on changed executable lines. The engine's
           `new_code_coverage` core check soft-skips inside `tc-fitness run` (it
           precedes pytest, so no coverage XML exists yet), so this reusable
           re-runs it in the `coverage-combine` lane, once that lane holds the
@@ -590,12 +591,13 @@ jobs:
           # Depth 0 fetches the checked-out ref's history, not the trunk's ref
           # NAME, so `origin/<trunk>` still has to be created before a merge-base
           # resolves. Strip a leading `origin/` for the refspec. A fetch failure
-          # stays a warning so a detached or renamed trunk degrades as it did
-          # before rather than hard-failing the gate.
-          [[ "$ENFORCE" == "true" ]] || exit 0
+          # is fatal: without the base ref the engine can see no changed lines
+          # and would otherwise report a false pass.
+          if [[ "$ENFORCE" != "true" ]]; then
+            exit 0
+          fi
           base="${BASE_REF#origin/}"
-          git fetch --no-tags origin "+refs/heads/${base}:refs/remotes/origin/${base}" || \
-            echo "::warning::could not fetch ${BASE_REF}; the new-code floor may soft-pass."
+          git fetch --no-tags origin "+refs/heads/${base}:refs/remotes/origin/${base}"
       - name: Locked uv install
         uses: three-cubes/tc-pipelines/actions/setup-uv-cached@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
         with:
@@ -612,14 +614,10 @@ jobs:
       # uploaded the finished XML, so the floor reads that artifact instead. A
       # download by NAME errors when the artifact is absent, which is what a
       # failed quality lane leaves — so it is asked for only once that lane
-      # succeeded, and the floor below reports the skip instead.
+      # succeeded. A missing artifact is a hard failure because the floor cannot
+      # establish coverage without the report.
       - name: Download the coverage XML (unsharded lane)
         if: ${{ inputs.pytest-shards <= 1 && needs.quality.result == 'success' }}
-        # A lane that produced no XML uploads no artifact (if-no-files-found:
-        # ignore), and a download by name errors on that with nothing said about
-        # coverage. Let the floor step below report it instead — it names the
-        # inputs to look at.
-        continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: ${{ inputs.coverage-artifact-name }}
@@ -629,45 +627,37 @@ jobs:
         env:
           COVERAGE_XML: ${{ inputs.coverage-xml-path }}
         run: |
-          # NOT `set -e`: `coverage combine` exits non-zero when it SKIPS an
-          # empty/partial shard file (e.g. a shard whose tests were all filtered),
-          # but the files it DID combine are still valid. Tolerate that and gate on
-          # whether a combined `.coverage` was actually produced.
-          set -uo pipefail
+          set -euo pipefail
           shopt -s nullglob
           shards=(.coverage.*)
           if [[ ${#shards[@]} -eq 0 ]]; then
-            echo "::warning::no shard coverage data found; skipping combine."
-            exit 0
+            echo "::error::no shard coverage data found; cannot enforce changed-line coverage."
+            exit 1
           fi
           echo "combining ${#shards[@]} shard file(s): ${shards[*]}"
-          uv run coverage combine "${shards[@]}" || echo "::warning::coverage combine skipped an empty/partial shard file (kept the rest)."
-          if [[ -f .coverage ]]; then
-            uv run coverage xml -o "$COVERAGE_XML" || echo "::warning::coverage xml produced no report (empty/unreportable shard data)."
-          else
-            echo "::warning::no combined coverage data produced; no XML written."
+          uv run coverage combine "${shards[@]}"
+          if [[ ! -f .coverage ]]; then
+            echo "::error::coverage combine produced no data; cannot enforce changed-line coverage."
+            exit 1
           fi
-          # Coverage assembly is a non-blocking convenience for the Sonar handoff
-          # (matching the original always()/if-no-files-found: ignore upload). The
-          # gate's real verdict is the shard test results, which already gated in
-          # the quality-shard jobs — a reporting hiccup here must not fail the gate.
-          exit 0
+          uv run coverage xml -o "$COVERAGE_XML"
       # Post-combine hook: repo-specific transform of the combined coverage XML
       # BEFORE the Sonar handoff — e.g. a consumer whose pytest uses many `--cov`
       # roots (ambiguous multi-source paths) collapses them to repo-root here so
-      # Sonar resolves them. Runs only when the combined XML exists; non-blocking.
+      # Sonar resolves them. Runs only when the combined XML exists; failures are
+      # blocking because the transformed report is the evidence scored below.
       - name: Coverage combine post-hook
-        if: ${{ inputs.coverage-combine-post != '' && inputs.pytest-shards > 1 }}
+        if: ${{ inputs.coverage-combine-post != '' }}
         shell: bash
         env:
           COVERAGE_XML: ${{ inputs.coverage-xml-path }}
         run: |
-          set -uo pipefail
-          if [[ -f "$COVERAGE_XML" ]]; then
-            ${{ inputs.coverage-combine-post }}
-          else
-            echo "::warning::no combined coverage XML; skipping coverage-combine-post."
+          set -euo pipefail
+          if [[ ! -f "$COVERAGE_XML" ]]; then
+            echo "::error::no combined coverage XML; cannot run coverage-combine-post."
+            exit 1
           fi
+          ${{ inputs.coverage-combine-post }}
       # Uploaded BEFORE the floor runs, so a below-floor result still leaves the
       # report for a downstream rollup job to read.
       - name: Upload combined coverage XML
@@ -676,7 +666,7 @@ jobs:
         with:
           name: ${{ inputs.coverage-artifact-name }}
           path: ${{ inputs.coverage-xml-path }}
-          if-no-files-found: ignore
+          if-no-files-found: error
       # Every branch of the decision is taken in shell rather than in a step-level
       # `if:`. A step skipped by a mis-evaluated expression leaves a green job and
       # no record that the floor never ran; a step that always executes has to say
@@ -694,26 +684,31 @@ jobs:
             echo "new-code coverage floor not requested (enforce-new-code-coverage=false)."
             exit 0
           fi
-          # A failed quality lane means the report is partial, so a below-floor
-          # reading would be an artefact of the failure rather than of the change.
-          # The gate fails on that lane's own result either way.
+          # A failed quality lane means the report is not trustworthy. Fail this
+          # lane too, rather than warning and allowing a green floor with no
+          # enforceable coverage evidence.
           if [[ "$QUALITY_RESULT" != "success" && "$SHARD_RESULT" != "success" ]]; then
-            echo "::warning::new-code coverage floor not run — no quality lane succeeded (quality=$QUALITY_RESULT, quality-shard=$SHARD_RESULT); the gate fails on that lane."
-            exit 0
+            echo "::error::new-code coverage floor cannot run — no quality lane succeeded (quality=$QUALITY_RESULT, quality-shard=$SHARD_RESULT)."
+            exit 1
           fi
           if [[ ! -f "$COVERAGE_XML" ]]; then
             echo "::error::new-code coverage floor cannot run — no coverage XML ($COVERAGE_XML) was produced/uploaded; check upload-coverage-artifact + the gate's pytest --cov config."
             exit 1
           fi
-          # The module entrypoint takes the check's OWN defaults — an 80% floor
-          # over every .py in the tree, `coverage.xml`, `origin/main`. The repo's
-          # [tool.tc_fitness.core_checks.new_code_coverage] block binds the
-          # in-catalogue run, not this one, so a repo that narrows `roots` there is
-          # scored more widely here, and one that moves `base_ref` off origin/main
-          # is scored against a ref this never diffs. Keep new-code-base-ref
-          # pointing at the trunk the check defaults to.
-          # Exit 1 on a below-floor changed file (hard, non-grandfatherable), 0 when
-          # the changed lines clear the floor or there is no measurable new code.
+          # Validate the consumer-owned contract before invoking the check's
+          # public module entrypoint. The module loads the same config on every
+          # supported engine version; the newer `tc-fitness run --gate` selector
+          # is deliberately avoided so existing consumers do not rerun their
+          # complete catalogue or need a coupled engine migration.
+          uv run python -c '
+          from pathlib import Path
+          from tc_fitness.gate_config import load_core_check_configs
+
+          floor = load_core_check_configs(Path.cwd()).get("new_code_coverage", {}).get("floor_pct")
+          if isinstance(floor, bool) or floor != 100:
+              raise SystemExit(f"new_code_coverage.floor_pct must be 100 for the reusable CI backstop (found {floor!r})")
+          print("new_code_coverage.floor_pct is 100")
+          '
           uv run python -m tc_fitness.core_checks.new_code_coverage
 
   # ── the complement of the shard tier, run ONCE ──────────────────────────────

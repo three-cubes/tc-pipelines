@@ -10,6 +10,10 @@ for the consumer-facing `@vN` workflow/action references.
 
 ### Changed
 
+- **Changed-line coverage now fails early and closed at 100%.** The reusable
+  Python gate runs the consumer-configured `tc-fitness` rule and treats a
+  missing base ref, report, shard data, combine result, or post-processing
+  failure as a blocking error instead of warning and continuing.
 - **The canonical testing standard now distinguishes structural checks from
   executable behavioural evidence.** Critical deployable surfaces are routed
   to the released `tc-fitness` `core:behavioural_evidence` contract, which binds
