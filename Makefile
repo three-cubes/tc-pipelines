@@ -5,7 +5,19 @@ TC_SCANNER_BIN_DIR := $(abspath $(TC_SCANNER_BIN_DIR))
 export TC_SCANNER_BIN_DIR
 export PATH := $(TC_SCANNER_BIN_DIR):$(PATH)
 
-.PHONY: prepare assert-clean check assurance assurance-hosted scanner-versions
+.PHONY: prepare assert-clean check assurance assurance-hosted scanner-versions workspace-cleanup-report workspace-cleanup-apply install-workspace-cleanup
+
+WORKSPACE_CLEANUP_REGISTRY ?= $(HOME)/.config/tc-pipelines/workspace-cleanup.json
+WORKSPACE_CLEANUP_REPOS ?= $(CURDIR)
+
+workspace-cleanup-report:
+	TC_WORKSPACE_CLEANUP_REGISTRY="$(WORKSPACE_CLEANUP_REGISTRY)" uv run --no-sync python governance/scripts/local_workspace_cleanup.py --registry "$(WORKSPACE_CLEANUP_REGISTRY)" --repo "$(WORKSPACE_CLEANUP_REPOS)"
+
+workspace-cleanup-apply:
+	TC_WORKSPACE_CLEANUP_REGISTRY="$(WORKSPACE_CLEANUP_REGISTRY)" uv run --no-sync python governance/scripts/local_workspace_cleanup.py --registry "$(WORKSPACE_CLEANUP_REGISTRY)" --repo "$(WORKSPACE_CLEANUP_REPOS)" --apply
+
+install-workspace-cleanup:
+	TC_WORKSPACE_CLEANUP_REGISTRY="$(WORKSPACE_CLEANUP_REGISTRY)" bash governance/scripts/install-local-workspace-cleanup.sh
 
 prepare:
 	uvx --from uv==0.12.5 uv lock
