@@ -300,7 +300,7 @@ jobs:
           version: "0.12.5"
           enable-cache: true
       - name: Capture committed candidate state
-        uses: three-cubes/tc-pipelines/actions/preparation-writeback@fb80aa5b8246b2d2b10eefdcb76d5f5e6d07ff80
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@c71b669195015f2094e57d912c96df833cfb7218
         with:
           mode: snapshot
           repository: ${{ github.repository }}
@@ -313,11 +313,11 @@ jobs:
           output: ${{ runner.temp }}/preparation-before.json
           root: ${{ github.workspace }}
       - name: Prepare candidate
-        uses: three-cubes/tc-pipelines/actions/python-preparation@fb80aa5b8246b2d2b10eefdcb76d5f5e6d07ff80
+        uses: three-cubes/tc-pipelines/actions/python-preparation@c71b669195015f2094e57d912c96df833cfb7218
         with:
           uv-version: ${{ inputs.uv-version }}
       - name: Capture first prepared state
-        uses: three-cubes/tc-pipelines/actions/preparation-writeback@fb80aa5b8246b2d2b10eefdcb76d5f5e6d07ff80
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@c71b669195015f2094e57d912c96df833cfb7218
         with:
           mode: snapshot
           repository: ${{ github.repository }}
@@ -330,7 +330,7 @@ jobs:
           output: ${{ runner.temp }}/preparation-first.json
           root: ${{ github.workspace }}
       - name: Produce bounded preparation evidence
-        uses: three-cubes/tc-pipelines/actions/preparation-writeback@fb80aa5b8246b2d2b10eefdcb76d5f5e6d07ff80
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@c71b669195015f2094e57d912c96df833cfb7218
         with:
           mode: produce
           uv-version: ${{ inputs.uv-version }}
@@ -339,11 +339,11 @@ jobs:
           patch: ${{ runner.temp }}/preparation-patch.json
           root: ${{ github.workspace }}
       - name: Prove preparation is a fixed point
-        uses: three-cubes/tc-pipelines/actions/python-preparation@fb80aa5b8246b2d2b10eefdcb76d5f5e6d07ff80
+        uses: three-cubes/tc-pipelines/actions/python-preparation@c71b669195015f2094e57d912c96df833cfb7218
         with:
           uv-version: ${{ inputs.uv-version }}
       - name: Capture second prepared state
-        uses: three-cubes/tc-pipelines/actions/preparation-writeback@fb80aa5b8246b2d2b10eefdcb76d5f5e6d07ff80
+        uses: three-cubes/tc-pipelines/actions/preparation-writeback@c71b669195015f2094e57d912c96df833cfb7218
         with:
           mode: snapshot
           repository: ${{ github.repository }}
