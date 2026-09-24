@@ -44,7 +44,9 @@ def test_reusable_exposes_whether_exact_candidate_evaluation_ran() -> None:
     gate = _load(GATE)
     output = _workflow_outputs(gate)["evaluated"]
     assert output["value"] == "${{ jobs.gate.outputs.evaluated }}"
-    assert gate["jobs"]["gate"]["outputs"]["evaluated"] == ("${{ steps.aggregate.outputs.evaluated }}")
+    assert gate["jobs"]["gate"]["outputs"]["evaluated"] == (
+        "${{ steps.aggregate.outputs.evaluated }}"
+    )
 
 
 def test_one_preparation_job_dominates_every_evaluator() -> None:
@@ -77,12 +79,21 @@ def test_quality_lanes_do_not_repeat_the_trusted_preparation_policy() -> None:
     assert len(body_calls) == 3
     assert all("candidate-head-sha" in step["with"] for step in body_calls)
 
-    combine_names = {step.get("name") for step in _steps(gate["jobs"]["coverage-combine"])}
+    combine_names = {
+        step.get("name") for step in _steps(gate["jobs"]["coverage-combine"])
+    }
     assert "Prepare candidate" not in combine_names
     preparation = gate["jobs"]["preparation"]
-    prepare = next(step for step in _steps(preparation) if step["name"] == "Prepare candidate")
-    assert prepare["uses"].startswith("three-cubes/tc-pipelines/actions/python-preparation@")
-    assert prepare["with"] == {"uv-version": "${{ inputs.uv-version }}"}
+    prepare = next(
+        step for step in _steps(preparation) if step["name"] == "Prepare candidate"
+    )
+    assert prepare["uses"].startswith(
+        "three-cubes/tc-pipelines/actions/python-preparation@"
+    )
+    assert prepare["with"] == {
+        "uv-version": "${{ inputs.uv-version }}",
+        "preparation-command": "${{ inputs.preparation-command }}",
+    }
 
 
 @pytest.mark.parametrize(
@@ -96,7 +107,11 @@ def test_required_context_is_explicitly_red_when_preparation_changed_the_pr(
     check = jobs["check"]
     assert "gate" in _needs(check)
     assert str(check.get("if", "")) == "always()"
-    step = next(step for step in _steps(check) if step.get("name") == "Gate on the reusable result")
+    step = next(
+        step
+        for step in _steps(check)
+        if step.get("name") == "Gate on the reusable result"
+    )
     assert step["env"]["EVALUATED"] == "${{ needs.gate.outputs.evaluated }}"
     assert '[[ "$EVALUATED" == "true" ]]' in step["run"]
     assert "exit 1" in step["run"]
@@ -127,7 +142,9 @@ def test_writeback_result_protocol_is_explicit() -> None:
     assert {"changed", "no-artifact", "ineligible"}.issubset(
         {
             value
-            for line in (WORKFLOWS / "preparation-writeback.yml").read_text(encoding="utf-8").splitlines()
+            for line in (WORKFLOWS / "preparation-writeback.yml")
+            .read_text(encoding="utf-8")
+            .splitlines()
             if (value := line.strip().removeprefix("result=")) != line.strip()
         }
     )
@@ -136,6 +153,10 @@ def test_writeback_result_protocol_is_explicit() -> None:
 def test_private_fetch_receives_the_ephemeral_read_token_in_its_own_step() -> None:
     workflow = _load(WORKFLOWS / "preparation-writeback.yml")
     steps = _steps(workflow["jobs"]["write-preparation"])
-    fetch = next(step for step in steps if step.get("name") == "Validate and apply without executing PR code")
+    fetch = next(
+        step
+        for step in steps
+        if step.get("name") == "Validate and apply without executing PR code"
+    )
     assert "preparation_writeback.py fetch" in fetch["run"]
     assert fetch["env"]["GITHUB_READ_TOKEN"] == "${{ github.token }}"

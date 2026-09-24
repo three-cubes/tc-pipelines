@@ -1,6 +1,12 @@
 name: python-preparation
 description: Apply the trusted, deterministic Python lock and consumer-configured Ruff preparation policy.
 inputs:
+  preparation-command:
+    description: >-
+      Consumer-owned deterministic preparation command. When set, this is the
+      sole preparation authority; the shared Python lock/Ruff fallback is not run.
+    required: false
+    default: ""
   uv-version:
     description: Explicit uv version override; empty uses the repository .uv-version or the compatibility fallback.
     required: false
@@ -15,10 +21,15 @@ runs:
     - name: Prepare Python lock and formatting inputs
       shell: bash
       env:
+        PREPARATION_COMMAND: ${{ inputs.preparation-command }}
         UV_VERSION: ${{ inputs.uv-version }}
         RUFF_VERSION: ${{ inputs.ruff-version }}
       run: |
         set -euo pipefail
+
+        if [[ -n "${PREPARATION_COMMAND:-}" ]]; then
+          exec bash -euo pipefail -c "$PREPARATION_COMMAND"
+        fi
 
         if [[ -f pyproject.toml ]]; then
           if [[ -n "$UV_VERSION" ]]; then
