@@ -17,9 +17,7 @@ pytestmark = pytest.mark.contract
 def test_consumer_preparation_command_is_the_only_preparation_authority(
     tmp_path: Path,
 ) -> None:
-    document = yaml.safe_load(
-        (ROOT / "actions/python-preparation/action.yml").read_text()
-    )
+    document = yaml.safe_load((ROOT / "actions/python-preparation/action.yml").read_text())
     script = document["runs"]["steps"][0]["run"]
     repo = tmp_path / "consumer"
     repo.mkdir()
@@ -41,9 +39,7 @@ def test_consumer_preparation_command_is_the_only_preparation_authority(
     )
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    (fake_bin / "uvx").write_text(
-        '#!/bin/sh\necho "shared preparation ran" >&2\nexit 97\n', encoding="utf-8"
-    )
+    (fake_bin / "uvx").write_text('#!/bin/sh\necho "shared preparation ran" >&2\nexit 97\n', encoding="utf-8")
     (fake_bin / "uvx").chmod(0o755)
     environment = {
         **os.environ,
@@ -70,17 +66,13 @@ def test_consumer_preparation_command_is_the_only_preparation_authority(
 def test_preparation_action_reads_non_newline_version_and_only_tracked_python(
     tmp_path: Path,
 ) -> None:
-    document = yaml.safe_load(
-        (ROOT / "actions/python-preparation/action.yml").read_text()
-    )
+    document = yaml.safe_load((ROOT / "actions/python-preparation/action.yml").read_text())
     script = document["runs"]["steps"][0]["run"]
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     (repo / ".uv-version").write_text("0.12.5", encoding="utf-8")
-    (repo / "pyproject.toml").write_text(
-        '[project]\nname = "fixture"\nversion = "0.1.0"\n', encoding="utf-8"
-    )
+    (repo / "pyproject.toml").write_text('[project]\nname = "fixture"\nversion = "0.1.0"\n', encoding="utf-8")
     (repo / "tracked.py").write_text("value = 1\n", encoding="utf-8")
     (repo / "ignored.py").write_text("value = 2\n", encoding="utf-8")
     subprocess.run(
@@ -121,9 +113,7 @@ def test_preparation_action_reads_non_newline_version_and_only_tracked_python(
 def test_consumer_ruff_config_is_a_fixed_point_without_executing_project_code(
     tmp_path: Path,
 ) -> None:
-    document = yaml.safe_load(
-        (ROOT / "actions/python-preparation/action.yml").read_text()
-    )
+    document = yaml.safe_load((ROOT / "actions/python-preparation/action.yml").read_text())
     script = document["runs"]["steps"][0]["run"]
     repo = tmp_path / "consumer"
     repo.mkdir()
@@ -195,26 +185,18 @@ def test_consumer_ruff_config_is_a_fixed_point_without_executing_project_code(
 def test_nested_ruff_config_does_not_change_unconfigured_sibling_defaults(
     tmp_path: Path,
 ) -> None:
-    document = yaml.safe_load(
-        (ROOT / "actions/python-preparation/action.yml").read_text()
-    )
+    document = yaml.safe_load((ROOT / "actions/python-preparation/action.yml").read_text())
     script = document["runs"]["steps"][0]["run"]
     repo = tmp_path / "mixed-consumer"
     nested = repo / "package"
     nested.mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    (repo / "ruff-base.toml").write_text(
-        'target-version = "py310"\nline-length = 100\n', encoding="utf-8"
-    )
+    (repo / "ruff-base.toml").write_text('target-version = "py310"\nline-length = 100\n', encoding="utf-8")
     (nested / "pyproject.toml").write_text(
         '[tool.ruff]\ntarget-version = "py313"\nline-length = 88\n', encoding="utf-8"
     )
-    (nested / "ruff.toml").write_text(
-        'target-version = "py311"\nline-length = 100\n', encoding="utf-8"
-    )
-    (nested / ".ruff.toml").write_text(
-        'extend = "../ruff-base.toml"\nline-length = 120\n', encoding="utf-8"
-    )
+    (nested / "ruff.toml").write_text('target-version = "py311"\nline-length = 100\n', encoding="utf-8")
+    (nested / ".ruff.toml").write_text('extend = "../ruff-base.toml"\nline-length = 120\n', encoding="utf-8")
     (repo / "-root_format.py").write_text(
         "result = compute(\n"
         "    first_argument, second_argument, third_argument,\n"
@@ -279,9 +261,7 @@ def test_nested_ruff_config_does_not_change_unconfigured_sibling_defaults(
 def test_requires_python_infers_ruff_target_without_forcing_shared_defaults(
     tmp_path: Path,
 ) -> None:
-    document = yaml.safe_load(
-        (ROOT / "actions/python-preparation/action.yml").read_text()
-    )
+    document = yaml.safe_load((ROOT / "actions/python-preparation/action.yml").read_text())
     script = document["runs"]["steps"][0]["run"]
     repo = tmp_path / "python-inference"
     repo.mkdir()
@@ -325,16 +305,9 @@ def test_requires_python_infers_ruff_target_without_forcing_shared_defaults(
         check=False,
     )
     assert prepared.returncode == 0
-    ruff_calls = [
-        call
-        for call in log.read_text(encoding="utf-8").splitlines()
-        if "ruff==" in call
-    ]
+    ruff_calls = [call for call in log.read_text(encoding="utf-8").splitlines() if "ruff==" in call]
     assert len(ruff_calls) == 2
-    assert all(
-        "--isolated" not in call and "--target-version" not in call
-        for call in ruff_calls
-    )
+    assert all("--isolated" not in call and "--target-version" not in call for call in ruff_calls)
     assert "--line-length 110" not in ruff_calls[0]
     assert "--line-length 110" in ruff_calls[1]
     prepared_source = (repo / "module.py").read_text(encoding="utf-8")
@@ -371,9 +344,7 @@ def test_requires_python_infers_ruff_target_without_forcing_shared_defaults(
 def test_nested_requires_python_keeps_ancestor_ruff_formatting_policy(
     tmp_path: Path,
 ) -> None:
-    document = yaml.safe_load(
-        (ROOT / "actions/python-preparation/action.yml").read_text()
-    )
+    document = yaml.safe_load((ROOT / "actions/python-preparation/action.yml").read_text())
     script = document["runs"]["steps"][0]["run"]
     repo = tmp_path / "nested-python-metadata"
     nested = repo / "package"

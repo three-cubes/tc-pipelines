@@ -36,35 +36,23 @@ def test_arbitrary_normalization_is_not_a_public_entrypoint() -> None:
     assert "pre-evaluation-normalize" not in _load(BODY)["inputs"]
 
 
-def test_consumer_preparation_is_forwarded_once_and_replayed_only_for_fixed_point_proof() -> (
-    None
-):
+def test_consumer_preparation_is_forwarded_once_and_replayed_only_for_fixed_point_proof() -> None:
     gate = _load(GATE)
     inputs = _workflow_inputs(gate)
     assert inputs["preparation-command"]["default"] == ""
     steps = gate["jobs"]["preparation"]["steps"]
     first = next(step for step in steps if step.get("name") == "Prepare candidate")
-    second = next(
-        step
-        for step in steps
-        if step.get("name") == "Prove preparation is a fixed point"
-    )
+    second = next(step for step in steps if step.get("name") == "Prove preparation is a fixed point")
     expected = {
         "uv-version": "${{ inputs.uv-version }}",
         "preparation-command": "${{ inputs.preparation-command }}",
     }
     assert first["with"] == second["with"] == expected
 
-    evidence = next(
-        step
-        for step in steps
-        if step.get("name") == "Produce bounded preparation evidence"
-    )
+    evidence = next(step for step in steps if step.get("name") == "Produce bounded preparation evidence")
     assert "inputs.preparation-command == ''" in evidence["if"]
     result = next(step for step in steps if step.get("id") == "result")
-    assert (
-        result["env"]["CUSTOM_PREPARATION"] == "${{ inputs.preparation-command != '' }}"
-    )
+    assert result["env"]["CUSTOM_PREPARATION"] == "${{ inputs.preparation-command != '' }}"
     assert "consumer-owned preparation changed the candidate" in result["run"]
 
 
@@ -92,11 +80,7 @@ def test_reusable_prepares_once_and_proves_a_fixed_point_before_evaluation() -> 
     names = [step.get("name") for step in steps]
 
     first = next(step for step in steps if step.get("name") == "Prepare candidate")
-    second = next(
-        step
-        for step in steps
-        if step.get("name") == "Prove preparation is a fixed point"
-    )
+    second = next(step for step in steps if step.get("name") == "Prove preparation is a fixed point")
     assert first["uses"] == second["uses"]
     assert (
         first["with"]
@@ -107,24 +91,14 @@ def test_reusable_prepares_once_and_proves_a_fixed_point_before_evaluation() -> 
         }
     )
     assert "three-cubes/tc-pipelines/actions/python-preparation@" in first["uses"]
-    assert names.index("Install trusted uv for formatter preparation") < names.index(
-        "Prepare candidate"
-    )
-    assert names.index("Capture committed candidate state") < names.index(
-        "Prepare candidate"
-    )
-    assert names.index("Prepare candidate") < names.index(
-        "Capture first prepared state"
-    )
-    assert names.index("Capture first prepared state") < names.index(
-        "Produce bounded preparation evidence"
-    )
+    assert names.index("Install trusted uv for formatter preparation") < names.index("Prepare candidate")
+    assert names.index("Capture committed candidate state") < names.index("Prepare candidate")
+    assert names.index("Prepare candidate") < names.index("Capture first prepared state")
+    assert names.index("Capture first prepared state") < names.index("Produce bounded preparation evidence")
     assert names.index("Produce bounded preparation evidence") < names.index(
         "Prove preparation is a fixed point"
     )
-    assert names.index("Prove preparation is a fixed point") < names.index(
-        "Capture second prepared state"
-    )
+    assert names.index("Prove preparation is a fixed point") < names.index("Capture second prepared state")
     assert names.index("Capture second prepared state") < names.index(
         "Admit clean candidate or request exact writeback"
     )
