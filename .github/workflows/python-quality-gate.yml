@@ -326,7 +326,7 @@ jobs:
           output: ${{ runner.temp }}/preparation-before.json
           root: ${{ github.workspace }}
       - name: Prepare candidate
-        uses: three-cubes/tc-pipelines/actions/python-preparation@8c7b7e34d58b70c4382d7922c9643dd11f51ca22
+        uses: three-cubes/tc-pipelines/actions/python-preparation@06fa49b5c37d2483b2e49d1190319dd313604c16
         with:
           preparation-command: ${{ inputs.preparation-command }}
           uv-version: ${{ inputs.uv-version }}
@@ -354,7 +354,7 @@ jobs:
           patch: ${{ runner.temp }}/preparation-patch.json
           root: ${{ github.workspace }}
       - name: Prove preparation is a fixed point
-        uses: three-cubes/tc-pipelines/actions/python-preparation@8c7b7e34d58b70c4382d7922c9643dd11f51ca22
+        uses: three-cubes/tc-pipelines/actions/python-preparation@06fa49b5c37d2483b2e49d1190319dd313604c16
         with:
           preparation-command: ${{ inputs.preparation-command }}
           uv-version: ${{ inputs.uv-version }}
