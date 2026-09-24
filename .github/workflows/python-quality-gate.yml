@@ -106,6 +106,15 @@ on:
           (e.g. a render smoke). Empty string skips.
         type: string
         default: ""
+      preparation-command:
+        description: >-
+          Repository-owned deterministic preparation command run once before
+          evaluation and once more to prove a fixed point. When set, it replaces
+          the shared Python lock/Ruff fallback. A command that changes a PR
+          candidate fails with an instruction to run it locally; arbitrary
+          consumer code is never replayed by the trusted writeback worker.
+        type: string
+        default: ""
       post-steps:
         description: >-
           Optional bash run after `tc-fitness run` (always runs unless the gate
@@ -313,8 +322,9 @@ jobs:
           output: ${{ runner.temp }}/preparation-before.json
           root: ${{ github.workspace }}
       - name: Prepare candidate
-        uses: three-cubes/tc-pipelines/actions/python-preparation@c71b669195015f2094e57d912c96df833cfb7218
+        uses: three-cubes/tc-pipelines/actions/python-preparation@8c7b7e34d58b70c4382d7922c9643dd11f51ca22
         with:
+          preparation-command: ${{ inputs.preparation-command }}
           uv-version: ${{ inputs.uv-version }}
       - name: Capture first prepared state
         uses: three-cubes/tc-pipelines/actions/preparation-writeback@c71b669195015f2094e57d912c96df833cfb7218
@@ -330,6 +340,7 @@ jobs:
           output: ${{ runner.temp }}/preparation-first.json
           root: ${{ github.workspace }}
       - name: Produce bounded preparation evidence
+        if: inputs.preparation-command == ''
         uses: three-cubes/tc-pipelines/actions/preparation-writeback@c71b669195015f2094e57d912c96df833cfb7218
         with:
           mode: produce
@@ -339,8 +350,9 @@ jobs:
           patch: ${{ runner.temp }}/preparation-patch.json
           root: ${{ github.workspace }}
       - name: Prove preparation is a fixed point
-        uses: three-cubes/tc-pipelines/actions/python-preparation@c71b669195015f2094e57d912c96df833cfb7218
+        uses: three-cubes/tc-pipelines/actions/python-preparation@8c7b7e34d58b70c4382d7922c9643dd11f51ca22
         with:
+          preparation-command: ${{ inputs.preparation-command }}
           uv-version: ${{ inputs.uv-version }}
       - name: Capture second prepared state
         uses: three-cubes/tc-pipelines/actions/preparation-writeback@c71b669195015f2094e57d912c96df833cfb7218
@@ -360,6 +372,7 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
+          CUSTOM_PREPARATION: ${{ inputs.preparation-command != '' }}
           BEFORE: ${{ runner.temp }}/preparation-before.json
           FIRST: ${{ runner.temp }}/preparation-first.json
           SECOND: ${{ runner.temp }}/preparation-second.json
@@ -382,6 +395,10 @@ jobs:
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          [[ "$CUSTOM_PREPARATION" != "true" ]] || {
+            echo "::error::consumer-owned preparation changed the candidate; run the repository preparation command locally, commit the result, and retry."
+            exit 1
+          }
           [[ "$EVENT_NAME" == "pull_request" ]] || {
             echo "::error::deterministic preparation changed a non-PR candidate that has no writeback path."
             exit 1

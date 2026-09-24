@@ -82,7 +82,10 @@ def test_quality_lanes_do_not_repeat_the_trusted_preparation_policy() -> None:
     preparation = gate["jobs"]["preparation"]
     prepare = next(step for step in _steps(preparation) if step["name"] == "Prepare candidate")
     assert prepare["uses"].startswith("three-cubes/tc-pipelines/actions/python-preparation@")
-    assert prepare["with"] == {"uv-version": "${{ inputs.uv-version }}"}
+    assert prepare["with"] == {
+        "uv-version": "${{ inputs.uv-version }}",
+        "preparation-command": "${{ inputs.preparation-command }}",
+    }
 
 
 @pytest.mark.parametrize(

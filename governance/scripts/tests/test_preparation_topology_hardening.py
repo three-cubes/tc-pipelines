@@ -41,7 +41,10 @@ def test_preparation_uses_only_the_closed_trusted_ruff_policy() -> None:
         step for step in workflow["jobs"]["preparation"]["steps"] if step["name"] == "Prepare candidate"
     )
     assert prepare["uses"].startswith("three-cubes/tc-pipelines/actions/python-preparation@")
-    assert prepare["with"] == {"uv-version": "${{ inputs.uv-version }}"}
+    assert prepare["with"] == {
+        "uv-version": "${{ inputs.uv-version }}",
+        "preparation-command": "${{ inputs.preparation-command }}",
+    }
     names = [step.get("name") for step in workflow["jobs"]["preparation"]["steps"]]
     assert "Install trusted uv for formatter preparation" in names
     assert "Locked uv install" not in names
