@@ -195,6 +195,81 @@ def test_writer_accepts_only_the_declared_trusted_transformation(
     assert (target / "module.py").read_text() == "value = 1\n"
 
 
+def test_trusted_replay_uses_consumer_ruff_config_without_executing_project_code(
+    tmp_path: Path,
+) -> None:
+    source, _ = repository(tmp_path)
+    (source / "pyproject.toml").write_text(
+        '[project]\nname = "ruff-consumer"\nversion = "0.1.0"\n',
+        encoding="utf-8",
+    )
+    nested = source / "package"
+    nested.mkdir()
+    (source / "ruff-base.toml").write_text('target-version = "py310"\nline-length = 100\n', encoding="utf-8")
+    (nested / "pyproject.toml").write_text(
+        '[tool.ruff]\ntarget-version = "py313"\nline-length = 88\n', encoding="utf-8"
+    )
+    (nested / "ruff.toml").write_text('target-version = "py311"\nline-length = 100\n', encoding="utf-8")
+    (nested / ".ruff.toml").write_text('extend = "../ruff-base.toml"\nline-length = 120\n', encoding="utf-8")
+    (source / "-root_formatting.py").write_text(
+        "result = compute(\n"
+        "    first_argument, second_argument, third_argument,\n"
+        "    fourth_argument, fifth_argument\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    (nested / "nested_formatting.py").write_text(
+        "result = compute(\n"
+        "    first_argument, second_argument, third_argument,\n"
+        "    fourth_argument, fifth_argument, sixth_argument\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    (source / "execution_guard.py").write_text('raise RuntimeError("candidate code executed")\n')
+    git(
+        source,
+        "add",
+        "--",
+        "pyproject.toml",
+        "ruff-base.toml",
+        "-root_formatting.py",
+        "package",
+        "execution_guard.py",
+    )
+    subprocess.run(["uvx", "--from", "uv==0.12.5", "uv", "lock"], cwd=source, check=True)
+    git(source, "add", "uv.lock")
+    git(source, "commit", "-qm", "add Ruff consumer configuration")
+    head = git(source, "rev-parse", "HEAD")
+
+    out = tmp_path / "evidence"
+    out.mkdir()
+    pre = snapshot(source, head, out)
+    action = yaml.safe_load((ROOT / "actions/python-preparation/action.yml").read_text())
+    script = action["runs"]["steps"][0]["run"]
+    environment = {
+        **os.environ,
+        "GITHUB_ACTION_PATH": str(ROOT / "actions/python-preparation"),
+        "RUFF_VERSION": "0.16.8",
+        "UV_VERSION": "",
+    }
+    prepared = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", script], cwd=source, env=environment, check=False
+    )
+    assert prepared.returncode == 0
+    assert "result = compute(first_argument," in (source / "-root_formatting.py").read_text()
+    assert "result = compute(first_argument," in (nested / "nested_formatting.py").read_text()
+    assert 'raise RuntimeError("candidate code executed")' in (source / "execution_guard.py").read_text()
+
+    receipt, patch = produce_after(source, pre, out)
+    target = clone_at_head(source, tmp_path / "target")
+    result = apply(target, receipt, patch, head)
+
+    assert result.returncode == 0, result.stderr
+    assert "result = compute(first_argument," in (target / "-root_formatting.py").read_text()
+    assert "result = compute(first_argument," in (target / "package/nested_formatting.py").read_text()
+    assert 'raise RuntimeError("candidate code executed")' in (target / "execution_guard.py").read_text()
+
+
 def test_trusted_policy_repairs_a_stale_uv_lock_and_replays_it(tmp_path: Path) -> None:
     source, _ = repository(tmp_path)
     pyproject = source / "pyproject.toml"
