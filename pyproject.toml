@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "Transition self-test harness for the tc-pipelines AI SDLC product."
 requires-python = ">=3.13"
 dependencies = [
-    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@b9b28cd839925e10c14a03638ffb8fa37b6ef09a",
+    "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@a192008ce391faaa7ce4c207bb784d5b450f81ed",
     "coverage>=7.0",
     "PyYAML>=6.0",
     "jsonschema>=4.23,<5",

@@ -1,23 +1,9 @@
-"""The new-code coverage floor must run somewhere it can still see the trunk.
+"""The new-code coverage floor must run with resolvable trunk evidence.
 
-The floor scores the lines a branch ADDED, which it resolves as the right side of
-`git diff $(git merge-base <trunk> HEAD)...HEAD`. When that merge-base cannot be
-computed the engine treats the change set as EMPTY and the check PASSES — the one
-outcome that looks identical to well-covered code. So the two steps that make the
-diff resolvable are the control: a full-history checkout, and a fetch that creates
-the trunk's remote-tracking ref, which `fetch-depth: 0` alone does not.
-
-That makes the floor's lane different in kind from the lane it used to be. As its
-own job, a shallow checkout was at least a visible line in the job's own log; run
-alongside the coverage combine, the same mistake reads as a green job that merged
-some XML. Nothing downstream distinguishes "the changed lines cleared the floor"
-from "no changed lines were found", so nothing downstream can be the check.
-
-`test_the_floor_soft_passes_without_the_trunk_ref` is why the assertions below are
-not arbitrary: it runs the real engine check over a real repository whose new lines
-are entirely uncovered, and shows it reporting PASS once the trunk ref is removed.
-Deleting that ref is what a shallow clone leaves behind, so the demonstration and
-the wiring assertions describe one failure.
+The floor scores the lines a branch added against its merge base with trunk. The
+workflow therefore provides full history and the trunk remote-tracking ref. The
+engine also fails closed when that ref cannot be resolved, so missing comparison
+evidence cannot look like successfully covered code.
 
 Neither actionlint nor yamllint can see any of this: each judges one file alone,
 and every shape here is individually valid YAML.
@@ -26,6 +12,8 @@ and every shape here is individually valid YAML.
 from __future__ import annotations
 
 import subprocess
+import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -37,11 +25,16 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
 GATE = WORKFLOW_DIR / "python-quality-gate.yml"
 
-#: The module invocation that IS the floor. Finding it locates the lane. The
-#: `-m` is load-bearing: the same dotted path appears in that step's own comment
-#: naming the config table, so matching the bare path would keep finding the lane
-#: after the line that runs the check was deleted.
-FLOOR_INVOCATION = "-m tc_fitness.core_checks.new_code_coverage"
+#: The configured engine invocation that IS the floor. Finding it locates the
+#: lane and proves the consumer's check configuration is loaded.
+FLOOR_INVOCATION = "uv run python -m tc_fitness.core_checks.new_code_coverage"
+FLOOR_PREFLIGHT = """from pathlib import Path
+from tc_fitness.gate_config import load_core_check_configs
+
+floor = load_core_check_configs(Path.cwd()).get("new_code_coverage", {}).get("floor_pct")
+if isinstance(floor, bool) or floor != 100:
+    raise SystemExit(f"new_code_coverage.floor_pct must be 100 for the reusable CI backstop (found {floor!r})")
+print("new_code_coverage.floor_pct is 100")"""
 
 #: The reusable's `coverage-artifact-name` default — what every caller that names
 #: none silently takes.
@@ -99,6 +92,13 @@ def test_the_scan_found_the_lane_that_runs_the_floor() -> None:
     )
 
 
+def test_the_floor_uses_the_backwards_compatible_public_entrypoint() -> None:
+    """The floor must work across supported consumer engine versions."""
+    floor = next(step for step in STEPS if FLOOR_INVOCATION in str(step.get("run", "")))
+    body = str(floor.get("run", ""))
+    assert "tc-fitness run --gate new_code_coverage" not in body
+
+
 def test_the_floor_lane_checks_out_full_history() -> None:
     checkouts = [step for step in STEPS if str(step.get("uses", "")).startswith("actions/checkout@")]
     assert checkouts, (
@@ -139,6 +139,22 @@ def test_the_trunk_ref_is_fetched_before_the_floor_runs() -> None:
     )
 
 
+def test_the_trunk_fetch_is_fail_closed() -> None:
+    """A missing base ref must fail the lane, never turn into a soft pass."""
+    fetch = next(
+        step
+        for step in STEPS
+        if "git fetch" in str(step.get("run", "")) and "new-code-base-ref" in str(step.get("env", ""))
+    )
+    body = str(fetch.get("run", ""))
+    assert "||" not in body, (
+        f"{GATE.name}: base-ref fetch failure is still tolerated with `||`; "
+        "an unresolved merge-base makes the engine see no changed lines and "
+        "therefore cannot be allowed to continue."
+    )
+    assert "set -e" in body or "exit 1" in body, f"{GATE.name}: base-ref fetch step has no failing exit path."
+
+
 def test_the_floor_runs_after_the_report_it_scores() -> None:
     """Scoring a report that a later step writes scores the previous run's file, or none."""
     floor = _index_of(STEPS, lambda s: FLOOR_INVOCATION in str(s.get("run", "")))
@@ -161,6 +177,154 @@ def test_the_floor_runs_after_the_report_it_scores() -> None:
         f"score at all. "
         f"fix: order every report-producing step before the floor step."
     )
+
+
+def test_coverage_artifact_download_is_fail_closed() -> None:
+    """A missing report must fail the job instead of being swallowed."""
+    downloads = [step for step in STEPS if str(step.get("uses", "")).startswith("actions/download-artifact@")]
+    assert downloads, f"{GATE.name}: floor lane has no coverage artifact download."
+    assert all(not step.get("continue-on-error") for step in downloads), (
+        f"{GATE.name}: coverage artifact download uses continue-on-error; a missing report must fail closed."
+    )
+
+
+def test_coverage_assembly_does_not_warn_and_continue() -> None:
+    """Missing or unmergeable coverage data must be a hard failure."""
+    combine = next(step for step in STEPS if "coverage combine" in str(step.get("run", "")))
+    body = str(combine.get("run", ""))
+    assert "set -euo pipefail" in body
+    assert "::warning::" not in body
+    assert "|| echo" not in body
+
+
+def test_failed_quality_lane_cannot_skip_the_floor() -> None:
+    """A failed producer lane must fail the floor job, not exit successfully."""
+    floor = next(step for step in STEPS if "Enforce the new-code coverage floor" == step.get("name"))
+    body = str(floor.get("run", ""))
+    assert "::warning::new-code coverage floor not run" not in body
+    assert "exit 1" in body
+
+
+def test_new_code_floor_contract_is_one_hundred_percent() -> None:
+    """The org policy and reusable must require 100% before scoring coverage."""
+    document = yaml.safe_load(GATE.read_text(encoding="utf-8")) or {}
+    triggers = document.get("on", document.get(True)) or {}
+    floor = (triggers.get("workflow_call") or {}).get("inputs", {}).get("enforce-new-code-coverage") or {}
+    description = str(floor.get("description", ""))
+    assert "100%" in description
+    assert "80%" not in description
+    ruleset = (REPO_ROOT / "governance" / "CANONICAL-ORG-RULESET.md").read_text(encoding="utf-8")
+    assert "| 100% coverage floor on changed lines |" in ruleset
+    assert "| 80% coverage floor on changed lines |" not in ruleset
+    floor_step = next(step for step in STEPS if FLOOR_INVOCATION in str(step.get("run", "")))
+    body = str(floor_step.get("run", ""))
+    assert "tc_fitness.gate_config import load_core_check_configs" in body
+    assert "governance/scripts/" not in body
+    assert "python -c" in body
+    assert FLOOR_PREFLIGHT in body
+    assert body.index("python -c") < body.index(FLOOR_INVOCATION)
+
+
+def test_routed_floor_fixture_configures_the_required_floor() -> None:
+    """The routed floor self-test must supply the same contract as the org policy."""
+    fixture = REPO_ROOT / ".github" / "selftest-fixture" / "floor.tc-fitness.toml"
+    document = tomllib.loads(fixture.read_text(encoding="utf-8"))
+    floor = document["core_checks"]["new_code_coverage"]
+    assert floor["floor_pct"] == 100
+    assert floor["coverage_report"] == "coverage.xml"
+
+    routing = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "test-shard-routing.yml").read_text(encoding="utf-8")
+    )
+    floor_caller = routing["jobs"]["floor"]["with"]
+    assert "floor.tc-fitness.toml .tc-fitness.toml" in floor_caller["coverage-combine-post"]
+
+
+def test_shard_fixture_records_real_coverage_data() -> None:
+    """The combine self-test must upload measured data, not empty marker files."""
+    fixture = REPO_ROOT / ".github" / "selftest-fixture" / ".tc-fitness.toml"
+    document = tomllib.loads(fixture.read_text(encoding="utf-8"))
+    assert document["steps"][0]["run"][:4] == ["python3", "-m", "coverage", "run"]
+
+
+def test_floor_lane_rejects_a_consumer_configured_below_one_hundred_percent(
+    tmp_path: Path,
+) -> None:
+    """The hosted backstop must reject 80% before the configured gate can pass."""
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    (consumer / "pyproject.toml").write_text(
+        '[tool.tc_fitness.core_checks.new_code_coverage]\nroots = ["src"]\nfloor_pct = 80\n',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", FLOOR_PREFLIGHT],
+        cwd=consumer,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1 and "floor_pct must be 100" in result.stderr, (
+        "the CI preflight accepted a consumer floor_pct=80, so the advertised "
+        "100% changed-line backstop can pass at 80%"
+    )
+
+
+def test_floor_lane_accepts_a_consumer_configured_at_one_hundred_percent(
+    tmp_path: Path,
+) -> None:
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    (consumer / "pyproject.toml").write_text(
+        '[tool.tc_fitness.core_checks.new_code_coverage]\nroots = ["src"]\nfloor_pct = 100\n',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", FLOOR_PREFLIGHT],
+        cwd=consumer,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_standalone_fitness_config_overrides_pyproject_floor(tmp_path: Path) -> None:
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    (consumer / "pyproject.toml").write_text(
+        '[tool.tc_fitness.core_checks.new_code_coverage]\nroots = ["src"]\nfloor_pct = 100\n',
+        encoding="utf-8",
+    )
+    (consumer / ".tc-fitness.toml").write_text(
+        '[core_checks.new_code_coverage]\nroots = ["src"]\nfloor_pct = 80\n',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", FLOOR_PREFLIGHT],
+        cwd=consumer,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "found 80" in result.stderr
+
+
+def test_coverage_combine_post_hook_is_blocking() -> None:
+    """A failed report transform must fail the coverage lane that scores it."""
+    job_steps = [
+        step
+        for job in ((yaml.safe_load(GATE.read_text(encoding="utf-8")) or {}).get("jobs") or {}).values()
+        if isinstance(job, dict)
+        for step in (job.get("steps") or [])
+        if isinstance(step, dict) and "coverage-combine-post" in str(step.get("if", ""))
+    ]
+    assert job_steps, "the workflow no longer exposes its coverage-combine-post hook"
+    assert all(not step.get("continue-on-error") for step in job_steps)
+    assert all("|| true" not in str(step.get("run", "")) for step in job_steps)
+    assert all("set -euo pipefail" in str(step.get("run", "")) for step in job_steps)
+    assert all("pytest-shards > 1" not in str(step.get("if", "")) for step in job_steps)
 
 
 def _uploading_gate_callers(path: Path) -> list[tuple[str, dict, str]]:
@@ -324,20 +488,12 @@ def test_the_floor_fails_on_uncovered_new_code(
     )
 
 
-def test_the_floor_soft_passes_without_the_trunk_ref(
+def test_the_floor_fails_closed_without_the_trunk_ref(
     repo_with_uncovered_new_code: Path,
 ) -> None:
-    """The defect the wiring exists to prevent, reproduced.
-
-    Same repository, same uncovered lines, same report — only the trunk ref is
-    gone, which is exactly what a shallow checkout leaves behind. The check now
-    reports PASS, and no signal anywhere distinguishes that from real coverage.
-    """
+    """Missing comparison evidence must not produce a false green result."""
     _git(repo_with_uncovered_new_code, "update-ref", "-d", "refs/remotes/origin/main")
-    assert _floor_verdict(repo_with_uncovered_new_code) == 0, (
-        "the engine now FAILS when the trunk ref is missing, so an unresolvable "
-        "merge-base is no longer silent. That is a stronger guarantee than the "
-        "wiring assertions above assume. "
-        "fix: re-read the engine's _changed_lines soft-pass paths and simplify "
-        "this file's assertions to match."
+    assert _floor_verdict(repo_with_uncovered_new_code) == 1, (
+        "the engine passed without a resolvable trunk ref; missing comparison "
+        "evidence must fail closed rather than masquerade as fully covered code"
     )

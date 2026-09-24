@@ -6,6 +6,11 @@
 # test-shard-routing.yml.
 name = "new-code floor self-test fixture"
 
+[core_checks.new_code_coverage]
+roots = ["."]
+coverage_report = "coverage.xml"
+floor_pct = 100
+
 [[steps]]
 id = "probe-under-coverage"
 summary = "run the shard probe under coverage"
