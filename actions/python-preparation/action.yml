@@ -1,5 +1,5 @@
 name: python-preparation
-description: Apply the trusted, deterministic Python lock and Ruff preparation policy.
+description: Apply the trusted, deterministic Python lock and consumer-configured Ruff preparation policy.
 inputs:
   uv-version:
     description: Explicit uv version override; empty uses the repository .uv-version or the compatibility fallback.
@@ -9,14 +9,6 @@ inputs:
     description: Pinned Ruff release used by the preparation policy.
     required: false
     default: "0.16.8"
-  target-version:
-    description: Ruff target Python version for the compatibility policy.
-    required: false
-    default: "py312"
-  line-length:
-    description: Ruff formatter line length.
-    required: false
-    default: "110"
 runs:
   using: composite
   steps:
@@ -25,8 +17,6 @@ runs:
       env:
         UV_VERSION: ${{ inputs.uv-version }}
         RUFF_VERSION: ${{ inputs.ruff-version }}
-        TARGET_VERSION: ${{ inputs.target-version }}
-        LINE_LENGTH: ${{ inputs.line-length }}
       run: |
         set -euo pipefail
 
@@ -43,10 +33,5 @@ runs:
 
         mapfile -d '' -t paths < <(git ls-files -z -- '*.py' '*.pyi')
         (( ${#paths[@]} == 0 )) && exit 0
-        uvx --from "ruff==${RUFF_VERSION}" ruff check \
-          --force-exclude --select E,F,I,UP,B,S,RUF \
-          --target-version "$TARGET_VERSION" \
-          --ignore E501,RUF022 --fix --no-unsafe-fixes --exit-zero -- "${paths[@]}"
-        uvx --from "ruff==${RUFF_VERSION}" ruff format \
-          --force-exclude --line-length "$LINE_LENGTH" \
-          --target-version "$TARGET_VERSION" -- "${paths[@]}"
+        python3 "$GITHUB_ACTION_PATH/../ruff_policy.py" \
+          prepare "$PWD" "$RUFF_VERSION" "${paths[@]}"

@@ -67,6 +67,9 @@ def replay_trusted_policy(root: Path, uv_version: str) -> tuple[list[dict[str, A
     ]
     if not paths:
         return manifest(root, include_content=True)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from ruff_policy import RuffPreparationError, run_ruff_preparation
+
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -83,43 +86,10 @@ def replay_trusted_policy(root: Path, uv_version: str) -> tuple[list[dict[str, A
         )
         if locked.returncode:
             fail(f"trusted uv lock failed: {locked.stderr.strip()}")
-    for arguments in (
-        [
-            "check",
-            "--force-exclude",
-            "--select",
-            "E,F,I,UP,B,S,RUF",
-            "--target-version",
-            "py312",
-            "--ignore",
-            "E501,RUF022",
-            "--fix",
-            "--no-unsafe-fixes",
-            "--exit-zero",
-            "--",
-            *paths,
-        ],
-        [
-            "format",
-            "--force-exclude",
-            "--line-length",
-            "110",
-            "--target-version",
-            "py312",
-            "--",
-            *paths,
-        ],
-    ):
-        result = subprocess.run(
-            ["uvx", "--from", f"ruff=={RUFF_VERSION}", "ruff", *arguments],
-            cwd=root,
-            text=True,
-            capture_output=True,
-            check=False,
-            env=environment,
-        )
-        if result.returncode:
-            fail(f"trusted Ruff replay failed: {result.stderr.strip()}")
+    try:
+        run_ruff_preparation(root, paths, RUFF_VERSION, environment)
+    except RuffPreparationError as error:
+        fail(f"trusted Ruff replay failed: {error}")
     return manifest(root, include_content=True)
 
 
