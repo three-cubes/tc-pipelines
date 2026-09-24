@@ -44,6 +44,10 @@ name: python-quality-gate
 on:
   workflow_call:
     inputs:
+      runs-on:
+        description: "GitHub Actions runner label for every job in this workflow."
+        type: string
+        default: ubuntu-latest
       # ── Toolchain pins (forwarded to setup-uv-cached) ───────────────────
       python-version:
         description: "Explicit compatibility-matrix override. Empty reads the consumer repository's .python-version."
@@ -276,7 +280,7 @@ jobs:
   # written back and therefore reject a non-fixed-point candidate here.
   preparation:
     name: Prepare exact candidate once
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     outputs:
       evaluated: ${{ steps.result.outputs.evaluated }}
       receipt-created: ${{ steps.result.outputs.receipt-created }}
@@ -429,7 +433,7 @@ jobs:
     name: Detect code changes (change-gate)
     needs: [preparation]
     if: ${{ needs.preparation.outputs.evaluated == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     outputs:
       code-changed: ${{ steps.detect.outputs.code-changed }}
     steps:
@@ -467,7 +471,7 @@ jobs:
     name: Python quality gate
     needs: [preparation, detect-changes]
     if: ${{ needs.preparation.outputs.evaluated == 'true' && (inputs.pytest-shards <= 1 || needs.detect-changes.outputs.code-changed != 'true') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     steps:
       - name: Run the gate (unsharded)
         uses: three-cubes/tc-pipelines/actions/python-gate-body@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
@@ -506,7 +510,7 @@ jobs:
   shards:
     needs: [detect-changes]
     if: ${{ inputs.pytest-shards > 1 && needs.detect-changes.outputs.code-changed == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
     steps:
@@ -526,7 +530,7 @@ jobs:
     needs: [preparation, shards, detect-changes]
     if: ${{ needs.preparation.outputs.evaluated == 'true' && inputs.pytest-shards > 1 && needs.detect-changes.outputs.code-changed == 'true' }}
     name: Python quality gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     strategy:
       fail-fast: false
       matrix:
@@ -584,7 +588,7 @@ jobs:
           && inputs.upload-coverage-artifact
           && needs.detect-changes.outputs.code-changed == 'true'
           && (inputs.pytest-shards > 1 || inputs.enforce-new-code-coverage) }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -737,7 +741,7 @@ jobs:
     needs: [preparation, detect-changes]
     if: ${{ needs.preparation.outputs.evaluated == 'true' && inputs.pytest-shards > 1 && inputs.shard-tier != '' && needs.detect-changes.outputs.code-changed == 'true' }}
     name: Python quality gate (non-shard)
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 45
     permissions:
       contents: read
@@ -786,7 +790,7 @@ jobs:
     name: Python quality gate result
     needs: [preparation, quality, quality-shard, quality-non-shard, coverage-combine]
     if: ${{ always() }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     outputs:
       evaluated: ${{ steps.aggregate.outputs.evaluated }}
     steps:
