@@ -69,7 +69,7 @@ jobs:
           # clone has none of those objects, so they would skip rather than check.
           fetch-depth: 0
       - name: Set up uv + Python
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@37899ffe0815b8679816955cf8b0fbdbd41f12ab # v2.2.1 candidate
       - name: Set up pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
