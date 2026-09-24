@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_TARGET_VERSION = "py312"
@@ -25,48 +26,70 @@ class RuffPreparationError(RuntimeError):
     """Ruff could not prepare one of the tracked file groups."""
 
 
-def _config_in(directory: Path) -> Path | None:
+@dataclass(frozen=True)
+class RuffConfig:
+    path: Path
+    has_ruff_policy: bool
+    has_python_constraint: bool
+
+
+def _config_in(directory: Path) -> RuffConfig | None:
     for name in (".ruff.toml", "ruff.toml"):
         candidate = directory / name
         if candidate.is_file():
-            return candidate
+            return RuffConfig(candidate, True, False)
     candidate = directory / "pyproject.toml"
     if candidate.is_file():
         content = candidate.read_text(encoding="utf-8")
         project = PROJECT_TABLE.search(content)
-        if RUFF_TABLE.search(content) or (
-            project is not None and REQUIRES_PYTHON.search(project.group(1)) is not None
-        ):
-            return candidate
+        has_ruff_policy = RUFF_TABLE.search(content) is not None
+        has_python_constraint = project is not None and REQUIRES_PYTHON.search(project.group(1)) is not None
+        if has_ruff_policy or has_python_constraint:
+            # Ruff can infer its target from project metadata without replacing
+            # the shared fallback width used by this repository.
+            return RuffConfig(candidate, has_ruff_policy, has_python_constraint)
     return None
 
 
-def _config_for_path(root: Path, relative_path: str) -> Path | None:
+def _config_for_path(root: Path, relative_path: str) -> RuffConfig | None:
     directory = (root / relative_path).parent
+    nearest_ruff_policy: RuffConfig | None = None
+    nearest_python_metadata: RuffConfig | None = None
     while directory != root.parent:
         config = _config_in(directory)
-        if config is not None:
-            return config.relative_to(root)
+        if config is not None and config.has_ruff_policy and nearest_ruff_policy is None:
+            nearest_ruff_policy = config
+        if config is not None and config.has_python_constraint and nearest_python_metadata is None:
+            nearest_python_metadata = config
         if directory == root:
             break
         directory = directory.parent
-    return None
+    selected = nearest_ruff_policy or nearest_python_metadata
+    if selected is None:
+        return None
+    return RuffConfig(
+        selected.path.relative_to(root),
+        selected.has_ruff_policy,
+        selected.has_python_constraint,
+    )
 
 
-def ruff_groups(root: Path, paths: list[str]) -> list[tuple[Path | None, list[str]]]:
+def ruff_groups(root: Path, paths: list[str]) -> list[tuple[RuffConfig | None, list[str]]]:
     """Partition tracked paths by their nearest Ruff config, preserving order."""
-    groups: dict[Path | None, list[str]] = {}
+    groups: dict[RuffConfig | None, list[str]] = {}
     for relative_path in sorted(paths):
         groups.setdefault(_config_for_path(root, relative_path), []).append(relative_path)
-    return sorted(groups.items(), key=lambda group: "" if group[0] is None else group[0].as_posix())
+    return sorted(groups.items(), key=lambda group: "" if group[0] is None else group[0].path.as_posix())
 
 
-def _arguments(config_path: Path | None, task: str) -> list[str]:
+def _arguments(config: RuffConfig | None, task: str) -> list[str]:
     arguments = [task]
-    if config_path is None:
+    if config is None:
         arguments.extend(["--isolated", "--target-version", DEFAULT_TARGET_VERSION])
         if task == "format":
             arguments.extend(["--line-length", DEFAULT_LINE_LENGTH])
+    elif not config.has_ruff_policy and task == "format":
+        arguments.extend(["--line-length", DEFAULT_LINE_LENGTH])
     if task == "check":
         arguments.extend(
             [
@@ -92,7 +115,7 @@ def run_ruff_preparation(
     environment: dict[str, str] | None = None,
 ) -> None:
     """Apply the pinned lint fixes and formatter without executing project code."""
-    for config_path, grouped_paths in ruff_groups(root, paths):
+    for config, grouped_paths in ruff_groups(root, paths):
         for task in ("check", "format"):
             result = subprocess.run(
                 [
@@ -100,7 +123,7 @@ def run_ruff_preparation(
                     "--from",
                     f"ruff=={ruff_version}",
                     "ruff",
-                    *_arguments(config_path, task),
+                    *_arguments(config, task),
                     "--",
                     *grouped_paths,
                 ],

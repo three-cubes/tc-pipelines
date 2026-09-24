@@ -200,7 +200,7 @@ def test_trusted_replay_uses_consumer_ruff_config_without_executing_project_code
 ) -> None:
     source, _ = repository(tmp_path)
     (source / "pyproject.toml").write_text(
-        '[project]\nname = "ruff-consumer"\nversion = "0.1.0"\n',
+        '[project]\nname = "ruff-consumer"\nversion = "0.1.0"\nrequires-python = ">=3.10,<3.11"\n',
         encoding="utf-8",
     )
     nested = source / "package"
@@ -268,6 +268,64 @@ def test_trusted_replay_uses_consumer_ruff_config_without_executing_project_code
     assert "result = compute(first_argument," in (target / "-root_formatting.py").read_text()
     assert "result = compute(first_argument," in (target / "package/nested_formatting.py").read_text()
     assert 'raise RuntimeError("candidate code executed")' in (target / "execution_guard.py").read_text()
+
+
+def test_trusted_replay_keeps_ancestor_ruff_policy_with_nested_python_metadata(
+    tmp_path: Path,
+) -> None:
+    source, _ = repository(tmp_path)
+    (source / "pyproject.toml").write_text(
+        '[project]\nname = "root-policy"\nversion = "0.1.0"\n'
+        'requires-python = ">=3.12"\n\n'
+        '[tool.ruff]\ntarget-version = "py312"\nline-length = 120\n',
+        encoding="utf-8",
+    )
+    nested = source / "package"
+    nested.mkdir()
+    (nested / "pyproject.toml").write_text(
+        '[project]\nname = "nested-metadata"\nversion = "0.1.0"\nrequires-python = ">=3.10,<3.11"\n',
+        encoding="utf-8",
+    )
+    module = nested / "module.py"
+    module.write_text(
+        "result = compute(\n"
+        "    first_argument, second_argument, third_argument,\n"
+        "    fourth_argument, fifth_argument, sixth_argument\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    git(source, "add", "pyproject.toml", "package/pyproject.toml", "package/module.py")
+    subprocess.run(["uvx", "--from", "uv==0.12.5", "uv", "lock"], cwd=source, check=True)
+    git(source, "add", "uv.lock")
+    git(source, "commit", "-qm", "add ancestor Ruff policy and nested metadata")
+    head = git(source, "rev-parse", "HEAD")
+
+    out = tmp_path / "evidence"
+    out.mkdir()
+    pre = snapshot(source, head, out)
+    action = yaml.safe_load((ROOT / "actions/python-preparation/action.yml").read_text())
+    environment = {
+        **os.environ,
+        "GITHUB_ACTION_PATH": str(ROOT / "actions/python-preparation"),
+        "RUFF_VERSION": "0.16.8",
+        "UV_VERSION": "",
+    }
+    prepared = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", action["runs"]["steps"][0]["run"]],
+        cwd=source,
+        env=environment,
+        check=False,
+    )
+    assert prepared.returncode == 0
+    prepared_source = module.read_text(encoding="utf-8")
+    assert "result = compute(first_argument," in prepared_source
+
+    receipt, patch = produce_after(source, pre, out)
+    target = clone_at_head(source, tmp_path / "target")
+    result = apply(target, receipt, patch, head)
+
+    assert result.returncode == 0, result.stderr
+    assert "result = compute(first_argument," in (target / "package/module.py").read_text()
 
 
 def test_trusted_policy_repairs_a_stale_uv_lock_and_replays_it(tmp_path: Path) -> None:
