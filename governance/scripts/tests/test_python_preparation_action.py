@@ -183,7 +183,7 @@ def test_requires_python_infers_ruff_target_without_forcing_shared_defaults(tmp_
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     (repo / "pyproject.toml").write_text(
-        '[project]\nname = "python-inference"\nversion = "0.1.0"\nrequires-python = ">=3.10,<3.11"\n',
+        '[project]\nname = "python-inference"\nversion = "0.1.0"\nrequires-python = ">=3.13,<3.14"\n',
         encoding="utf-8",
     )
     (repo / "module.py").write_text(
@@ -234,7 +234,7 @@ def test_requires_python_infers_ruff_target_without_forcing_shared_defaults(tmp_
         text=True,
     )
     assert settings.returncode == 0, settings.stderr
-    assert "linter.unresolved_target_version = 3.10" in settings.stdout
+    assert "linter.unresolved_target_version = 3.13" in settings.stdout
 
     second = subprocess.run(
         ["bash", "-euo", "pipefail", "-c", script], cwd=repo, env=environment, check=False
@@ -252,11 +252,11 @@ def test_nested_requires_python_keeps_ancestor_ruff_formatting_policy(tmp_path: 
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     (repo / "pyproject.toml").write_text(
         '[project]\nname = "root-policy"\nversion = "0.1.0"\n\n'
-        '[tool.ruff]\ntarget-version = "py312"\nline-length = 120\n',
+        '[tool.ruff]\ntarget-version = "py313"\nline-length = 120\n',
         encoding="utf-8",
     )
     (nested / "pyproject.toml").write_text(
-        '[project]\nname = "nested-metadata"\nversion = "0.1.0"\nrequires-python = ">=3.10,<3.11"\n',
+        '[project]\nname = "nested-metadata"\nversion = "0.1.0"\nrequires-python = ">=3.13,<3.14"\n',
         encoding="utf-8",
     )
     (nested / "module.py").write_text(
@@ -298,4 +298,4 @@ def test_nested_requires_python_keeps_ancestor_ruff_formatting_policy(tmp_path: 
     )
     assert settings.returncode == 0, settings.stderr
     assert "formatter.line_width = 120" in settings.stdout
-    assert "linter.unresolved_target_version = 3.12" in settings.stdout
+    assert "linter.unresolved_target_version = 3.13" in settings.stdout

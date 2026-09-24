@@ -200,7 +200,7 @@ def test_trusted_replay_uses_consumer_ruff_config_without_executing_project_code
 ) -> None:
     source, _ = repository(tmp_path)
     (source / "pyproject.toml").write_text(
-        '[project]\nname = "ruff-consumer"\nversion = "0.1.0"\nrequires-python = ">=3.10,<3.11"\n',
+        '[project]\nname = "ruff-consumer"\nversion = "0.1.0"\nrequires-python = ">=3.13,<3.14"\n',
         encoding="utf-8",
     )
     nested = source / "package"
@@ -276,14 +276,14 @@ def test_trusted_replay_keeps_ancestor_ruff_policy_with_nested_python_metadata(
     source, _ = repository(tmp_path)
     (source / "pyproject.toml").write_text(
         '[project]\nname = "root-policy"\nversion = "0.1.0"\n'
-        'requires-python = ">=3.12"\n\n'
-        '[tool.ruff]\ntarget-version = "py312"\nline-length = 120\n',
+        'requires-python = ">=3.13,<3.14"\n\n'
+        '[tool.ruff]\ntarget-version = "py313"\nline-length = 120\n',
         encoding="utf-8",
     )
     nested = source / "package"
     nested.mkdir()
     (nested / "pyproject.toml").write_text(
-        '[project]\nname = "nested-metadata"\nversion = "0.1.0"\nrequires-python = ">=3.10,<3.11"\n',
+        '[project]\nname = "nested-metadata"\nversion = "0.1.0"\nrequires-python = ">=3.13,<3.14"\n',
         encoding="utf-8",
     )
     module = nested / "module.py"
