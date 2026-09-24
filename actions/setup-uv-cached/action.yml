@@ -63,6 +63,10 @@ runs:
         version: ${{ steps.toolchain.outputs.uv_version }}
         python-version: ${{ steps.toolchain.outputs.python_version }}
         enable-cache: true
+        # Merge-group lanes share one immutable lock-derived key. They may all
+        # restore it, but saving from each parallel lane only creates reservation
+        # contention; PR/main runs remain the cache producers.
+        save-cache: ${{ github.event_name != 'merge_group' }}
         # Root-anchored, with no `**`. The action's default glob walks the
         # whole workspace, so in a repo that also carries a pnpm workspace it
         # descends every `node_modules` tree — measured at 86.3s to locate 40

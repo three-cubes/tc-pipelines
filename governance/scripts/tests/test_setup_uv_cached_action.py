@@ -223,6 +223,16 @@ def test_org_action_installs_only_the_uv_locked_project_environment() -> None:
     assert "uv pip install" not in action
 
 
+def test_merge_queue_restores_but_does_not_race_to_save_the_shared_cache() -> None:
+    """Parallel merge-group lanes must not contend to create one cache key."""
+
+    action = _yaml(ACTION)
+    install = next(step for step in action["runs"]["steps"] if "astral-sh/setup-uv@" in step.get("uses", ""))
+
+    assert install["with"]["enable-cache"] is True
+    assert install["with"]["save-cache"] == "${{ github.event_name != 'merge_group' }}"
+
+
 def test_default_ci_sync_installs_the_explicit_dev_dependency_group() -> None:
     """The published default installs CI tools declared in the locked dev group."""
     action = _yaml(ACTION)
