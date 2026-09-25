@@ -457,7 +457,7 @@ jobs:
         # Immutable SHA pin (SGO-280 shipped the action to main; its bootstrap
         # branch ref was left dangling after the branch was deleted, breaking the
         # self-test — SGO-303 repins it as the release step intended).
-        uses: three-cubes/tc-pipelines/actions/detect-code-changes@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1
+        uses: three-cubes/tc-pipelines/actions/detect-code-changes@37899ffe0815b8679816955cf8b0fbdbd41f12ab # v2.2.1
         with:
           code-change-filter: ${{ inputs.code-change-filter }}
           fetch-depth: ${{ inputs.fetch-depth }}
@@ -474,7 +474,7 @@ jobs:
     runs-on: ${{ inputs.runs-on }}
     steps:
       - name: Run the gate (unsharded)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@37899ffe0815b8679816955cf8b0fbdbd41f12ab # v2.2.1 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -537,7 +537,7 @@ jobs:
         shard: ${{ fromJSON(needs.shards.outputs.matrix) }}
     steps:
       - name: Run the gate (shard ${{ matrix.shard }}/${{ inputs.pytest-shards }})
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@37899ffe0815b8679816955cf8b0fbdbd41f12ab # v2.2.1 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -620,7 +620,7 @@ jobs:
           base="${BASE_REF#origin/}"
           git fetch --no-tags origin "+refs/heads/${base}:refs/remotes/origin/${base}"
       - name: Locked uv install
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@37899ffe0815b8679816955cf8b0fbdbd41f12ab # v2.2.1 candidate
         with:
           uv-version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}
@@ -752,7 +752,7 @@ jobs:
           echo "::error::shard-tier is set but non-shard-tier is empty — every step outside the shard tier would drop out of the gate while it still reported green. fix: set non-shard-tier to the tier holding those steps. next: re-run."
           exit 1
       - name: Run the gate (non-shard tier)
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@37899ffe0815b8679816955cf8b0fbdbd41f12ab # v2.2.1 candidate
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}

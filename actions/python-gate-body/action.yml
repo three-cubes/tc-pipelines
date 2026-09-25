@@ -97,7 +97,7 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       # install` has run that includes every `node_modules` tree. Measured on
       # a consumer: 79s here, against 1.1s in a job that installs uv first.
     - name: Locked uv install
-      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1 candidate
+      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@37899ffe0815b8679816955cf8b0fbdbd41f12ab # v2.2.1 candidate
       with:
         uv-version: ${{ inputs.uv-version }}
         python-version: ${{ inputs.python-version }}

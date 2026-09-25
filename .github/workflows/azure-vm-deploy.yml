@@ -279,7 +279,7 @@ jobs:
           PY
 
       - name: WIF Azure login
-        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@9a0f888e4ce475e5446762fa6992c83decd213b3 # v2.2.1
+        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@37899ffe0815b8679816955cf8b0fbdbd41f12ab # v2.2.1
         with:
           client-id: ${{ inputs.azure-client-id }}
           tenant-id: ${{ inputs.azure-tenant-id }}
