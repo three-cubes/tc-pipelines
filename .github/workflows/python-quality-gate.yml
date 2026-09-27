@@ -457,7 +457,7 @@ jobs:
         # Immutable SHA pin (SGO-280 shipped the action to main; its bootstrap
         # branch ref was left dangling after the branch was deleted, breaking the
         # self-test — SGO-303 repins it as the release step intended).
-        uses: three-cubes/tc-pipelines/actions/detect-code-changes@37899ffe0815b8679816955cf8b0fbdbd41f12ab # v2.2.1
+        uses: three-cubes/tc-pipelines/actions/detect-code-changes@f82eb3c5ea0addbfa13c41f4034e5ba107620aed # v2.2.1
         with:
           code-change-filter: ${{ inputs.code-change-filter }}
           fetch-depth: ${{ inputs.fetch-depth }}
@@ -620,7 +620,7 @@ jobs:
           base="${BASE_REF#origin/}"
           git fetch --no-tags origin "+refs/heads/${base}:refs/remotes/origin/${base}"
       - name: Locked uv install
-        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@37899ffe0815b8679816955cf8b0fbdbd41f12ab # v2.2.1 candidate
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@f82eb3c5ea0addbfa13c41f4034e5ba107620aed # v2.2.1 candidate
         with:
           uv-version: ${{ inputs.uv-version }}
           python-version: ${{ inputs.python-version }}
