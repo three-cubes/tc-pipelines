@@ -22,7 +22,7 @@ description: |
     permissions: { id-token: write, contents: read }
     steps:
       - id: app
-        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@37899ffe0815b8679816955cf8b0fbdbd41f12ab # v2.2.1
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@e2bb181307ae1751e035624f10c7c034b0f132d3 # v2.2.1
         with:
           client-id:       {{ vars.AZURE_CLIENT_ID }}
           tenant-id:       {{ vars.AZURE_TENANT_ID }}
