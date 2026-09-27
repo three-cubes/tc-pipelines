@@ -46,6 +46,7 @@ OPERATIONS = {
     "canary",
     "cleanup",
     "fleet",
+    "host-readiness",
     "readiness",
     "resolve-hold",
     "stage",
@@ -74,6 +75,7 @@ MAX_STDERR_TAIL_BYTES = 64 * 1024
 TERM_GRACE_SECONDS = 1
 OPERATION_TIMEOUT_SECONDS = {
     "status": 60,
+    "host-readiness": 120,
     "readiness": 120,
     "verify": 300,
     "cleanup": 300,
