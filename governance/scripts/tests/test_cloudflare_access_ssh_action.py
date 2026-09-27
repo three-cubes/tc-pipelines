@@ -277,6 +277,16 @@ def test_stage_accepts_same_day_release_suffix() -> None:
     assert request["release_tag"] == "v2026.9.7.4"
 
 
+def test_host_readiness_is_an_allowed_non_mutating_operation() -> None:
+    module = _transport_module()
+
+    _canonical, request = module._validated_request(_request(operation="host-readiness"))
+
+    assert request["operation"] == "host-readiness"
+    assert module.OPERATION_TIMEOUT_SECONDS["host-readiness"] == 120
+    assert "host-readiness" not in module.MUTATING_OPERATIONS
+
+
 @pytest.mark.parametrize(
     "updates",
     [
@@ -496,6 +506,7 @@ def test_every_operation_has_a_fixed_code_owned_deadline() -> None:
     module = _transport_module()
     assert module.OPERATION_TIMEOUT_SECONDS == {
         "status": 60,
+        "host-readiness": 120,
         "readiness": 120,
         "verify": 300,
         "cleanup": 300,
