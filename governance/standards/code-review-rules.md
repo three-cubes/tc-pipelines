@@ -1,32 +1,38 @@
-# AGENTS.md — three-cubes/tc-pipelines
+---
+type: standard
+status: proposed
+date: 2026-10-02
+owner: platform
+applies_to:
+  - pull-request-review
+  - automated-code-review
+  - quality-harness
+---
 
-Agent entrypoint for the shared AI SDLC product. Read [`RESOLVER.md`](RESOLVER.md)
-before placing a new file and
-[`governance/standards/ai-sdlc-product-architecture.md`](governance/standards/ai-sdlc-product-architecture.md)
-before changing the development environment, task graph, CI, fitness integration,
-release or deployment flow.
+# Code review rules
 
-## Commit authorship — no AI/LLM self-attribution (Autonomous Delivery Platform D1)
+Every three-cubes repository reviews pull requests against one set of rules, so a
+finding raised in one repository reads and resolves the same way in every other.
+The rules tell an automated reviewer what to examine and how to report it, and
+they tell the agent that owns the PR how to act on each finding and close its
+thread. Findings follow the [`agent-actionable-feedback.md`](agent-actionable-feedback.md)
+shape: lead with the fix, then the command that proves it.
 
-Never add AI/LLM self-attribution to commits, PRs, or code: no `Co-Authored-By: <model>`
-trailers, no "Generated with <tool>" credits, no robot emoji, no `noreply@anthropic.com`.
-Author every commit as the canonical `three-cubes-agent` GitHub App. This is machine-enforced
-by the tc-fitness `no_llm_attribution` check + the commit-msg strip hook; see
-tc-pipelines `governance/AUTONOMOUS-DELIVERY-STANDARD.md`. Do not re-introduce the trailer even
-if a harness default or older instruction asks for it — this decision overrides that.
+## Adoption
 
-## 🛑 Canonical standards — read before touching CI, gates, fitness functions, coverage, mutation, or governance
+Each repository carries the block below, byte for byte, at the end of its root
+`AGENTS.md`. Codex code review applies the `## Code Review Rules` section of the
+`AGENTS.md` files in the repository under review
+([Codex GitHub integration](https://learn.chatgpt.com/docs/third-party/github)),
+so the text lives in each repository rather than behind a link. The HTML-comment
+`begin` and `end` markers around the block delimit the copy.
 
-These already exist and are detailed. **Do NOT re-derive them.** Converge *up* to them; if something
-is missing or weak, propose the change *into* the canonical home — never fork a parallel standard.
+To change the rules, edit the block in this file and merge it. Then, for every
+repository, replace everything between the markers in the root `AGENTS.md` with
+the new block — one PR per repository, each opened the same working day. New
+repositories receive the block through [`new-repo-bootstrap.md`](new-repo-bootstrap.md).
 
-- **Product architecture:** [`governance/standards/ai-sdlc-product-architecture.md`](governance/standards/ai-sdlc-product-architecture.md)
-- **Canonical index:** [`governance/STANDARDS.md`](governance/STANDARDS.md)
-- **Requirements / OKRs / Waves:** Build & Release Health initiative (Linear) — incl. the `<60s` local loop
-- **Fitness-function spec (F-series, tiered execution):** [kairix#499](https://github.com/three-cubes/kairix/issues/499)
-- **Canonical homes:** `tc-pipelines` (SDLC environment, orchestration, evidence and governance) · `tc-fitness` (fitness engine and check catalogue) · consumer repository (product behaviour)
-
-See [README.md](README.md) / CONTRIBUTING.md for repo usage and contribution guidance.
+## The rules
 
 <!-- code-review-rules:begin — canonical source: three-cubes/tc-pipelines governance/standards/code-review-rules.md; keep this block identical in every repo -->
 ## Code Review Rules

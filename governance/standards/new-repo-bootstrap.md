@@ -27,7 +27,8 @@ The adoption change contains:
 - a thin GitHub workflow caller;
 - branch rulesets and code-owner routing;
 - dependency-update configuration;
-- repository authoring entrypoints and resolver;
+- repository authoring entrypoints and resolver, with the
+  [`code-review-rules.md`](code-review-rules.md) block in the root `AGENTS.md`;
 - secret scanning and Git hooks;
 - release callers when the repository publishes artefacts;
 - deployment callers when the repository owns a runtime target.
