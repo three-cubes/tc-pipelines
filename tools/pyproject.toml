@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 dependencies = ["pyjwt[crypto]>=2,<3"]  # [crypto] -> cryptography, required for RS256 App JWTs
 
 [dependency-groups]
-test = ["pytest>=8,<9"]
+test = ["pytest>=8,<10"]
 
 [project.scripts]
 # `agent-token` -> short-lived per-agent App installation token on stdout.
