@@ -107,6 +107,7 @@ level — see §3–§4 — and are not duplicated below.)
 | SDLC & workflow | [`ci-release-deployment-architecture.md`](standards/ci-release-deployment-architecture.md) | Local evidence, exact-merge validation, toolchain parity, attested candidates, protected publish, deployment handoff and PVT. |
 | SDLC & workflow | [`contract-test-patterns.md`](standards/contract-test-patterns.md) | Copy-paste contract-test skeletons (TS + Python) + baseline-shrink. |
 | SDLC & workflow | [`process-shared-repo-pr-review-and-merge.md`](standards/process-shared-repo-pr-review-and-merge.md) | Review + merge process for shared repos the author can't self-approve. |
+| SDLC & workflow | [`code-review-rules.md`](standards/code-review-rules.md) | What automated review examines, the actionable finding shape, and how the PR's agent resolves each thread. |
 | SDLC & workflow | [`agent-process-controls.md`](standards/agent-process-controls.md) | The control hierarchy for agent-behaviour risks — push high-value risks from guidance up to structural gates. |
 | Quality & fitness | [`quality-ratchet.md`](standards/quality-ratchet.md) | Touched-file coverage ratchet — lift without papering. |
 | Quality & fitness | [`mutation-testing-survival-ratchet.md`](standards/mutation-testing-survival-ratchet.md) | Diff-scoped mutation + survivors ratchet. |
