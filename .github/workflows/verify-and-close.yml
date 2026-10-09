@@ -416,24 +416,28 @@ jobs:
           # markers + any AI/LLM self-attribution footer stripped (D1 — the
           # harvest comment must never re-introduce attribution), blank runs
           # collapsed, and capped so the harvest stays a DISTILLATION not a copy.
-          # Deterministic, no network.
-          summary="$(printf '%s\n' "$pr_body" \
+          # Deterministic, no network. The cap is applied in bash, not by piping
+          # into head: under pipefail a head that exits early SIGPIPEs the
+          # upstream writers (exit 141) and fails the step on any long PR body.
+          # ${var:0:N} counts characters in the runner UTF-8 locale, so the cap
+          # never splits a multibyte sequence.
+          summary_full="$(printf '%s\n' "$pr_body" \
             | sed -e 's/<!--.*-->//g' -e '/^[[:space:]]*Co-authored-by:/Id' -e '/🤖/d' \
-            | awk 'NF{blank=0} !NF{blank++} blank<2' \
-            | head -c 3500)"
+            | awk 'NF{blank=0} !NF{blank++} blank<2')"
+          summary="${summary_full:0:3500}"
           [[ -n "${summary//[[:space:]]/}" ]] || summary="_(no PR description provided)_"
 
           # Distil the key decisions: the section under a heading matching
           # /decision/i (up to the next heading), else a pointer to the PR + ADRs.
-          decisions="$(printf '%s\n' "$pr_body" \
+          decisions_full="$(printf '%s\n' "$pr_body" \
             | awk '
                 /^#{1,6}[[:space:]].*[Dd]ecision/ { grab=1; next }
                 /^#{1,6}[[:space:]]/             { grab=0 }
                 grab                             { print }
               ' \
             | sed -e 's/<!--.*-->//g' \
-            | awk 'NF{blank=0} !NF{blank++} blank<2' \
-            | head -c 1500)"
+            | awk 'NF{blank=0} !NF{blank++} blank<2')"
+          decisions="${decisions_full:0:1500}"
           [[ -n "${decisions//[[:space:]]/}" ]] \
             || decisions="See merged PR${pr_number:+ #${pr_number}} and any ADRs it links."
 

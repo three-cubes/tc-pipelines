@@ -27,6 +27,14 @@ for the consumer-facing `@vN` workflow/action references.
   and every Git-metadata helper writes the canonical bot identity. Actions
   repository secrets are explicitly not a local plaintext retrieval mechanism.
 
+### Fixed
+
+- **verify-and-close no longer fails on a long pull request body.** The harvest
+  step capped the distilled summary and decisions with `head -c` inside
+  `set -o pipefail`; on a body over the cap, head exited early, the upstream
+  writers took SIGPIPE and the step failed with exit 141 after a passing verify.
+  The step now captures the full text and caps it in bash.
+
 ## [2.2.0] — 2026-09-18
 
 ### Added
