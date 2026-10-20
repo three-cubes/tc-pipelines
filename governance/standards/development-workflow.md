@@ -26,7 +26,7 @@ Track substantial or delegated work as a Linear work item — do not let it live
 
 Create local commits with the canonical `three-cubes-agent[bot]` author and committer metadata; this needs no credential. Send every off-CI `git`, `gh`, or API write through the trusted host broker, which mints a repository-scoped, short-lived installation token for the selected App and confines it to one operation. The agent harness never receives Key Vault access or token material, and never falls back to a shared human PAT. In Actions, the WIF-backed composite provides the equivalent job-scoped token path; Actions repository secrets are not a local plaintext retrieval mechanism. The App tiers remain least-privilege: an agent cannot self-approve, bypass CODEOWNERS, or override branch protection.
 
-Commit *author* and *committer* always resolve to `three-cubes-agent[bot]` / `295831460+three-cubes-agent[bot]@users.noreply.github.com`, independent of which per-agent App performs the remote write. Carry no AI/LLM self-attribution: no `Co-Authored-By: <model>` trailer, no "Generated with" credit, no robot emoji. The `no_llm_attribution` + `canonical_commit_identity` fitness checks and the commit-msg strip hook enforce this on every commit and the PR title + body. Because a PR author cannot approve their own PR, App-authorship is exactly what lets a human maintainer review the control-plane changes that need one.
+Commit *author* and *committer* always resolve to `three-cubes-agent[bot]` / `295831460+three-cubes-agent[bot]@users.noreply.github.com`, independent of which per-agent App performs the remote write. Reviewed dependency-bump PRs keep their Dependabot or Renovate bot authorship, which `canonical_commit_identity` accepts; any other automation identity requires a governance change before use. Carry no AI/LLM self-attribution: no `Co-Authored-By: <model>` trailer, no "Generated with" credit, no robot emoji. The `no_llm_attribution` + `canonical_commit_identity` fitness checks and the commit-msg strip hook enforce this on every commit and the PR title + body. Because a PR author cannot approve their own PR, App-authorship is exactly what lets a human maintainer review the control-plane changes that need one. Recreate a human-authored agent PR through the App.
 
 Ordinary work then **merges itself on a green gate** — no human runs the merge; a human review is required only on the control-plane paths CODEOWNERS pins (see the Merge gate below). Canon: the [Agent SDLC-access + HITL standard](../agent-sdlc-access-and-hitl.md) + [`STANDARDS.md §4`](../STANDARDS.md).
 
@@ -43,8 +43,8 @@ Idea → Issue → Plan → Execute → Review → Merge → Deploy → Verify
 | **Idea → Issue** | All work starts as a tracked issue. Assign priority and milestone. |
 | **Issue → Plan** | List files that change, define verification criteria, identify dependencies and risks. |
 | **Plan → Execute** | Branch from `main`, follow commit conventions, run verification after every logical change. |
-| **Execute → Review** | Open PR as the App, all automated checks pass, complete manual verification checklist. |
-| **Review → Merge** | On a green gate, `auto-merge-on-green.yml` arms `gh pr merge --auto` as the App and GitHub merges the moment every required check passes — no human runs the merge. Branch deletes after merge. |
+| **Execute → Review** | Open PR as the App and verify the App as PR author, all automated checks pass, complete manual verification checklist. |
+| **Review → Merge** | On a green gate, the lane arms GitHub's native auto-merge (`gh pr merge --auto`) and GitHub merges the moment every required check passes — no human runs the merge. Branch deletes after merge. |
 | **Merge → Release or Deploy → Verify** | Exact integration allocates the release, builds one immutable candidate, publishes it through the protected environment and deploys that digest. Product PVT promotes or rolls back the candidate. See `sdlc-release-workflow.md` and `ci-release-deployment-architecture.md`. |
 
 > **Product release deploys the qualified digest.** The release graph hands the
@@ -96,7 +96,11 @@ sign-off path. Use the stable repository commands:
 
 Repositories on the migration path use their documented `make check` command
 until `tc-sdlc` supplies these targets. Their adoption state is recorded in
-[`../../docs/MIGRATION.md`](../../docs/MIGRATION.md).
+[`../../docs/MIGRATION.md`](../../../execution/pipelines/docs/MIGRATION.md).
+
+Run the local gate before every push; CI is the sign-off. Reproduce any CI
+failure locally, fix it there, and push once — a push whose CI failure was
+locally reproducible is a process violation.
 
 Record local evidence in the PR or handoff: tested commit, exact commands,
 terminal exit status, SDLC lock, task identities and generated receipt or
@@ -164,11 +168,16 @@ A change is DONE when its behaviour is proven and its required gate is verified.
 
 ### Branch Naming
 
-The `branch_naming` fitness gate enforces Linear's `gitBranchName` shape
+The **`org-branch-naming`** org ruleset (native `branch_name_pattern`, all repos,
+every non-`main` branch — see [`CANONICAL-ORG-RULESET.md`](../CANONICAL-ORG-RULESET.md))
+enforces the branch shape. A branch is Linear's `gitBranchName` shape
 `<user>/<team>-<number>-<slug>` — the branch carries its Linear issue
 identifier, so the issue↔branch↔PR link is automatic (per
-[`roadmap-management-linear-github.md`](roadmap-management-linear-github.md)).
-Copy the exact name from the Linear issue ("Copy git branch name"):
+[`roadmap-management-linear-github.md`](roadmap-management-linear-github.md)) —
+OR a Conventional Branch operational prefix
+(`feat`/`fix`/`docs`/`chore`/`ci`/`build`/`refactor`/`test`/`perf`/`style`/`hotfix`/`release`/`revert`/`experiment`/`deps`/`feature`/`bugfix`)
+OR a bot namespace (`dependabot`/`renovate`). For work-item branches, copy the
+exact name from the Linear issue ("Copy git branch name"):
 
 ```
 dan/kno-45-pr-a-sync-compose_slide-dispatch-table-stage-columns
@@ -176,8 +185,8 @@ dan/kno-48-pr-d-mcp-powerpoint-doctor-cli-bindoctor
 dan/exe-12-engagement-bundle-manifest
 ```
 
-`main`/`develop` and automation branches (`worktree-agent-*`, `renovate/*`,
-`dependabot/*`, `gh-pages`) are exempt. The commit-message type prefix
+`main` is the protected trunk, governed by the org `main` rulesets rather than
+`org-branch-naming`. The commit-message type prefix
 (`feat`/`fix`/`chore`/…) still names the concern — see Commit Messages below.
 
 ### Commit Messages
@@ -199,15 +208,15 @@ docs: update ways of working with agent workflow
 
 ### Merge gate — required contexts, review, and auto-merge
 
-Three status contexts gate every merge: **Quality gate** (`uv run tc-fitness run`), **SonarCloud scan** (the coverage + new-code analysis job), and **SonarCloud Code Analysis** (the SonarCloud app's new-code quality gate); a repo that has hardened its gate also requires **Mutation**. The `main` ruleset (`RULESET-D1`) blocks deletion + force-push, is **not strict** (no forced up-to-date rebase), does **not** stale-dismiss reviews, and requires **0 approvals on ordinary work**.
+Two status contexts gate every merge: **Quality gate** (`uv run tc-fitness run`, the fan-in check-run) and **no-attribution** (the commit-authorship check). SonarCloud is decommissioned; a free two-tier gate (deterministic OSS checks + a self-hosted Foundry LLM judge) replaces it and is not a required context. Branch protection is org-level: the `main` ruleset (`RULESET-D1`, applied as the org rulesets in [`CANONICAL-ORG-RULESET.md`](../CANONICAL-ORG-RULESET.md)) blocks deletion + force-push, is **not strict** (no forced up-to-date rebase), does **not** stale-dismiss reviews, and requires **0 approvals on ordinary work**.
 
-**Ordinary work auto-merges on green.** `auto-merge-on-green.yml` fires on the Quality-gate `workflow_run` completion; when the fan-in "CI gate" check-run is green it arms `gh pr merge --auto` as the App, and GitHub merges the instant every required context passes. No human runs the merge.
+**Ordinary work auto-merges on green.** The lane arms GitHub's native auto-merge (`gh pr merge --auto`), and GitHub merges the instant every required context passes. No human runs the merge.
 
 **Control-plane changes hold for a human.** A PR that touches a CODEOWNERS-owned path — the CI/merge machinery, the gate's own definition (`[tool.tc_fitness]`), governance canon, contracts/schemas, deploy/runtime-config — requires a `@three-cubes/maintainers` (humans-only) review and does **not** auto-merge. Everything else — skills, tools, tests, feature docs, content — merges unattended on green. This is what makes App-authorship load-bearing: because an author cannot approve their own PR, the required human review is a genuine second party. The two CORE paved-road repos (tc-pipelines, tc-fitness) hold *every* PR for an `n+1` human approval — see [`process-shared-repo-pr-review-and-merge.md`](process-shared-repo-pr-review-and-merge.md).
 
-`gh pr merge --admin` is the **owner's logged exception**, requested by an agent and never self-authorised — a ruleset with no bypass actors blocks even admins, so the override is a deliberate human act. It clears the review gate and, under the interim coverage-gate policy, a **coverage / duplication / smell-only** SonarCloud Code Analysis failure — but never a required check red for another reason, and never a **Security Rating worse than A**. Before any `--admin` past a failing SonarCloud Code Analysis, read the SonarCloud PR decoration (`gh api repos/<org>/<repo>/issues/<pr>/comments` → the `sonarqubecloud[bot]` body) and check the failed conditions. A security finding is fixed, not bypassed — repo policy sets **no Sonar issue-ignore overrides** (see `sonar-project.properties`): genuinely refactor the finding (e.g. validate + reconstruct a URL flowing to `urlopen` for S5144 SSRF), never suppress it.
+`gh pr merge --admin` is the **owner's logged exception**, requested by an agent and never self-authorised — a ruleset with no bypass actors blocks even admins, so the override is a deliberate human act. It clears the review gate only, and only with every **required** check green. A security finding is fixed, not bypassed: genuinely refactor the finding (e.g. validate + reconstruct a URL flowing to `urlopen` for S5144 SSRF), never suppress it.
 
-Canon: [`STANDARDS.md §4`](../STANDARDS.md) + [`agent-sdlc-access-and-hitl.md`](../agent-sdlc-access-and-hitl.md); `RULESET-D1` / `CODEOWNERS-D1` / `STD-MERGE` in [`ADR-POLICY.md`](../decisions/ADR-POLICY.md).
+Canon: [`STANDARDS.md §4`](../STANDARDS.md) + [`agent-sdlc-access-and-hitl.md`](../agent-sdlc-access-and-hitl.md); `RULESET-D1` / `CODEOWNERS-D1` / `STD-MERGE` in [`ADR-POLICY.md`](../decisions/ADR-0002-adr-policy.md).
 
 ---
 

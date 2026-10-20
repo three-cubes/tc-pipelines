@@ -13,19 +13,23 @@ name: 'Reusable — Azure VM deploy (WIF → snapshot → apply → smoke)'
 #       uses: three-cubes/tc-pipelines/.github/workflows/azure-vm-deploy.yml@<sha> # vX.Y.Z
 #       with:
 #         resource-group: RG-AGENTS-CORE
+#         # The host's deploy root (execution/docs/standards/deploy-root.md),
+#         # exported as TC_DEPLOY_ROOT before every remote script runs.
+#         deploy-root: ${{ vars.TC_DEPLOY_ROOT }}
 #         targets: |
 #           - vm-name: vm-openclaw
 #             apply-script: |
-#               cd /data/development/tc-agent-zone && git pull --ff-only
+#               cd "$TC_DEPLOY_ROOT" && git pull --ff-only
 #               bash devsecops/apply/apply-openclaw-config.sh --no-snapshot
 #             smoke-units: 'openclaw-gateway cli-proxy-api caddy'
 #           - vm-name: vm-hermes-poc
 #             apply-script: |
-#               cd /data/development/tc-agent-zone && git pull --ff-only
+#               cd "$TC_DEPLOY_ROOT" && git pull --ff-only
 #               bash devsecops/apply/hermes/apply-config.sh --no-snapshot
 #             smoke-units: 'hermes-gateway-northcoast-retention.service'
 #         op-tag: deploy-on-merge
 #         skip-snapshot: ${{ inputs.skip_snapshot }}
+#         environment-name: production  # the GitHub environment the deploy identity trusts
 #       permissions:
 #         contents: read
 #         id-token: write
@@ -96,17 +100,35 @@ on:
         required: false
         type: string
         default: ''
+      environment-name:
+        description: |
+          The GitHub environment the deploy job runs in. A job calling a reusable
+          workflow cannot set `environment` itself, so the caller names it here.
+          Empty leaves the job without an environment, as before, and its OIDC
+          subject is then the ref's. A deploy identity from
+          execution/infrastructure/github-deploy/ trusts only the environment
+          subject, so a caller signing in as one must pass the environment the
+          identity's instance names (execution/operations/runbooks/github-deploy-identity.md).
+        required: false
+        type: string
+        default: ''
       azure-client-id:
-        description: WIF identity client ID (typically vars.AZURE_CLIENT_ID).
-        required: true
+        description: |
+          WIF identity client ID. Optional: empty resolves vars.AZURE_CLIENT_ID inside
+          the deploy job, after environment-name applies, so an environment-level
+          variable works (a caller's `with:` cannot read one).
+        required: false
+        default: ''
         type: string
       azure-tenant-id:
-        description: Azure AD tenant ID (typically vars.AZURE_TENANT_ID).
-        required: true
+        description: 'Azure AD tenant ID. Optional, empty resolves vars.AZURE_TENANT_ID inside the deploy job.'
+        required: false
+        default: ''
         type: string
       azure-subscription-id:
-        description: Subscription ID (typically vars.AZURE_SUBSCRIPTION_ID).
-        required: true
+        description: 'Subscription ID. Optional, empty resolves vars.AZURE_SUBSCRIPTION_ID inside the deploy job.'
+        required: false
+        default: ''
         type: string
       surface-apply-output:
         description: |
@@ -139,6 +161,17 @@ on:
           a `*-receipt-b64-` marker; the reusable retains only 1–2048 URL-safe
           Base64 characters after it. Arbitrary protected output remains
           suppressed.
+        required: false
+        type: string
+        default: ''
+      deploy-root:
+        description: |
+          The host's deploy root (execution/docs/standards/deploy-root.md): an
+          absolute path of letters, digits, `.`, `_`, `-` and `/`. When set it is
+          exported as TC_DEPLOY_ROOT at the top of every remote script (preflight,
+          apply and failure cleanup), so a script that expands "$TC_DEPLOY_ROOT"
+          resolves it in the clean remote shell. Empty (default) exports nothing,
+          and a script that needs the variable must set it itself.
         required: false
         type: string
         default: ''
@@ -182,6 +215,10 @@ jobs:
   deploy:
     name: WIF → snapshot → apply → smoke
     runs-on: ubuntu-latest
+    # Empty resolves to no environment (the pre-input behaviour); a name puts the
+    # job behind that environment's reviewers and branch policy and gives it the
+    # environment OIDC subject.
+    environment: ${{ inputs.environment-name }}
     outputs:
       preflight-status: ${{ steps.preflight.outputs.status }}
       preflight-receipt-digest: ${{ steps.preflight.outputs.receipt-digest }}
@@ -192,11 +229,13 @@ jobs:
       apply-output: ${{ steps.apply.outputs.apply-output }}
     steps:
       - if: ${{ inputs.snapshot-policy != 'forbidden' }}
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Validate deployment policy and protected input
+        id: policy
         shell: bash
         env:
+          DEPLOY_ROOT: ${{ inputs.deploy-root }}
           HERMES_RUNTIME_SECRETS_B64: ${{ secrets.hermes-runtime-secrets-b64 }}
           SKIP_SNAPSHOT: ${{ inputs.skip-snapshot }}
           SNAPSHOT_POLICY: ${{ inputs.snapshot-policy }}
@@ -242,6 +281,18 @@ jobs:
             echo "::error::protected-diagnostic-receipt-prefix must identify a receipt-b64 marker" >&2
             exit 1
           fi
+          # `deploy-root` is a free-text input — validate before it is embedded.
+          # The export line is built once here and every remote script carries it.
+          DEPLOY_ROOT="${DEPLOY_ROOT:-}"
+          DEPLOY_ROOT_EXPORT=""
+          if [[ -n "$DEPLOY_ROOT" ]]; then
+            if ! [[ "$DEPLOY_ROOT" =~ ^/[A-Za-z0-9._/-]*$ ]]; then
+              echo "::error::deploy-root must be an absolute path of letters, digits, '.', '_', '-' and '/'" >&2
+              exit 1
+            fi
+            DEPLOY_ROOT_EXPORT="export TC_DEPLOY_ROOT=$(printf '%q' "$DEPLOY_ROOT")"
+          fi
+          echo "deploy-root-export=${DEPLOY_ROOT_EXPORT}" >>"${GITHUB_OUTPUT:-/dev/null}"
           python3 - <<'PY'
           import base64
           import binascii
@@ -279,11 +330,11 @@ jobs:
           PY
 
       - name: WIF Azure login
-        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@f82eb3c5ea0addbfa13c41f4034e5ba107620aed # v2.2.1
+        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@b0268816c0dfa911da7b59b03b8b58f7292e7295 # v2.2.1
         with:
-          client-id: ${{ inputs.azure-client-id }}
-          tenant-id: ${{ inputs.azure-tenant-id }}
-          subscription-id: ${{ inputs.azure-subscription-id }}
+          client-id: ${{ inputs.azure-client-id || vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ inputs.azure-tenant-id || vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ inputs.azure-subscription-id || vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Parse targets
         id: parse
@@ -301,6 +352,7 @@ jobs:
         shell: bash
         env:
           PREFLIGHT_SCRIPT: ${{ inputs.preflight-script }}
+          DEPLOY_ROOT_EXPORT: ${{ steps.policy.outputs.deploy-root-export }}
           TARGETS_YAML: ${{ inputs.targets }}
           RG: ${{ inputs.resource-group }}
         run: |
@@ -357,6 +409,7 @@ jobs:
               printf '%s\n' \
                 'set -e' \
                 'export HOME=/root' \
+                "${DEPLOY_ROOT_EXPORT:-}" \
                 "$PREFLIGHT_SCRIPT" \
                 "printf '%s\n' '${REMOTE_SUCCESS_TOKEN}'"
             )
@@ -436,7 +489,7 @@ jobs:
       - name: Snapshot all VMs
         id: snapshot
         if: ${{ inputs.snapshot-policy != 'forbidden' }}
-        uses: ./.github/actions/snapshot-azure-vm-disk
+        uses: three-cubes/tc-pipelines/.github/actions/snapshot-azure-vm-disk@b0268816c0dfa911da7b59b03b8b58f7292e7295 # v2.2.1
         with:
           resource-group: ${{ inputs.resource-group }}
           vm-names: ${{ steps.parse.outputs.vm-list }}
@@ -457,6 +510,7 @@ jobs:
           HERMES_RUNTIME_SECRETS_B64: ${{ secrets.hermes-runtime-secrets-b64 }}
           PROTECTED_DIAGNOSTIC_PREFIX: ${{ inputs.protected-diagnostic-prefix }}
           PROTECTED_DIAGNOSTIC_RECEIPT_PREFIX: ${{ inputs.protected-diagnostic-receipt-prefix }}
+          DEPLOY_ROOT_EXPORT: ${{ steps.policy.outputs.deploy-root-export }}
           TARGETS_YAML: ${{ inputs.targets }}
           RG: ${{ inputs.resource-group }}
           SURFACE_OUTPUT: ${{ inputs.surface-apply-output }}
@@ -559,6 +613,8 @@ jobs:
           # Accumulate each target's apply output so it can optionally be
           # surfaced as the `apply-output` job output (see surface-apply-output).
           APPLY_ACC="$(mktemp)"
+          # From here EXIT also removes the accumulator, then retries the managed-command cleanup as before.
+          trap 'rm -f "$APPLY_ACC"; cleanup_managed_command' EXIT
           # az vm run-command is serialised per-VM by Azure — invocations
           # collide with a (Conflict) error when a prior extension run is
           # still in flight (operator ad-hoc commands, prior deploy that
@@ -724,6 +780,7 @@ jobs:
                 '(' \
                 '  set -e' \
                 '  export HOME=/root' \
+                "  ${DEPLOY_ROOT_EXPORT:-}" \
                 '  exec 9>/run/lock/tc-pipelines-azure-vm-deploy.lock' \
                 '  flock 9' \
                 "$SCRIPT" \
@@ -937,6 +994,7 @@ jobs:
         shell: bash
         env:
           CLEANUP_SCRIPT: ${{ inputs.failure-cleanup-script }}
+          DEPLOY_ROOT_EXPORT: ${{ steps.policy.outputs.deploy-root-export }}
           TARGETS_YAML: ${{ inputs.targets }}
           RG: ${{ inputs.resource-group }}
         run: |
@@ -978,6 +1036,7 @@ jobs:
               printf '%s\n' \
                 'set -e' \
                 'export HOME=/root' \
+                "${DEPLOY_ROOT_EXPORT:-}" \
                 "$CLEANUP_SCRIPT" \
                 "printf '%s\n' '${REMOTE_SUCCESS_TOKEN}'"
             )

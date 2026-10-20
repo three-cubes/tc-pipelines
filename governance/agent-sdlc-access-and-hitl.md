@@ -2,7 +2,7 @@
 
 > Promoted into tc-pipelines governance (SGO-163) as the org-canonical
 > SDLC-access + HITL standard. The per-agent App manifests it references live at
-> [`agent-app-manifests/`](agent-app-manifests/); the enforcement templates
+> [`agent-app-manifests/`](agent-app-manifests); the enforcement templates
 > (`main` ruleset, CODEOWNERS) live alongside in this `governance/` dir. Consuming
 > repos (`tc-agent-zone`, `kairix`) converge up to this — do not fork a parallel
 > standard.
@@ -31,7 +31,7 @@ Granted comprehensively. Listed alphabetically to map straight to the App /
 fine-grained-token settings page. `write` implies `read`. This is the **Full
 SDLC (Builder)** tier; the orchestration + contributor tiers are the same table
 trimmed — the concrete per-tier encodings are the four
-[`agent-app-manifests/*.json`](agent-app-manifests/).
+[`agent-app-manifests/*.json`](agent-app-manifests).
 
 | Permission | Level | Why |
 |---|---|---|
@@ -81,7 +81,13 @@ them is itself a human action.
    - Required status checks: `Quality gate` and `no-attribution`. Private
      Team-plan repos cannot use a GitHub merge queue; where available (public
      repos) a merge queue re-runs checks on the combined commit, else strict
-     status checks stand in.
+     status checks stand in. The merge queue is a separate repository ruleset
+     applied from [`merge-queue.json`](rulesets/merge-queue.json); the base
+     branch protections come from the org `main` ruleset.
+   - The org ruleset is the live source of truth; a repository-local copy of it
+     stays unapplied. Identify live rulesets by stable `name` rather than numeric
+     ID:
+     `gh api 'repos/<org>/<repo>/rulesets?includes_parents=true' --jq '.[] | {name, enforcement, source_type}'`.
    - No deletion / no force-push; **not strict** (no forced rebase) and **no
      stale-dismiss** (an approval persists through pushes).
    - `bypass_actors`: the human **admin role only** (emergency override). Agent
@@ -111,7 +117,7 @@ mechanical bottleneck.
 Each agent's remote writes authenticate as its **own GitHub App**
 (`tc-agent-builder`, `tc-agent-shape`, `tc-agent-consultant`,
 `tc-agent-growth`) — see
-[`agent-app-manifests/`](agent-app-manifests/). Why apps, not a shared PAT:
+[`agent-app-manifests/`](agent-app-manifests). Why apps, not a shared PAT:
 
 - **Distinct identity** — the audit log shows *which agent* did what (vs. one
   blurred `quanyeomans`/`openclaw-pat` actor).
@@ -119,6 +125,8 @@ Each agent's remote writes authenticate as its **own GitHub App**
   PAT to leak or rotate by hand. Replaces the `*-openclaw-pat` secrets in KV.
 - **Per-agent least-privilege** — tiers (full / orchestration / contributor)
   scope each agent to its role; Growth can't edit workflows, only Builder can.
+- **A PR a human can approve** — the App authors the PR, so a maintainer's
+  review satisfies the CODEOWNERS gate without an owner `--admin` bypass.
 - **Commit metadata is separate** — the App is the authenticated remote actor;
   every agent-authored commit records the canonical `three-cubes-agent[bot]`
   author and committer. GitHub records the pusher separately.
@@ -157,18 +165,27 @@ its Azure session to the harness. There is no fallback to a human PAT. If the
 broker is unavailable, local commits and checks continue; the remote write
 stops until broker service is restored.
 
-The `agent-token` CLI in [`tools/`](../tools/README.md) is the lower-level mint
+The broker runs `git` over HTTPS remotes with credential helpers and prompts
+disabled, and runs `gh` from an allowlist of command groups and actions with
+aliases, extensions and token-printing modes unavailable. Agents raise PRs
+through the broker rather than an ambient `gh` login. Before reporting a PR
+ready, the agent confirms `gh pr view` shows an `app/` author and recreates any
+human-authored PR through the broker. `gh pr merge --admin` is the human owner's
+logged exception; see
+[`development-workflow.md`](standards/development-workflow.md).
+
+The `agent-token` CLI in [`tools/`](https://github.com/three-cubes/tc-pipelines/blob/main/tools/README.md) is the lower-level mint
 implementation for that trusted broker and for restricted platform-operator
 diagnosis. Because it prints a token, it is not the agent-harness interface.
 It requires exactly one `three-cubes/REPO` scope and includes that repository in
 the installation-token exchange, including when the canonical App uses its
-fixed installation ID. Its optional `--git-config` helper always sets the same
+fixed installation ID. Its optional `--git-config` helper mints and prints no token, and always sets the same
 canonical local commit identity shown above, never the selected remote actor.
 
 ### GitHub Actions boundary
 
 In Actions, the
-[`.github/actions/github-app-token`](../.github/actions/github-app-token/action.yml)
+[`.github/actions/github-app-token`](../../execution/pipelines/.github/actions/github-app-token/action.yml)
 composite uses the job's WIF identity to mint the same short-lived App token and
 passes it only to the authorised workflow steps. An Actions repository secret
 is available only inside an explicitly authorised workflow job; GitHub's API

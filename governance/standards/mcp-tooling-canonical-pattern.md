@@ -161,7 +161,7 @@ export function registerExampleTools(server: McpServer) {
   defineTool(server, {
     name: "example_thing",
     description: "Agent-facing description with useful defaults.",
-    schema: z.object({ query: z.string() }).passthrough(),
+    schema: z.looseObject({ query: z.string() }),
     handler: async ({ query }) => ({ result: `echo: ${query}` }),
   });
 }
@@ -235,25 +235,12 @@ uv lock
 uv sync --frozen
 ```
 
-**`src/mcp_<name>/server.py`** — registration:
+**`src/mcp_<name>/tools/example.py`** — schema, handler and registration:
 
 ```python
-from mcp.server.fastmcp import FastMCP
-from mcp_tool_kit import async_tool_handler, wrap_tool_errors
-from .tools import example as example_tools
+from typing import Any
 
-
-def build_server() -> FastMCP:
-    server = FastMCP("mcp-<name>")
-    example_tools.register(server)
-    return server
-```
-
-**`src/mcp_<name>/tools/example.py`** — pure tool functions + decorators:
-
-```python
-from mcp.server.fastmcp import FastMCP
-from mcp_tool_kit import async_tool_handler, wrap_tool_errors
+from mcp_tool_kit import DefinedTool, ToolContext, ToolResult, define_tool
 from pydantic import BaseModel, Field
 
 
@@ -261,25 +248,62 @@ class ExampleInput(BaseModel):
     query: str = Field(..., description="Free-text input")
 
 
-@wrap_tool_errors
-def _tool_example_thing(query: str) -> dict:
-    return {"result": f"echo: {query}"}
+def _example_thing(args: ExampleInput, ctx: ToolContext) -> ToolResult:
+    return ToolResult(text=f"echo: {args.query}")
 
 
-def register(server: FastMCP) -> None:
-    @server.tool(description="Agent-facing description with useful defaults.")
-    @async_tool_handler
-    def example_thing(query: str) -> dict:
-        return _tool_example_thing(query)
+def register(registry: list[DefinedTool[Any]]) -> None:
+    define_tool(
+        registry,
+        name="example_thing",
+        description="Echo a supplied query without changing state.",
+        schema=ExampleInput,
+        handler=_example_thing,
+    )
 ```
 
-The pattern (pure function under the decorator, FastMCP-bound thin adapter on top) mirrors kairix's `server.py` adapters — keeps tests bypassing FastMCP entirely.
+The example is read-only, so it does not declare `irreversible=True`. For a
+tool that changes state, pass `irreversible=True`; `define_tool` then registers
+the `<name>_validate` dry-run companion in the same registry.
+
+**`src/mcp_<name>/server.py`** — stdio server wiring:
+
+```python
+from typing import Any
+
+from mcp_tool_kit import DefinedTool, make_stdio_server, serve_stdio
+
+from .tools import example
+
+
+TOOLS: list[DefinedTool[Any]] = []
+example.register(TOOLS)
+server = make_stdio_server("mcp-<name>", TOOLS)
+
+
+def main_cli() -> None:
+    serve_stdio("mcp-<name>", TOOLS)
+```
+
+`make_stdio_server` owns the SDK `list_tools` and `call_tool` registration and
+dispatches through the shared registry. A handler may raise an ordinary
+exception or a structured toolkit error:
+
+```python
+from mcp_tool_kit import ToolKitError
+
+raise ToolKitError({"code": "not_found", "what": "Item was not found.", "hint": "Check the identifier."})
+```
+
+`dispatch_tool` converts either form to the standard MCP result envelope.
 
 ### 3.2 Anti-patterns
 
 - Per-package `uv.lock` — root `uv.lock` only per ADR-016 D2.
 - Pydantic v1 — Pydantic v2 required.
-- Tool functions raising back to FastMCP — always wrap in `wrap_tool_errors` (the JSON-RPC `-32602` masking incident in kairix #177 motivates this).
+- Returning ad hoc error dictionaries from handlers — raise
+  `ToolKitError({...})` or an ordinary exception and let `dispatch_tool`
+  produce the structured result envelope.
 - Mixing tool registration into `__init__.py` — `server.py` owns the registration.
 - Requiring manual venv activation before the MCP can start — launchers must use the repo/package dependency manager or a declared runtime cache.
 - Writing tracked generated metadata, such as `.egg-info`, into a source tree that the runtime user cannot update.
@@ -309,11 +333,11 @@ Authoritative source: [`mcp-engineering-standard.md`](mcp-engineering-standard.m
 
 | Rule | TS expression | Python expression |
 |---|---|---|
-| Always use the helper | `defineTool` from `@three-cubes/mcp-tool-kit` | `@wrap_tool_errors` + `@async_tool_handler` from `mcp-tool-kit` (python sub-path) |
-| Schema | Zod with `.passthrough()` + did-you-mean | Pydantic v2 strict |
-| Errors | `ToolKitError({ code, what, hint })` | `ToolKitError(code, what, hint)` |
-| Drop-and-warn unknown fields | `.passthrough()` + `NotesCollector` warning | Pydantic `model_config = ConfigDict(extra="ignore")` + log warning |
-| Validate companion for irreversible | `defineTool({ irreversible: true })` auto-registers `<name>_validate` | `define_tool(irreversible=True)` mirror (post-D7) |
+| Always use the helper | `defineTool` from `@three-cubes/mcp-tool-kit` | `define_tool(registry, ...)` from `mcp-tool-kit` (python sub-path) |
+| Schema | Zod 4, `z.looseObject()` + did-you-mean | Pydantic v2 strict |
+| Errors | `ToolKitError({ code, what, hint })` | `ToolKitError({"code": ..., "what": ..., "hint": ...})` |
+| Drop-and-warn unknown fields | `z.looseObject()` + `NotesCollector` warning | Pydantic `model_config = ConfigDict(extra="ignore")` + log warning |
+| Validate companion for irreversible | `defineTool({ irreversible: true })` auto-registers `<name>_validate` | `define_tool(registry, irreversible=True)` auto-registers `<name>_validate` |
 | Idempotency | Document in `description`; agents should be able to retry safely | Same |
 
 ## 5. Test pyramid
@@ -352,10 +376,22 @@ This standard does NOT re-derive build commands — delegate to the linked stand
 
 The runtime resolves MCP servers via its `mcp.servers` config entries (e.g. openclaw's `openclaw.json` template). For each MCP:
 
-- The `command` + `args` must launch the built artefact (TS: `node .../dist/index.js`; Python: `<pkg> mcp serve` or `python -m <pkg>.cli`).
+- The `command` + `args` use the package's checked-in `bin/start.sh` wrapper.
+  The wrapper owns dependency-manager and module details rather than duplicating
+  them in endpoint configuration.
 - The launcher MUST default to stdio transport (ADR-017 D6) — the runtime spawns the process and pipes stdio.
 - Env vars (API tokens, etc.) come from the platform secret store (e.g. Azure Key Vault) via the runtime's secret provider (see the security-framework standard).
 - HTTP transport is not currently supported in the runtime's launcher; defer per ADR-017 D6.
+
+The Python wrapper shape:
+
+```bash
+exec uv run --no-sync --frozen --project "$REPO_ROOT" \
+  --package mcp-<name> python -m mcp_<name>
+```
+
+`--no-sync --frozen` consumes the prebuilt workspace environment without
+writing editable-package metadata into a read-only deployed tree.
 
 After editing the config template:
 
@@ -433,7 +469,7 @@ If a single MCP can't accommodate the bump, hold the bump back across the surfac
 | An MCP ships only one test file | Surface coverage gap | Add per-tool contract tests under `test/contract/` |
 | Tool registered via raw `server.tool(...)` | Author bypassed `defineTool` | Replace with `defineTool` call; the auto-error-envelope is load-bearing |
 | `defineTool` call appears in `src/index.ts` | Author put the tool next to the launcher | Move to `src/tools/<group>.ts` and register from `src/server.ts` |
-| Tool raises an exception that surfaces as JSON-RPC `-32602` to the agent | Tool wasn't wrapped in `wrap_tool_errors` (Python) or escaped `defineTool` (TS) | Wrap. The kairix incident report (kairix #177) is the canon example. |
+| Tool raises an exception that surfaces as JSON-RPC `-32602` to the agent | The tool bypassed `dispatch_tool` (Python) or escaped `defineTool` (TS) | Register Python handlers with `define_tool` and serve the registry with `make_stdio_server` / `serve_stdio`; the shared dispatcher owns error conversion. |
 | `pnpm install --frozen-lockfile` fails after adding a new MCP | Member glob missed the new path, or root `package.json` didn't get the workspace bump | Verify `pnpm-workspace.yaml` glob; re-run `pnpm install` (no `--frozen-lockfile`) to regenerate |
 | `uv lock --check` fails after adding a Python MCP | Member not added to root `[tool.uv.workspace] members` | Add member; re-run `uv lock`; commit `uv.lock` alongside `pyproject.toml` |
 | MCP tool is visible but unusable | Env/template root differs between gateway, wrapper and direct bridge | Declare one default path/env contract and test the real MCP invocation |

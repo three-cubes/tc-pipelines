@@ -17,8 +17,8 @@ PREPARE_RELEASE = REPO_ROOT / "actions" / "prepare-release-metadata" / "prepare_
 PREPARE_ACTION = REPO_ROOT / "actions" / "prepare-release-metadata" / "action.yml"
 
 
-def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([*args], capture_output=True, text=True, cwd=cwd, check=False)
+def _run(cwd: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([*args], capture_output=True, text=True, cwd=cwd, check=False, env=env)
 
 
 def _project(tmp_path: Path) -> Path:
@@ -74,6 +74,30 @@ def test_semantic_bump_updates_project_lock_changelog_and_receipt(
     receipt = json.loads((project / ".release-prepared.json").read_text(encoding="utf-8"))
     assert receipt["version"] == "v1.2.4"
     assert receipt["version_file"] == ""
+
+
+def test_semantic_bump_reads_a_plain_version_when_the_caller_forces_colour(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path)
+
+    prepared = _run(
+        project,
+        "python3",
+        str(PREPARE_RELEASE),
+        "--bump",
+        "patch",
+        "--tag-prefix",
+        "v",
+        "--version-file",
+        "",
+        "--date",
+        "2099-09-18",
+        env={**os.environ, "FORCE_COLOR": "1"},
+    )
+
+    assert prepared.returncode == 0, prepared.stderr
+    assert "version=v1.2.4" in prepared.stdout
 
 
 def test_action_empty_version_file_skips_plain_file_binding(tmp_path: Path) -> None:

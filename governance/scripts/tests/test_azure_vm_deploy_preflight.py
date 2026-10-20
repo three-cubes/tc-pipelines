@@ -10,8 +10,20 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "azure-vm-deploy.yml"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+# tc-pipelines governance/ lives in assurance/governance/ (ADR-0001 D4).
+GOVERNANCE_ROOT = next(
+    root
+    for root in (PLATFORM_ROOT / "assurance" / "governance", PLATFORM_ROOT / "governance")
+    if root.is_dir()
+)
+WORKFLOW = PLATFORM_ROOT / ".github" / "workflows" / "azure-vm-deploy.yml"
 SNAPSHOT_ACTION = REPO_ROOT / ".github" / "actions" / "snapshot-azure-vm-disk" / "action.yml"
 
 
@@ -92,6 +104,9 @@ def fake_remote_tools(tmp_path: Path) -> tuple[Path, Path]:
     yq = bin_dir / "yq"
     yq.write_text(
         """#!/usr/bin/env bash
+# Read all of stdin first, as the real yq does: the workflow pipes `echo "$TARGETS_YAML" | yq ...` under pipefail,
+# and a stand-in that exits without reading lets `echo` take SIGPIPE (status 141) whenever it loses the race.
+cat >/dev/null
 case "$1" in
   length) echo 1 ;;
   '.[0].vm-name') echo vm-test ;;
@@ -268,17 +283,6 @@ def test_terminal_conflict_does_not_sleep_before_failure() -> None:
         assert script.index(terminal_guard) < script.index('sleep "$wait_seconds"')
 
 
-def test_snapshot_standard_documents_reversible_preflight_path() -> None:
-    standard = (REPO_ROOT / "governance" / "standards" / "snapshot-before-apply.md").read_text(
-        encoding="utf-8"
-    )
-
-    assert "Reversible pre-snapshot admission path" in standard
-    assert "Keep preflight to writer freezes and lease acquisition" in standard
-    assert "partial preflight" in standard
-    assert "failure or cancellation" in standard
-
-
 def test_snapshot_action_surfaces_created_resource_ids() -> None:
     action = yaml.load(SNAPSHOT_ACTION.read_text(encoding="utf-8"), Loader=GithubActionsLoader)
 
@@ -385,3 +389,12 @@ fi
     assert "snapshot delete -g rg-test -n legacy-osdisk-pre-deploy-1 --no-wait" in calls
     assert "tagged-osdisk-pre-deploy-2" in output.read_text(encoding="utf-8")
     assert "legacy-osdisk-pre-deploy-1" in output.read_text(encoding="utf-8")
+
+
+def test_snapshot_standard_documents_reversible_preflight_path() -> None:
+    standard = (GOVERNANCE_ROOT / "standards" / "snapshot-before-apply.md").read_text(encoding="utf-8")
+
+    assert "Reversible pre-snapshot admission path" in standard
+    assert "Keep preflight to writer freezes and lease acquisition" in standard
+    assert "partial preflight" in standard
+    assert "failure or cancellation" in standard

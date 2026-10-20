@@ -46,7 +46,11 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+WORKFLOW_DIR = PLATFORM_ROOT / ".github" / "workflows"
 ACTION_DIRS = (REPO_ROOT / "actions", REPO_ROOT / ".github" / "actions")
 
 EXPRESSION = re.compile(r"\$\{\{(.+?)\}\}", re.DOTALL)
@@ -204,7 +208,7 @@ def _ternaries() -> list[tuple[str, str, str, list[str], str, dict]]:
                 selected, guards, fallback = ternary
                 found.append(
                     (
-                        str(path.relative_to(REPO_ROOT)),
+                        str(path.relative_to(PLATFORM_ROOT)),
                         "/".join(keypath),
                         selected,
                         guards,

@@ -16,6 +16,10 @@ quality bar is [`../gate-hardening.md`](../gate-hardening.md).
 - consumer repositories own product configuration, tests, qualification
   journeys and deployment values.
 
+A consumer repository keeps a check locally only when it enforces a rule that
+exists in that repository alone. A rule a sibling repository would also apply
+belongs in `tc-fitness`.
+
 ## Change fitness behaviour
 
 1. Define the expected finding and public check contract in `tc-fitness`.
@@ -45,6 +49,10 @@ human code-owner review.
 
 Hosted workflow YAML owns GitHub events, credentials, runners and protected
 environments. Portable execution behaviour enters the package and task graph.
+A caller passes only inputs and secrets that satisfy the reusable workflow's
+`workflow_call` contract, and a pull request that runs the changed caller job
+proves that contract before merge; a skipped or change-gated job leaves it
+unexercised. See [`code-review-rules.md`](code-review-rules.md).
 
 ## Preparation behaviour
 
@@ -78,13 +86,16 @@ individual pins.
 
 ## Current compatibility surfaces
 
-The current `fitness-engine-canary.yml`, direct engine pins, direct workflow
-pins and consumer-repin dispatcher remain as migration surfaces. Their behaviour
-is represented in reference fixtures before removal. New shared capability is
-implemented in the coordinated package, image, graph or release catalogue.
+Direct engine pins and direct workflow pins remain as migration surfaces. Their
+behaviour is represented in reference fixtures before removal. The engine canary
+and the consumer-repin dispatcher are retired: the engine's own workspace gate
+and Dependabot replace them. New shared capability is implemented in the
+coordinated package, image, graph or release catalogue.
 
 ## Harness routing
 
 Every repository authoring entrypoint links to
 [`../STANDARDS.md`](../STANDARDS.md) and the product architecture. This sends
-changes to the canonical implementation rather than a consumer-local copy.
+changes to the canonical implementation rather than a consumer-local copy. The
+`harness_canon_reference` fitness check fails a repository whose harness does not
+reference the standards index.

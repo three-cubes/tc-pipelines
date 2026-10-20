@@ -6,7 +6,7 @@ until this is green.
 
 Run (stdlib only, no deps, no network — the transport/judgment seams are injected):
 
-    python3 -m unittest discover -s governance/loop/tests -v
+    python3 -m unittest discover -s orchestration/loops/tests -v
 """
 
 from __future__ import annotations
@@ -16,6 +16,14 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# The lights-out gate (loop_dispatcher.guardrails_validated) runs this harness under
+# stdlib unittest on a runner that installs no packages; tier_marks supplies pytest's
+# marks there and pytest itself everywhere else.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from tier_marks import pytest
+
+pytestmark = pytest.mark.unit
+
 
 import loop_state_machine as loop
 from loop_state_machine import (

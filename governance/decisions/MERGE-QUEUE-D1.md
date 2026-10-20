@@ -22,8 +22,24 @@ The canonical queue configuration lives in
 
 - **grouping = ALLGREEN** — a group merges only if the whole group is green
   (one red entry fails the group, not just itself).
-- **group size** — `min_entries_to_merge: 1`, `max_entries_to_merge: 1`,
+- **group size** — `min_entries_to_merge: 1`, `max_entries_to_merge: 5`,
   `min_entries_to_merge_wait_minutes: 0`, `max_entries_to_build: 3`.
+  - Each entry is still tested once, on top of the entries ahead of it, so
+    the group size changes no queue run. It caps how many green entries land
+    on `main` in one merge: a burst lands as one push, so the default branch
+    runs its post-merge workflows once instead of once per pull request. A
+    quiet repository rarely fills a group, so the cap costs it nothing.
+    A workflow that acts on each merged pull request after a push to `main`
+    must therefore handle several in one push: the `verify-and-close` reusable
+    lists the merge commits on the push's first-parent chain and closes each
+    one's work item.
+  - The queue does not hold entries to fill a group
+    (`min_entries_to_merge: 1`, no wait): entries already build side by side,
+    so waiting would only add latency.
+  - `max_entries_to_build` is the throughput lever: enough concurrent builds
+    to cover the peak arrival rate over the queue run time. When an entry
+    fails, every entry built on top of it rebuilds, so raise it (to 5) only
+    while the queue's failure rate stays low (under about one run in ten).
 - **allowed merge method** — `MERGE` (the repository's merge-commit policy).
 - **check-response timeout** — `check_response_timeout_minutes: 45`, matching
   the longest required shared-gate lane (a required
@@ -61,8 +77,7 @@ on:
 ```
 
 The job named **"CI gate"** (the fan-in check-run that
-[`auto-merge-on-green.yml`](../../.github/workflows/auto-merge-on-green.yml)
-keys off) must therefore report on BOTH `pull_request` and `merge_group`.
+the former `auto-merge-on-green.yml` keyed off; GitHub's native auto-merge now does) must therefore report on BOTH `pull_request` and `merge_group`.
 
 ## Reconciliation with kata ADR-013
 

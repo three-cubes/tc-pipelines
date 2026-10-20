@@ -54,8 +54,8 @@ Mutation testing is the structural instrument for that goal because:
   passing.
 
 The ratchet shape (touched files, baseline shrinks only) is identical to
-the SonarCloud and coverage ratchets in `quality-ratchet.md`. This doc
-extends that pattern to a third data source.
+the in-repo ratchets in `quality-ratchet.md`. This doc
+extends that pattern to mutation survivors.
 
 ## 2. Per-language tooling
 
@@ -183,7 +183,7 @@ The `mutation_survival_ratchet.py` gate:
 6. Aggregates per-package: if any touched file in a package regressed,
    the package FAILs.
 
-Same override grammar as Sonar ratchet:
+Same override grammar as the quality ratchet:
 
 ```
 mutation-ratchet-acknowledged: <path> — <specific reason>

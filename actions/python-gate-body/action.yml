@@ -86,7 +86,7 @@ runs:  # ${{ inputs.probe-undeclared-input }}
   using: composite
   steps:
     - name: Checkout
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: ${{ inputs.fetch-depth }}
         ref: ${{ inputs.candidate-head-sha }}
@@ -97,7 +97,7 @@ runs:  # ${{ inputs.probe-undeclared-input }}
       # install` has run that includes every `node_modules` tree. Measured on
       # a consumer: 79s here, against 1.1s in a job that installs uv first.
     - name: Locked uv install
-      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@f82eb3c5ea0addbfa13c41f4034e5ba107620aed # v2.2.1 candidate
+      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@b0268816c0dfa911da7b59b03b8b58f7292e7295 # v2.2.1 candidate
       with:
         uv-version: ${{ inputs.uv-version }}
         python-version: ${{ inputs.python-version }}
@@ -133,12 +133,12 @@ runs:  # ${{ inputs.probe-undeclared-input }}
     # ── Node / pnpm half (opt-in) ───────────────────────────────────────
     - name: Set up pnpm
       if: inputs.run-node == 'true'
-      uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       with:
         version: ${{ inputs.pnpm-version }}
     - name: Set up Node
       if: inputs.run-node == 'true'
-      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: ${{ inputs.node-version-file }}
         cache: pnpm
@@ -317,14 +317,14 @@ runs:  # ${{ inputs.probe-undeclared-input }}
     # suffix so `download-artifact` with a pattern gathers them).
     - name: Upload coverage XML (unsharded)
       if: ${{ always() && inputs.upload-coverage-artifact == 'true' && inputs.shard-index == '' }}
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: ${{ inputs.coverage-artifact-name }}
         path: ${{ inputs.coverage-xml-path }}
         if-no-files-found: ignore
     - name: Upload shard coverage data (sharded)
       if: ${{ always() && inputs.upload-coverage-artifact == 'true' && inputs.shard-index != '' }}
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: ${{ inputs.coverage-artifact-name }}-shard-${{ inputs.shard-index }}
         path: .coverage.*

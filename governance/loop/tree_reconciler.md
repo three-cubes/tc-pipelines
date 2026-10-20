@@ -75,7 +75,7 @@ Linear personal/workspace-key form).
 ## CLI (`--dry-run` — the report-only view)
 
 Runs on the stuck-session cron cadence. Report-only — **no Linear writes, no side
-effects**. Run from `governance/loop/`:
+effects**. Run from `orchestration/loops/`:
 
 ```sh
 # offline: a combined snapshot {issues, delegations, branches}
@@ -98,7 +98,7 @@ non-clean report exit `4` so a cron/CI job can surface drift.
 ## Run
 
 ```sh
-python3 -m unittest discover -s governance/loop/tests -v
+python3 -m unittest discover -s orchestration/loops/tests -v
 ```
 
 This is a CORE repo, so per decision **D3** these files take **n+1 human review**

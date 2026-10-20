@@ -16,8 +16,7 @@ on:
       run-for-real:
         description: >-
           Leave false (default) for the static call-graph self-check — the job
-          stays gated off and only the input/secret SHAPES are validated. The
-          dispatcher (example-callers.yml) passes this through.
+          stays gated off and only the input/secret SHAPES are validated.
         type: boolean
         default: false
 
@@ -38,5 +37,5 @@ jobs:
       azure-tenant-id: "00000000-0000-0000-0000-000000000000"
       azure-subscription-id: "00000000-0000-0000-0000-000000000000"
     secrets:
-      linear-api-key: dummy-key-shape-check-only
-      agent-runtime-token: dummy-token-shape-check-only
+      linear-api-key: dummy-key-shape-check-only  # pragma: allowlist secret (a placeholder for the call shape)
+      agent-runtime-token: dummy-token-shape-check-only  # pragma: allowlist secret (a placeholder for the call shape)

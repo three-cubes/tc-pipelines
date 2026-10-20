@@ -8,7 +8,13 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
 from governance.scripts import local_workspace_cleanup as cleanup
+
+pytestmark = pytest.mark.integration
+
+# The tc-pipelines root this tree mirrors (assurance/ here), so governance/ paths resolve from any working directory.
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def run_git(cwd: Path, *args: str) -> str:
@@ -453,7 +459,7 @@ def test_registry_omitted_lists_default_to_empty(tmp_path: Path) -> None:
 
 
 def test_launch_agent_template_has_report_only_default_and_apply_opt_in() -> None:
-    template_path = Path("governance/workspace/com.three-cubes.tc-pipelines.workspace-cleanup.plist")
+    template_path = REPO_ROOT / "governance/workspace/com.three-cubes.tc-pipelines.workspace-cleanup.plist"
     template = template_path.read_text()
     document = plistlib.loads(template_path.read_bytes())
     assert "--apply" not in template
@@ -483,7 +489,7 @@ def test_launch_agent_installer_renders_escaped_paths_and_absolute_tools(tmp_pat
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
         "TC_WORKSPACE_CLEANUP_REGISTRY": str(registry),
     }
-    script = Path("governance/scripts/install-local-workspace-cleanup.sh")
+    script = REPO_ROOT / "governance/scripts/install-local-workspace-cleanup.sh"
     subprocess.run(["bash", str(script)], check=True, env=env, capture_output=True, text=True)
     target = home / "Library/LaunchAgents/com.three-cubes.tc-pipelines.workspace-cleanup.plist"
     document = plistlib.loads(target.read_bytes())

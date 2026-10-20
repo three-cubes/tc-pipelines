@@ -19,7 +19,7 @@ repo set. Three target `main`; the fourth targets every non-`main` branch. Snaps
 [`rulesets/main-baseline.json`](rulesets/main-baseline.json), and
 [`rulesets/branch-naming.json`](rulesets/branch-naming.json).
 
-| | **Product** (tc-agent-zone, kairix, kata) | **Paved-path core** (tc-pipelines, tc-fitness) | **Baseline** (.github, design-system-avanade, tc-demo-viewer, token-usage-and-visualization) |
+| | **Product** (tc-agent-zone, kairix, kata, agent-platform) | **Paved-path core** (tc-pipelines, tc-fitness) | **Baseline** (.github, design-system-avanade, tc-demo-viewer, token-usage-and-visualization) |
 |---|---|---|---|
 | Ruleset | `org-main-product` | `org-main-core` | `org-main-baseline` |
 | Approving reviews | **0** — work merges lights-out on green | **1** — a framework regression is fleet-wide | **0** |
@@ -47,6 +47,31 @@ plane** (the gate's own definition + deploy/apply surfaces) held for a human —
 paths hold. `@three-cubes/maintainers` is humans-only so an agent can never approve
 the gate that gates it.
 
+A fifth ruleset — [`rulesets/export-mirrors.json`](rulesets/export-mirrors.json) →
+**`org-export-mirrors`** — makes a public repository that agent-platform exports
+(ADR-0001 D6) a one-way mirror: only the `three-cubes-agent` App, which opens the
+export pull request, and the human maintainers team may create, update or delete
+any branch other than `main`. `main` is left to its `main` profile: restricting
+its updates too would block every pull-request merge, auto-merge included, since
+a merge is an update and auto-merge cannot bypass a ruleset. Its `repository_name` list grows as each source repository is frozen:
+tc-fitness and tc-pipelines (PLA-668) now, kairix (PLA-451) at its cutover. The
+`main` profile still applies, so an export merges through its pull request and
+`Quality gate` like any other change.
+
+The ruleset restricts branches created inside the mirror. It does not stop a
+pull request from a fork, and it breaks any workflow of the mirror that opens a
+branch with the default `GITHUB_TOKEN`. A repository therefore joins the list only
+when its export publishes (`assurance/checks/tests/test_export_mirror_ruleset.py`
+fails a listed repository whose export is held), its README and CONTRIBUTING send
+contributors to agent-platform, no workflow of the mirror opens a branch with the
+default token, and an organisation admin has confirmed that a required check in the
+mirror rejects any pull request that is not the export's. The last three live in the
+mirror's own files and settings, which a test in this repository cannot read, so they
+are confirmed when the repository is added. kairix (PLA-451) meets none of them yet
+(its export is held, its contributor documents tell people to branch there, and
+`reflib-history-capture.yml` opens a branch with the default token), so it stays off
+the list until it does.
+
 ## The rules and what enforces them
 
 | Requirement | Enforced by | Component |
@@ -60,7 +85,7 @@ the gate that gates it.
 | Shard-count-independent required context | tc-pipelines | the reusable fan-in check-run, required **by name** |
 | Consumer can't drift off the paved path | tc-fitness | `core:engine_version_floor`, `core:ci_consumes_shared_gate`, fan-in-name parity |
 | Deterministic gate (no flaky reruns) | tc-fitness | `core:deterministic_tests` |
-| Lights-out auto-merge of work PRs | tc-pipelines | `auto-merge-on-green.yml` (App token via WIF) |
+| Lights-out auto-merge of work PRs | GitHub | native auto-merge (`gh pr merge --auto`) behind the merge queue |
 | Secret scanning | tc-fitness / GitHub | `detect-secrets` (zero-tolerance vs empty baseline) + GitHub push protection |
 | Required review + code-owner + thread | GitHub | the `pull_request` ruleset rule (above) |
 

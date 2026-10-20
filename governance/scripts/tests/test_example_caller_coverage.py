@@ -20,11 +20,8 @@ resolved at parse time while the body never executes.
 A reusable deliberately left without a caller is declared in NO_EXAMPLE_CALLER
 with its reason, so intent stays distinguishable from drift.
 
-Whether the dispatcher also fans a given example out is deliberately NOT asserted
-here: `example-callers.yml` documents that fan-out job as optional, because the
-per-file static check does not depend on it and a mandatory edit to one shared
-file re-serialises parallel work. Only a fan-out job pointing at a file that is
-not on disk is checked, since that fails the whole dispatch rather than one job.
+agent-platform carries no `example-callers.yml` dispatcher: the static check is
+per file, and nothing here dispatches the examples for real.
 """
 
 from __future__ import annotations
@@ -38,9 +35,19 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export REPO_ROOT is that
+# root. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+WORKFLOW_DIR = PLATFORM_ROOT / ".github" / "workflows"
+# In agent-platform the examples sit apart from the live workflows, so none runs here; the public export maps them
+# back into .github/workflows/, where they are found with the reusables.
+EXAMPLES_DIR = PLATFORM_ROOT / "execution" / "pipelines" / "examples" / "workflows"
+# Reusables kept in the public export for external consumers that pin them, though agent-platform runs none:
+# they sit apart from the live workflows here and the export maps them back.
+COMPAT_DIR = PLATFORM_ROOT / "execution" / "pipelines" / "compat" / "workflows"
+EXAMPLE_DIRS = [d for d in (WORKFLOW_DIR, EXAMPLES_DIR, COMPAT_DIR) if d.is_dir()]
 
-DISPATCHER = "example-callers.yml"
 EXAMPLE_PREFIX = "example-"
 
 # Only a `./`-rooted path resolves against the file in THIS tree. A
@@ -78,21 +85,20 @@ def _reusables() -> list[str]:
     """Shipped reusables: `workflow_call` workflows that are not themselves examples."""
     return sorted(
         path.name
-        for path in WORKFLOW_DIR.glob("*.yml")
+        for d in EXAMPLE_DIRS
+        for path in d.glob("*.yml")
         if not path.name.startswith(EXAMPLE_PREFIX) and "workflow_call" in _trigger_names(_load(path))
     )
 
 
 def _examples() -> list[str]:
-    return sorted(
-        path.name for path in WORKFLOW_DIR.glob(f"{EXAMPLE_PREFIX}*.yml") if path.name != DISPATCHER
-    )
+    return sorted(path.name for d in EXAMPLE_DIRS for path in d.glob(f"{EXAMPLE_PREFIX}*.yml"))
 
 
 def _local_calls() -> list[tuple[str, str, str]]:
     """(source workflow, job name, called workflow filename)."""
     found = []
-    for path in sorted(WORKFLOW_DIR.glob("*.yml")):
+    for path in sorted(p for d in EXAMPLE_DIRS for p in d.glob("*.yml")):
         for job_name, job in (_load(path).get("jobs") or {}).items():
             if not isinstance(job, dict):
                 continue
@@ -105,10 +111,9 @@ def _local_calls() -> list[tuple[str, str, str]]:
 REUSABLES = _reusables()
 EXAMPLES = _examples()
 CALLS = _local_calls()
-FAN_OUT = [(job, target) for source, job, target in CALLS if source == DISPATCHER]
 
 
-def test_the_scan_found_reusables_examples_and_fan_out() -> None:
+def test_the_scan_found_reusables_and_examples() -> None:
     """A scan that silently matches nothing would pass every assertion below."""
     assert len(REUSABLES) >= 15, (
         f"only {len(REUSABLES)} shipped reusables discovered — the `on:` read "
@@ -118,11 +123,6 @@ def test_the_scan_found_reusables_examples_and_fan_out() -> None:
         f"only {len(EXAMPLES)} example files discovered — the "
         f"`{EXAMPLE_PREFIX}*.yml` glob has probably drifted, so the example "
         f"assertions no longer see anything to check."
-    )
-    assert len(FAN_OUT) >= 10, (
-        f"only {len(FAN_OUT)} fan-out jobs discovered in {DISPATCHER} — the "
-        f"`uses:` pattern has probably drifted, so neither the coverage nor the "
-        f"dangling-target assertion sees anything to check."
     )
 
 
@@ -146,7 +146,7 @@ def test_every_reusable_is_called_from_inside_this_repo(reusable: str) -> None:
         f"promoted to required, or a renamed secret ships green from here and "
         f"breaks in a consumer as `startup_failure` — no job, no log, no "
         f"annotation. "
-        f"fix: add .github/workflows/{EXAMPLE_PREFIX}{stem}.yml passing every "
+        f"fix: add execution/pipelines/examples/workflows/{EXAMPLE_PREFIX}{stem}.yml passing every "
         f"required input and secret, with every job gated on "
         f"`if: ${{{{ inputs.run-for-real }}}}` so the shape is resolved but the "
         f"body never runs; or declare the omission in NO_EXAMPLE_CALLER with "
@@ -180,20 +180,6 @@ def test_every_example_exercises_a_shipped_reusable(example: str) -> None:
         f"fix: point at least one job at "
         f"`uses: ./.github/workflows/{named_after}`, or rename the file so it "
         f"no longer derives the name of a shipped reusable."
-    )
-
-
-@pytest.mark.parametrize(
-    ("job", "target"),
-    FAN_OUT,
-    ids=[f"{job} -> {target}" for job, target in FAN_OUT],
-)
-def test_every_fan_out_target_exists_on_disk(job: str, target: str) -> None:
-    assert (WORKFLOW_DIR / target).exists(), (
-        f"{DISPATCHER}: job `{job}` targets {target}, which is not on disk. "
-        f"GitHub rejects the whole dispatch as `startup_failure` before any job "
-        f"starts, so every OTHER example stops running too. "
-        f"fix: restore {target}, or delete the `{job}` fan-out job."
     )
 
 

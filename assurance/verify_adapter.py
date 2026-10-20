@@ -48,14 +48,15 @@ def verify(case):
         )
         return {"installed_fitness": completed.stdout.strip()}
     if case == "action-actions-python-preparation":
-        clean = subprocess.run(
-            ["git", "diff", "--exit-code", "--", "."],
+        # A tracked-only `git diff` would pass a run that leaves a new lockfile or other artifact.
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all", "--", "."],
             capture_output=True,
             text=True,
             check=False,
         )
-        if clean.returncode != 0:
-            raise ValueError(f"preparation changed the hosted fixture:\n{clean.stdout}")
+        if dirty.returncode != 0 or dirty.stdout.strip():
+            raise ValueError(f"preparation changed the hosted fixture:\n{dirty.stdout}{dirty.stderr}")
         return {"status": "pass", "working_tree": "clean"}
     raise ValueError("unknown adapter case")
 

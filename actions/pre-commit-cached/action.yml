@@ -41,7 +41,7 @@ runs:
     # not re-inlined, so the install seam stays single-sourced. Self-pinned to
     # the repo's own released tag.
     - name: Locked uv install
-      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@f82eb3c5ea0addbfa13c41f4034e5ba107620aed # v2.2.1 candidate
+      uses: three-cubes/tc-pipelines/actions/setup-uv-cached@b0268816c0dfa911da7b59b03b8b58f7292e7295 # v2.2.1 candidate
       with:
         uv-version: ${{ inputs.uv-version }}
         python-version: ${{ inputs.python-version }}

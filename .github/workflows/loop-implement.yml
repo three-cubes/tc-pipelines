@@ -3,7 +3,7 @@ name: loop-implement
 # The HEADLESS AGENT-EXECUTION RUNTIME for the Autonomous Delivery Platform loop
 # (initiative pillar SP-C · the REAL DispatchSink target). This is the piece that
 # turns ONE selected READY work item into a working bot PR: the loop's dispatcher
-# (governance/loop/loop_runner.py :: GitHubActionsDispatchSink) triggers this
+# (orchestration/loops/loop_runner.py :: GitHubActionsDispatchSink) triggers this
 # workflow via `workflow_dispatch` for exactly one issue, and here — on an
 # ephemeral GitHub-hosted `ubuntu-latest` runner — Claude Code runs HEADLESS
 # (`claude -p`) to implement that single item and open its PR.
@@ -38,7 +38,7 @@ name: loop-implement
 #
 # INERT until arming: this workflow only ever runs when the loop's dispatcher
 # fires it, and the dispatcher is only REACHED on the runner's single
-# armed + live + past-soak path (see governance/loop/ARMING.md). Merging this file
+# armed + live + past-soak path (see orchestration/loops/ARMING.md). Merging this file
 # starts NOTHING — there is no push/PR/schedule trigger here.
 
 on:
@@ -196,13 +196,8 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "loop-implement: ${ISSUE_ID_IN} -> ${target_repo} @ ${ISSUE_BRANCH_IN}"
 
-      - name: Checkout orchestrator (tc-pipelines — for the local composite actions)
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
       - name: Azure login for Key Vault (WIF — secret-free)
-        uses: ./.github/actions/wif-azure-login
+        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@b0268816c0dfa911da7b59b03b8b58f7292e7295 # v2.2.1
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
@@ -214,7 +209,7 @@ jobs:
         # the TARGET repo, so every git/gh write acts as the three-cubes-agent App
         # (never a human, never GITHUB_TOKEN). Its token output is masked.
         id: app
-        uses: ./.github/actions/github-app-token
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@b0268816c0dfa911da7b59b03b8b58f7292e7295 # v2.2.1
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
@@ -223,12 +218,12 @@ jobs:
           repositories: ${{ env.TARGET_NAME }}
 
       - name: Set up Node (for the Claude Code CLI) and Python
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "20"
 
       - name: Set up Python (uv/uvx + repo tooling)
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
@@ -248,7 +243,7 @@ jobs:
           gh --version
 
       - name: Check out the TARGET repo (App token) at its default branch
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ env.TARGET_REPO }}
           token: ${{ steps.app.outputs.token }}

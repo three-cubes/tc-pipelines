@@ -6,7 +6,7 @@ AFTER a harvest succeeds — and the provenance-stamped, idempotent harvest
 predicate the workflow and the spec share. Stdlib only, no network; runs under the
 same discovery as the loop guardrail harness:
 
-    python3 -m unittest discover -s governance/loop/tests -v
+    python3 -m unittest discover -s orchestration/loops/tests -v
 """
 
 from __future__ import annotations
@@ -15,7 +15,12 @@ import sys
 import unittest
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+pytestmark = pytest.mark.unit
+
 
 from harvest_gate import (
     Issue,

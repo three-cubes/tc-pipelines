@@ -122,6 +122,30 @@ the `actionable_feedback_try_hint_coverage` check scans `defineErrorMapping(tabl
 
 Every word in a remediation should be directly actionable. If you can delete a sentence and the agent can still get back to green, delete it.
 
+### Capability feedback defect classes
+
+When a real agent run exposes a reusable capability defect, record it through
+the capability's `feedback.yaml` signal so the fix lands in the capability
+itself. Feedback signals use these canonical `defect_class` values:
+
+| Class | Use when |
+|---|---|
+| `route_discovery` | Agent did not discover or invoke the correct capability from user intent. |
+| `affordance_ux` | Capability was available but not reachable or understandable to the agent. |
+| `runtime_dependency` | Declared dependency, connector, credential or health probe failed. |
+| `prohibited_fallback` | Agent used or proposed an undeclared shortcut instead of returning blocked/deferred. |
+| `quality_gate_miss` | Validation or eval gate missed an output defect. |
+| `output_governance` | Artefact state, promotion, provenance or distribution control failed. |
+| `deployment_export_visibility` | Capability deployed or exported but was not visible or invocable on the target surface. |
+| `adoption_usage` | Observed usage shows low adoption, repeated avoidance or confusing capability selection. |
+
+Every durable capability-feedback issue must include `defect_class`,
+`capability_id`, `feedback_signal`, `user_intent`, `evidence_path`,
+`reproduction`, `expected_behavior`, `observed_behavior`, `owner` and
+`durable_issue`. For high-criticality ToolPack invocation evals, set
+`invocation_evals[].feedback_signal` to the relevant skill feedback signal so
+the measured failure has a durable route.
+
 ## Output modes
 
 Default output should be short. Do not make every response verbose just because the system can provide detail.

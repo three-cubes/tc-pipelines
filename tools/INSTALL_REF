@@ -1,0 +1,7 @@
+# The agent-platform commit `make bootstrap-host` installs tc-agent-tools (queue-pr,
+# agent-token) from, as root, into /opt/tc-agent-tools. It is control plane: the pin
+# decides what code runs with the host's identity and permissions, so CODEOWNERS holds
+# this file (ADR-0047). The Makefile reads the first line that is not a comment, and
+# nothing else restates the ref. The commit has queue-pr --verify-installation (the
+# bootstrap's own check). Move it when execution/pipelines/tools changes on main.
+0d61e4520abfdd315ebfcab5410c581438dc954b  # pragma: allowlist secret (a commit SHA)

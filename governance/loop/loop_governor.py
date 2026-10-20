@@ -40,11 +40,12 @@ discipline the loop enforces.
 
 Run the harness (this module's tests included)::
 
-    python3 -m unittest discover -s governance/loop/tests -v
+    python3 -m unittest discover -s orchestration/loops/tests -v
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
@@ -356,10 +357,8 @@ class JsonFileStateStore:
                 os.fsync(fh.fileno())
             os.replace(tmp, self.path)  # atomic on POSIX
         except BaseException:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(tmp)
-            except OSError:
-                pass
             raise
 
 

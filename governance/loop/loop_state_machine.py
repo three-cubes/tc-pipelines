@@ -1,6 +1,6 @@
 """Autonomous-delivery loop state machine + guardrail engine (SP-C-1).
 
-This module is the machine-checkable half of ``governance/decisions/ADR-LOOP-STATE-MACHINE.md``.
+This module is the machine-checkable half of ``assurance/governance/decisions/ADR-0004-autonomous-loop-state-machine.md``.
 It encodes:
 
 * the explicit state machine ``ready -> dispatched -> in_review -> verifying ->
@@ -20,7 +20,7 @@ It encodes:
 
 Stdlib only, no network — the same discipline the loop enforces. Run the harness:
 
-    python3 -m unittest discover -s governance/loop/tests -v
+    python3 -m unittest discover -s orchestration/loops/tests -v
 
 The harness passing is the **lights-out gate**: ``arm_auto_dispatch`` refuses to
 arm unless it is handed proof the guardrails validated (which is only true when
@@ -56,7 +56,7 @@ class Event(str, Enum):
     DISPATCH = "dispatch"
     PR_OPENED = "pr_opened"
     GATE_COMPLETE = "gate_complete"
-    VERIFIED_PASS = "verified_pass"
+    VERIFIED_PASS = "verified_pass"  # pragma: allowlist secret
     VERIFIED_FAIL = "verified_fail"
     RETRY = "retry"
     ESCALATE = "escalate"
@@ -423,11 +423,11 @@ class LoopEngine:
     def arm_auto_dispatch(self, *, guardrails_validated: bool) -> None:
         """Flip the lights-out flag — refused unless the guardrail harness is
         green. ``guardrails_validated`` is the caller's proof (only true when
-        ``governance/loop/tests`` pass). See the ADR's "lights-out gate"."""
+        ``orchestration/loops/tests`` pass). See the ADR's "lights-out gate"."""
         if not guardrails_validated:
             raise GuardrailTripped(
                 "auto-dispatch may not be armed until the guardrail harness is "
-                "green (run: python3 -m unittest discover -s governance/loop/tests)",
+                "green (run: python3 -m unittest discover -s orchestration/loops/tests)",
                 scope="lights_out",
             )
         self._auto_dispatch_armed = True

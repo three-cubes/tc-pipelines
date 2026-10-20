@@ -1,0 +1,24 @@
+# tc-pipelines' lint and format policy, carried with the loop so the public
+# export (governance/loop/ in three-cubes/tc-pipelines) and this repository
+# apply the same rules. The loop runs on Python 3.12 runners.
+line-length = 110
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "S", "RUF"]
+# UP042: the loop's enums mix in str and are serialised by value into the
+# durable ledger; StrEnum would change their str() and so the stored form.
+ignore = ["E501", "RUF022", "UP042"]
+
+[lint.per-file-ignores]
+# Requests go to fixed HTTPS API endpoints (Linear GraphQL, GitHub REST).
+"loop_dispatcher.py" = ["S310"]
+"loop_runner.py" = ["S310"]
+"tree_reconciler.py" = ["S310"]
+# VERIFIED_PASS and PASS are verification verdicts, not credentials.
+"loop_state_machine.py" = ["S105"]
+# Tests assert and carry placeholder tokens as fixtures. E402: the loop is not a
+# package, so each test puts the loop directory on sys.path before importing it;
+# this keeps stdlib unittest discovery (the lights-out gate) working. S603/S607:
+# the workflow test runs the workflow's own validation script under bash.
+"tests/**" = ["S101", "S105", "S106", "S107", "S108", "E402", "S603", "S607"]

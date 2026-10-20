@@ -9,7 +9,7 @@
 # config + CODEOWNERS + dependabot.yml +
 # .gitignore from the template repo, distributes the agent-affordance + harness
 # payload (rendered skeletons + sonar-sqaa hook + safe-commit/preflight), RENDERS
-# the quality-gate wiring (pyproject [tool.tc_fitness] + ci.yml + auto-merge.yml +
+# the quality-gate wiring (pyproject [tool.tc_fitness] + ci.yml + preparation-writeback.yml +
 # Makefile + .secrets.baseline + CORE catalogue + repo-local git-hooks), and
 # `--verify`s that the applied ruleset's required contexts match the jobs ci.yml
 # emits — so a bootstrapped repo's `main` ruleset never requires a check nothing
@@ -74,6 +74,8 @@ VERIFY_ONLY=0                # verify an existing OUT_DIR, render nothing
 CANONICAL_HOMES='`tc-pipelines` (SDLC environment, orchestration, evidence and governance) · `tc-fitness` (fitness engine and check catalogue) · consumer repository (product behaviour)'
 
 # The rendered affordance skeleton set (source name -> repo-root target).
+# Each renders from `<name>.tmpl`, so no template is ever loaded as a live
+# CLAUDE.md or AGENTS.md by an agent working in the repository that holds it.
 AFFORDANCE_SKELETONS=(CLAUDE.md AGENTS.md CONTRIBUTING.md ETHOS.md RESOLVER.md SCORECARD.md)
 
 # Canonical repo variables every governed repo carries. Pulled from the org (so
@@ -194,7 +196,7 @@ render_skeleton() {
       next
     }
     { print }
-  ' "${SKELETON_DIR}/${src}" | subst_tokens
+  ' "${SKELETON_DIR}/${src}.tmpl" | subst_tokens
 }
 
 # Render one quality-gate wiring template (`<name>.tmpl`) to a target path.
@@ -223,7 +225,14 @@ render_wiring() {
 render_ruleset() {
   local src="$1" dest="$2"
   mkdir -p "$(dirname "$dest")"
-  cp "$src" "$dest"
+  # The canonical file is the queue-backed profile (strict off: the merge queue tests the merge result).
+  # A queue-less repository has no queue, so it keeps the up-to-date base requirement.
+  if [[ "$MERGE_QUEUE" == "1" ]]; then
+    cp "$src" "$dest"
+  else
+    jq '(.rules[] | select(.type=="required_status_checks") | .parameters.strict_required_status_checks_policy) = true' \
+      "$src" > "$dest"
+  fi
 }
 
 # ── verify ───────────────────────────────────────────────────────────────────
@@ -453,7 +462,7 @@ if [[ "$DO_AFFORDANCE" == "1" ]]; then
   else
     echo "note: no local governance/skeletons/ — fetch each skeleton from ${TEMPLATE_REPO} and render:"
     for s in "${AFFORDANCE_SKELETONS[@]}"; do
-      echo "  gh api repos/${TEMPLATE_REPO}/contents/governance/skeletons/${s} --jq '.content' | base64 -d \\"
+      echo "  gh api repos/${TEMPLATE_REPO}/contents/governance/skeletons/${s}.tmpl --jq '.content' | base64 -d \\"
       echo "    | sed -e 's|{{REPO}}|${REPO}|g' > ${s}   # then inline the _canonical-standards-banner.md INCLUDE"
     done
   fi
@@ -497,7 +506,7 @@ fi
 # PR permanently blocked. This section RENDERS the wiring that emits those exact
 # contexts — pyproject `[tool.tc_fitness]` + the CORE catalogue + ci.yml (the
 # reusable caller + the `Quality gate`/`no-attribution`/`SonarCloud scan`
-# aggregators) + auto-merge.yml + Makefile + .secrets.baseline + repo-local
+# aggregators) + preparation-writeback.yml + Makefile + .secrets.baseline + repo-local
 # git-hooks — into $OUT_DIR, ready to copy into the repo. Same no-live-git design:
 # it renders/verifies locally and prints the commit sequence. Toggle off with
 # --no-wiring.
@@ -518,7 +527,7 @@ if [[ "$DO_WIRING" == "1" ]]; then
     # CI: the caller + the aggregators that carry the bare required contexts. The
     # SONAR-BLOCK is kept/stripped by render_wiring per --sonar/--no-sonar.
     render_wiring "workflows/ci.yml.tmpl"          "${OUT_DIR}/.github/workflows/ci.yml"
-    render_wiring "workflows/auto-merge.yml.tmpl"  "${OUT_DIR}/.github/workflows/auto-merge.yml"
+    render_wiring "workflows/preparation-writeback.yml.tmpl" "${OUT_DIR}/.github/workflows/preparation-writeback.yml"
 
     # The ruleset that MATCHES the emitted contexts (sonar-trimmed under --no-sonar).
     render_ruleset "$RULESET_SRC" "${OUT_DIR}/.github/rulesets/main-product.json"

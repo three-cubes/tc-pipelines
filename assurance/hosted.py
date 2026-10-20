@@ -14,9 +14,36 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
-from github_evidence import archive_member, download, download_log, validate_mutation
+from github_evidence import (
+    archive_member,
+    download,
+    download_log,
+    executed_workflow,
+    validate_mutation,
+)
 from protected_evidence import validate_protected
 from receipt import ReceiptError, digest, read, validate, write
+
+REQUIRED_PROTECTED_POLICY_FIELDS = (
+    "contract",
+    "environment",
+    "target",
+    "image_digest",
+    "host_id",
+    "runtime_user",
+    "deployment_id",
+    "configuration_identity",
+    "run_id",
+    "attempt_id",
+    "required_checks",
+    "max_age_seconds",
+    "repository",
+    "workflow_path",
+    "actor_id",
+    "producer_commit",
+    "artifact_name",
+    "artifact_digest",
+)
 
 
 def command(root, *args):
@@ -128,25 +155,7 @@ def plan(
             "authority": "consumer-protected-environment",
             "runtime_receipt_required": True,
             "release_authority_policy_required": True,
-            "required_policy_fields": [
-                "contract",
-                "environment",
-                "target",
-                "image_digest",
-                "host_id",
-                "runtime_user",
-                "deployment_id",
-                "configuration_identity",
-                "run_id",
-                "attempt_id",
-                "required_checks",
-                "max_age_seconds",
-                "repository",
-                "workflow_path",
-                "actor_id",
-                "artifact_name",
-                "artifact_digest",
-            ],
+            "required_policy_fields": list(REQUIRED_PROTECTED_POLICY_FIELDS),
             "expectation": expectation_for(root, selection, row, {}),
         }
         for row in selection["surfaces"]
@@ -235,7 +244,11 @@ def validate_jobs(jobs, expected_steps, run_id, attempt, head):
             raise ReceiptError(f"missing, skipped or duplicate required step: {step}")
 
 
+HOSTED_WORKFLOW = ".github/workflows/hosted-assurance.yml"
+
+
 def validate_run(run, selection):
+    """The run is the exact candidate's successful attempt of the hosted-assurance workflow."""
     if (
         run["head_sha"] != selection["candidate_head"]
         or run["status"] != "completed"
@@ -244,6 +257,8 @@ def validate_run(run, selection):
         or run["run_attempt"] != selection["attempt"]
     ):
         raise ReceiptError("GitHub has no successful exact-candidate execution")
+    if not executed_workflow(run, selection["repository"], HOSTED_WORKFLOW, selection["head"]):
+        raise ReceiptError("run did not execute the hosted-assurance workflow at the tested commit")
 
 
 def download_native(root, selection, name, archive):
@@ -360,8 +375,8 @@ def collect(root, directory):
                 "outputs": [
                     {"id": "execution-log", "path": "execution.log"},
                     {"id": "github-terminal", "path": "terminal.json"},
-                ]
-                + native_outputs,
+                    *native_outputs,
+                ],
                 "finding": None,
             }
             (case_dir / "expectation.json").write_text(json.dumps(expectation, indent=2) + "\n")

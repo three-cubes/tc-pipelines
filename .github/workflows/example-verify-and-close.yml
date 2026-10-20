@@ -14,10 +14,6 @@ name: example — verify-and-close (reusable self-check)
 # without a real credential (the run-for-real gate keeps it from ever
 # authenticating).
 #
-# De-serialised layout (parallel-dev friction fix): each reusable owns its OWN
-# `example-<reusable>.yml`; `example-callers.yml` is a thin dispatcher that fans
-# out to every file here — see its header for the "add your file" convention.
-#
 # NEVER runs the underlying work by default: `workflow_call` only and every job is
 # gated on `run-for-real` (default false); the call graph is validated statically
 # regardless of the gate, the bodies never execute under the default dispatch.
@@ -30,9 +26,8 @@ on:
       run-for-real:
         description: >-
           Leave false (default) for the static call-graph self-check — every job
-          stays gated off and only the input/secret SHAPES are validated. The
-          dispatcher (example-callers.yml) passes this through; flipping it true
-          would attempt a real verify-and-close and is not the point here.
+          stays gated off and only the input/secret SHAPES are validated. Flipping it
+          true would attempt a real verify-and-close and is not the point here.
         type: boolean
         default: false
 
@@ -71,7 +66,7 @@ jobs:
       # gate (verifier verdict defaults to pass).
       verify-command: scripts/checks/check-fresh-install-smoke.sh
     secrets:
-      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
+      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only  # pragma: allowlist secret (a placeholder for the call shape)
 
   verify-close-taz:
     if: ${{ inputs.run-for-real }}
@@ -93,4 +88,4 @@ jobs:
       independent-verifier-verdict: pass
       fail-on-verify-failure: false
     secrets:
-      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
+      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only  # pragma: allowlist secret (a placeholder for the call shape)

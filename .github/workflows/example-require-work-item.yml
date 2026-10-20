@@ -15,10 +15,6 @@ name: example — require-work-item (reusable self-check)
 # (no live PR), and the fallback secret is a clearly-dummy literal so the call
 # shape resolves without a real credential.
 #
-# De-serialised layout (parallel-dev friction fix): each reusable owns its OWN
-# `example-<reusable>.yml`; `example-callers.yml` is a thin dispatcher that fans
-# out to every file here — see its header for the "add your file" convention.
-#
 # NEVER runs the underlying work by default: `workflow_call` only and every job is
 # gated on `run-for-real` (default false); the call graph is validated statically
 # regardless of the gate, the bodies never execute under the default dispatch.
@@ -31,9 +27,8 @@ on:
       run-for-real:
         description: >-
           Leave false (default) for the static call-graph self-check — every job
-          stays gated off and only the input/secret SHAPES are validated. The
-          dispatcher (example-callers.yml) passes this through; flipping it true
-          would attempt a real check (needs a live PR) and is not the point here.
+          stays gated off and only the input/secret SHAPES are validated. Flipping it
+          true would attempt a real check (needs a live PR) and is not the point here.
         type: boolean
         default: false
 
@@ -75,4 +70,4 @@ jobs:
       escape-requires-approval: false
       bot-actors: "dependabot[bot] renovate[bot]"
     secrets:
-      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only
+      LINEAR_API_KEY: dummy-not-a-real-key-shape-check-only  # pragma: allowlist secret (a placeholder for the call shape)

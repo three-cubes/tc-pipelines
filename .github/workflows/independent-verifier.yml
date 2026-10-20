@@ -77,7 +77,7 @@ jobs:
     steps:
       - name: Mint three-cubes-agent App token (WIF, secret-free)
         id: app
-        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@933274c58b631acf54d94e95d7495daf9180fdac # post-v2.2.0
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@b0268816c0dfa911da7b59b03b8b58f7292e7295 # post-v2.2.0
         with:
           client-id: ${{ inputs.azure-client-id }}
           tenant-id: ${{ inputs.azure-tenant-id }}
@@ -185,7 +185,7 @@ jobs:
           #   headers: x-api-key: "$AGENT_RUNTIME_TOKEN"; anthropic-version: 2023-06-01
           #   body:
           #     model:         "$MODEL"                # default claude-opus-4-8
-          #     max_tokens:    16000
+          #     "max_tokens":  16000
           #     thinking:      {"type": "adaptive"}
           #     output_config: {"effort": "$EFFORT",   # default high
           #                     "format": {"type": "json_schema",

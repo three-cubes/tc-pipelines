@@ -22,6 +22,11 @@ Host or infrastructure mutation adds the recovery mechanism appropriate to that
 surface. A VM disk snapshot is one host-level mechanism; it is used when host or
 disk state changes and the rollback objective requires it.
 
+A dry run mutates no state and creates no recovery point. An explicit skip
+override is recorded in the deployment log. A recovery-point failure reports its
+cause with `fix:` and `next:` lines per
+[`agent-actionable-feedback.md`](agent-actionable-feedback.md).
+
 ## Identity and permissions
 
 The hosted deployment identity creates cloud recovery resources through
@@ -41,8 +46,10 @@ Every recovery artefact records:
 - verification result.
 
 The default operational window is 48 hours. Named incident evidence and product
-policy may extend retention. Cleanup records deleted and retained artefacts and
-their byte or provider identities.
+policy may extend retention. Cleanup runs as a dedicated job separate from the
+apply: the apply path creates recovery artefacts, and deletion rights stay with
+the cleanup identity. Cleanup records deleted and retained artefacts and their
+byte or provider identities.
 
 ## Current Azure compatibility path
 

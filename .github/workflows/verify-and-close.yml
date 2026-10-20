@@ -9,6 +9,11 @@ name: verify-and-close
 # and hand-marking the Linear issue Done. A consumer's on-merge-to-main workflow
 # `uses:` this reusable; it then, deterministically:
 #
+#   0. Lists the pull requests the push merged. A merge queue can land several
+#      green pull requests as one push to main (`max_entries_to_merge`), each
+#      as its own merge commit on main's first-parent chain, so steps 1-4 run
+#      once per merge commit between the push's `before` and its head
+#      (`merged-prs` job; one entry when the caller names the commit or issue).
 #   1. Resolves the linked Linear issue id from the merged branch name (org
 #      convention `<user>/<team>-<number>-<slug>`, e.g. `dan/sgo-156-...` =>
 #      SGO-156) or, failing that, the merged PR body.
@@ -32,7 +37,7 @@ name: verify-and-close
 #      for the fresh-context verifier-agent judgment step, wired BETWEEN verify
 #      and close via `independent-verifier-verdict`. The interim gate is
 #      deterministic (verify job green); the verifier agent is the judgment
-#      upgrade. See `governance/loop/verify-and-close.md`.
+#      upgrade. See `orchestration/loops/verify-and-close.md`.
 #
 # Injection-safe per the org workflow standard: every caller-supplied input and
 # every `github.event.*` field is env-bound before it reaches a shell body
@@ -85,8 +90,11 @@ on:
       merged-sha:
         description: >-
           The merged commit sha to verify + reference in the confirm comment.
-          Defaults to the triggering event's github.sha (the merge commit on a
-          push-to-main caller).
+          Default empty => every merge commit on the push's first-parent chain
+          from github.event.before to github.sha, one verify-and-close each (a
+          merge queue can land several pull requests in one push); github.sha
+          alone when the push has no usable `before`. Setting it, issue-id,
+          branch-name or pr-body selects that one entry.
         type: string
         default: ""
       branch-name:
@@ -165,7 +173,7 @@ on:
           Identity Federation (OIDC) — the consumer stores NO GitHub secret. The
           job federates to Azure with the azure-* inputs below, reads
           `linear-key-secret-name`, masks it, and uses it ONLY for the Linear
-          GraphQL Authorization header. Requires `id-token: write` on the caller
+          GraphQL Authorization header. Requires write on `id-token` for the caller
           job. Leave empty to fall back to secrets.LINEAR_API_KEY.
         type: string
         default: ""
@@ -218,15 +226,81 @@ permissions:
   id-token: write
 
 jobs:
+  # The commits this run verifies and closes: the final commit of each pull
+  # request the push merged, oldest first. GitHub's compare API (every page)
+  # lists the push's commits with their parents; walking first parents from the
+  # head back to `before` keeps only main's own commits, not the merged
+  # branches'. Each is resolved to its pull request, and only a pull request's
+  # last commit is kept, so a rebase merge that put several commits on main is
+  # verified once, at its final state. A commit whose lookup fails is kept as
+  # its own entry, and the pushed head is always verified. Any other doubt (a
+  # caller override, no `before`, an API error, a chain that does not reach
+  # `before`) selects the one commit the run names.
+  merged-prs:
+    name: merged pull requests
+    runs-on: ubuntu-latest
+    outputs:
+      shas: ${{ steps.list.outputs.shas }}
+    steps:
+      - name: List the push's merged pull requests
+        id: list
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          MERGED_SHA_INPUT: ${{ inputs.merged-sha }}
+          OVERRIDES: ${{ inputs.issue-id }}${{ inputs.branch-name }}${{ inputs.pr-body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          single() { jq -cn --arg sha "$1" '[$sha]'; }
+          shas="$(single "${MERGED_SHA_INPUT:-$HEAD_SHA}")"
+          if [[ -z "${MERGED_SHA_INPUT:-}" && -z "${OVERRIDES:-}" && -n "${BEFORE_SHA:-}" && ! "$BEFORE_SHA" =~ ^0+$ ]]; then
+            if commits="$(gh api --paginate "repos/${GH_REPO}/compare/${BEFORE_SHA}...${HEAD_SHA}?per_page=100" \
+                --jq '.commits[] | {sha, parent: (.parents[0].sha // "")}' 2>/dev/null)"; then
+              chain="$(jq -sc --arg before "$BEFORE_SHA" --arg head "$HEAD_SHA" '
+                (map({key: .sha, value: .parent}) | from_entries) as $parent
+                | [$head | recurse(if . == $before then empty else ($parent[.] // empty) end)]
+                | if index($before) == null then [] else map(select(. != $before)) | reverse end
+              ' <<<"$commits")"
+              entries=""
+              for sha in $(jq -r '.[]' <<<"$chain"); do
+                # A failed lookup keeps the commit as its own entry: it is verified, not dropped.
+                pr="$(gh api "repos/${GH_REPO}/commits/${sha}/pulls" --jq '.[0].number // empty' 2>/dev/null)" || pr="unresolved:${sha}"
+                entries+="$(jq -cn --arg sha "$sha" --arg pr "$pr" '{sha: $sha, pr: $pr}')"$'\n'
+              done
+              # The pushed head is always verified, whatever its lookup found.
+              merged="$(jq -sc --arg head "$HEAD_SHA" '
+                [to_entries[] | select(.value.pr != "" or .value.sha == $head) | {i: .key, sha: .value.sha, pr: (if .value.pr == "" then "head" else .value.pr end)}]
+                | group_by(.pr) | map(max_by(.i)) | sort_by(.i) | map(.sha)
+              ' <<<"$entries")"
+              [[ "$merged" != "[]" ]] && shas="$merged"
+            else
+              echo "merged-prs: cannot compare ${BEFORE_SHA}...${HEAD_SHA}; verifying the head only."
+            fi
+          fi
+          echo "merged-prs: $(jq -r 'length' <<<"$shas") commit(s): $(jq -r 'join(" ")' <<<"$shas")"
+          echo "shas=$shas" >> "$GITHUB_OUTPUT"
+
   verify-and-close:
     name: verify-and-close
+    needs: [merged-prs]
     runs-on: ${{ inputs.runs-on }}
+    strategy:
+      # One leg per merged pull request, in merge order: a failure in one does
+      # not hide the others, and the consumer's verify-command never runs twice
+      # at once against shared infrastructure.
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        merged-sha: ${{ fromJSON(needs.merged-prs.outputs.shas) }}
     steps:
       - name: Checkout merged commit
         if: inputs.checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.merged-sha || github.sha }}
+          ref: ${{ matrix.merged-sha }}
           fetch-depth: ${{ inputs.fetch-depth }}
           persist-credentials: false
 
@@ -238,7 +312,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          MERGED_SHA: ${{ inputs.merged-sha || github.sha }}
+          MERGED_SHA: ${{ matrix.merged-sha }}
           ISSUE_ID_INPUT: ${{ inputs.issue-id }}
           BRANCH_INPUT: ${{ inputs.branch-name }}
           PR_BODY_INPUT: ${{ inputs.pr-body }}
@@ -445,7 +519,7 @@ jobs:
 
           # Assemble the artifact. The trailing HTML marker is the canonical,
           # provenance-stamped (issue-id) harvest key shared with
-          # governance/loop/harvest_gate.py — keep the format byte-identical.
+          # orchestration/loops/harvest_gate.py — keep the format byte-identical.
           out="${RUNNER_TEMP:-/tmp}/harvest.md"
           {
             printf '## Harvest — %s (ADR-038 harvest-then-decay)\n\n' "$ISSUE_ID"
@@ -477,7 +551,7 @@ jobs:
         # The azure-* inputs are typically vars.AZURE_CLIENT_ID / _TENANT_ID /
         # _SUBSCRIPTION_ID on the caller. Requires `id-token: write`.
         if: inputs.linear-key-vault != '' && steps.resolve.outputs.resolved == 'true'
-        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@f82eb3c5ea0addbfa13c41f4034e5ba107620aed # v2.2.1
+        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@b0268816c0dfa911da7b59b03b8b58f7292e7295 # v2.2.1
         with:
           client-id: ${{ inputs.azure-client-id }}
           tenant-id: ${{ inputs.azure-tenant-id }}

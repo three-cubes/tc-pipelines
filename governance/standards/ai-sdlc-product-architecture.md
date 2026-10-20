@@ -34,13 +34,15 @@ The product provides:
 
 | Home | Owns |
 |---|---|
-| `tc-pipelines` | SDLC package, canonical development image, task orchestration, reusable workflows, release/deployment protocols, evidence schemas, governance templates and adoption tooling. |
+| `tc-pipelines` | SDLC package, canonical development image, reusable workflows, release/deployment protocols, evidence schemas, governance templates and adoption tooling. |
 | `tc-fitness` | Executable fitness engine, shared check catalogue, evaluation semantics and structured findings. |
 | Consumer repository | Product source, product tests, product graph declaration, generated artefacts, build inputs, runtime configuration, qualification journeys and deployment values. |
 | Runtime target | Secrets, persistent state, target observations, deployment receipts and operational evidence. |
 
-`tc-pipelines` invokes `tc-fitness` as a first-class task in the SDLC graph.
-The pipeline owns when and where the fitness evaluation runs. `tc-fitness` owns
+*Amended 2026-10-13 (PLA-566, per the Consumer-contract amendment, PLA-467 and PLA-468):* Nx owns task scheduling, the task graph, caching and project-level affected selection. `tc-pipelines` no longer owns task orchestration; a unit that reimplements a task graph, scheduler, cache or toolchain provisioner is superseded by Nx, mise, uv or pnpm. `tc-fitness` owns the check catalogue and findings, and runs as Nx targets.
+
+`tc-pipelines` supplies the fitness task to the consumer's Nx graph.
+The Nx graph owns when the fitness evaluation runs (scheduling and affected selection); `tc-pipelines` keeps where it runs (the runner, canonical image and toolchain). `tc-fitness` owns
 how declared checks execute and report findings. A coordinated SDLC release
 records the compatible `tc-fitness` version.
 
@@ -56,7 +58,7 @@ One `tc-pipelines` release publishes a coordinated set of surfaces:
 
 | Surface | Contract |
 |---|---|
-| `@three-cubes/tc-sdlc` | Nx preset, executors, generators, schema validation and the `tc-sdlc` command. |
+| `@three-cubes/tc-sdlc` | An Nx plugin: inferred projects and targets, the fitness executor, generators (`init`, catalogue sync) and `nx migrate` migrations. It packages Nx, uv, pnpm, mise and Dev Containers and reimplements none of them (amended 2026-10-06, PLA-467). |
 | `ghcr.io/three-cubes/tc-sdlc` | Canonical Linux development and CI image with the reviewed toolchain. |
 | GitHub reusable workflows | Thin hosted entrypoints that execute the released SDLC package in the canonical image. |
 | Governance library | Standards, rulesets, repository skeletons and adoption tooling. |
@@ -115,6 +117,13 @@ qualification receipts. Generation and writeback follow admission.
 
 ## Consumer contract
 
+*Amended 2026-10-06 (PLA-467, PLA-468):* tc-sdlc v4 replaces `sdlc.yaml` and the generated `tc-sdlc.lock` with the standard files each tool already reads:
+- `nx.json`, for the plugin registration, targets and inputs;
+- `mise.toml`, the one pin for every tool version;
+- the uv and pnpm lockfiles.
+
+`nx migrate` performs the coordinated upgrade. The text below describes v3 and stays as its record until v3 is retired (PLA-470).
+
 Each consumer carries a small `sdlc.yaml` declaration and a generated
 `tc-sdlc.lock`. The declaration names product tasks and product-specific
 commands. The lock binds the complete released SDLC toolchain.
@@ -164,6 +173,8 @@ Repositories may add product-specific targets. The shared commands retain the
 same meaning across the fleet.
 
 ## Environment model
+
+*Amended 2026-10-06 (PLA-468):* native bootstrap is `mise install` from `mise.toml`, then `uv sync` and `pnpm install` from the lockfiles. The canonical image is built with `devcontainer build` from the same pins, published with `docker/build-push-action` and attested with `actions/attest-build-provenance`. tc-sdlc v3's own bootstrap, state locking and maintenance engine is retired in favour of these tools.
 
 The canonical Linux image is the authoritative environment for CI and release
 evidence. It pins Python, uv, Node, pnpm, Go, Bash and the reviewed infrastructure
@@ -252,6 +263,8 @@ execute against their real boundary.
 
 ## Fitness integration
 
+*Amended 2026-10-13 (PLA-566, per the Consumer-contract amendment, PLA-467 and PLA-468):* Nx schedules the fitness targets and selects the affected projects. `tc-fitness` runs as those targets and owns the check catalogue, profile membership, findings, and the path-scoped selection of checks inside one target from the changed-file list that target receives. `tc-pipelines` keeps environment selection (the workflow's runner and pinned toolchain, chosen before Nx starts) and evidence handoff. The v3 wording below that gives graph scheduling to `tc-pipelines` is superseded.
+
 `tc-fitness` is a required graph task, not a separate CI convention. The
 consumer's SDLC declaration selects named fitness profiles. The SDLC release
 catalogue supplies a compatible engine version, and `tc-sdlc upgrade` updates
@@ -265,8 +278,8 @@ The normal profiles are:
 | `full` | Complete repository verification for release admission. | repository-defined and measured |
 | `nightly` | Soak, mutation and broad live or compatibility evaluation. | scheduled, retained and actionable |
 
-Profile membership and findings remain owned by `tc-fitness`. Graph scheduling,
-environment selection and evidence handoff remain owned by `tc-pipelines`.
+Profile membership and findings remain owned by `tc-fitness`. Evidence handoff and environment selection
+remain owned by `tc-pipelines`; graph scheduling is owned by Nx (see the amendment above).
 
 ## CI and release flow
 
@@ -303,14 +316,14 @@ The task definitions remain executable locally.
 `tc-pipelines` owns the generic transaction:
 
 1. acquire the deployment lock;
-2. verify candidate identity and evidence;
+2. verify candidate identity and evidence, including the delivered state the host must hold (preflight);
 3. capture the product-defined persistent-state recovery point;
 4. converge host prerequisites;
 5. pull and start the qualified digest;
 6. execute health and product verification journeys;
 7. promote the candidate or restore the predecessor;
 8. retain a complete receipt;
-9. remove expired deployment artefacts.
+9. remove expired deployment artefacts and superseded images.
 
 Ansible defines repeatable host state. Docker Compose defines a single-host
 container application. Consumer adapters define product state, knowledge

@@ -38,6 +38,18 @@ Drafted because an early parallel-execution session repeatedly violated rules th
 **Forbidden example:**
 > "Fill in the model block for each agent using sensible defaults."
 
+**What counts as live state.** Any value that must match what is deployed: model identifiers, plugin enablement, approval configuration, scheduled-job definitions, service state (enabled / running / failed) and workspace layout.
+
+**When the rule applies.**
+- Always: authoring an ADR that names a config value, schedule, file path or runtime behaviour; briefing a sub-agent that produces config-like content; designing a fitness function whose expected value depends on deployment state; writing any "current state" section.
+- Optionally: greenfield work with no existing runtime state, and architecture docs that describe target state. Target-state docs name the gap between target and current state.
+- During incident response: act on the best available information, then verify against live state once the incident clears.
+
+**Reading live state well.**
+- Run runtime CLI diagnostics as the service user, so they load the same config and plugin index the service loads. A root-level file read suits structural inspection.
+- Compare the in-repo template against the live render with a normalised diff, e.g. `diff <(jq -S . <template>) <(jq -S . <live-render>)`.
+- The template remains the deployment source of truth. Read live state to confirm the template names the intended target, then write the target value into the template. When template and live differ on purpose (the template names the next state), record the gap in the same PR.
+
 ## Rule 2 — One git tree at a time
 
 **The incident.** Multiple sub-agents were spawned in parallel without `isolation: worktree`. They shared the parent's `.git/HEAD`. As each agent ran git operations (branch, commit, push), they switched the parent's HEAD. Net effect: my work landed on the wrong branch repeatedly, and the agents stashed each other's working trees during execution.

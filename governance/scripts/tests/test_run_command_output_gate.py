@@ -7,10 +7,16 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.contract
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
 SCRIPT = REPO_ROOT / "governance" / "scripts" / "run_command_output_gate.py"
 ACTION = REPO_ROOT / ".github" / "actions" / "apply-on-vm-via-runcommand" / "action.yml"
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "azure-vm-deploy.yml"
+WORKFLOW = PLATFORM_ROOT / ".github" / "workflows" / "azure-vm-deploy.yml"
 
 
 def _load_module():

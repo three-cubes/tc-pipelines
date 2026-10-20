@@ -7,15 +7,8 @@ name: example — python-quality-gate (reusable self-check)
 # `workflow_call:` contract at parse time — a mismatch fails HERE, in
 # tc-pipelines' own CI, not later in a consumer's pipeline.
 #
-# De-serialised layout (parallel-dev friction fix): this used to be one giant
-# `example-callers.yml` every reusable's PR appended to (and collided on). Now
-# each reusable owns its OWN `example-<reusable>.yml` file — a new reusable adds a
-# NEW file and never edits a shared one. `example-callers.yml` is now a thin
-# dispatcher that fans out to every file here; see its header for the convention.
-#
-# NEVER runs the underlying work by default: `workflow_call` only (the dispatcher
-# is `workflow_dispatch`-gated) and every job is gated on `run-for-real`, whose
-# default is false — the call graph is validated statically regardless of the
+# NEVER runs the underlying work by default: `workflow_call` only and every job
+# is gated on `run-for-real`, whose default is false — the call graph is validated statically regardless of the
 # gate; the bodies never execute under the default dispatch.
 #
 # Part of three-cubes/kairix#499 Phase 4 (org CI consolidation).
@@ -26,9 +19,8 @@ on:
       run-for-real:
         description: >-
           Leave false (default) for the static call-graph self-check — every job
-          stays gated off and only the input/secret SHAPES are validated. The
-          dispatcher (example-callers.yml) passes this through; flipping it true
-          would attempt a real run (needs real repo scripts / images / tokens
+          stays gated off and only the input/secret SHAPES are validated. Flipping it
+          true would attempt a real run (needs real repo scripts / images / tokens
           and, for the release/publish paths, explicit HITL authorization) — this
           self-check is not the place for that.
         type: boolean
@@ -54,7 +46,7 @@ jobs:
       coverage-artifact-name: coverage-data
       coverage-xml-path: coverage.xml
     secrets:
-      gh-token: dummy-token-shape-check-only
+      gh-token: dummy-token-shape-check-only  # pragma: allowlist secret (a placeholder for the call shape)
 
   quality-taz:
     if: ${{ inputs.run-for-real }}
@@ -93,4 +85,4 @@ jobs:
       tc-fitness-args: run --changed-files-from .tc-fitness-changed-files
       coverage-artifact-name: change-gated-coverage
     secrets:
-      gh-token: dummy-token-shape-check-only
+      gh-token: dummy-token-shape-check-only  # pragma: allowlist secret (a placeholder for the call shape)

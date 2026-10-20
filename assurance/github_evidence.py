@@ -92,6 +92,24 @@ def archive_member(archive, name):
         raise ReceiptError("invalid native artifact archive") from error
 
 
+def executed_workflow(run, repository, workflow_path, revision):
+    """Whether the run is a direct ``workflow_dispatch`` of ``workflow_path`` at exactly ``revision``.
+
+    GitHub reports the workflow file of a dispatched run as ``path`` and the commit it ran at as
+    ``head_sha``. A reusable call is not accepted: the caller's ``referenced_workflows`` names a
+    called workflow even when its job never ran, and it does not say which workflow produced the
+    run's artifacts, so a caller could upload imitation evidence beside a skipped trusted call.
+    Calls are accepted again only once the producing workflows attest their artifacts and the
+    verifier checks the attestation against the workflow revision.
+    """
+    return (
+        run.get("path") == workflow_path
+        and run.get("event") == "workflow_dispatch"
+        and run.get("head_sha") == revision
+        and (run.get("repository") or {}).get("full_name") == repository
+    )
+
+
 def validate_mutation(path):
     result = read(Path(path))
     if result != {"status": "pass", "original_exit": 0, "mutant_exit": 1, "killed": 1}:

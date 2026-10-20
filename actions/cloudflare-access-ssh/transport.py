@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import hashlib
 import hmac
 import json
@@ -374,10 +375,12 @@ def _verify_cloudflared_version(path: Path, version: str) -> None:
 
 
 def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    try:
+    # A group with nothing left to signal answers ESRCH, or on macOS EPERM while
+    # its only member is a leader that has exited but is not yet reaped. Either
+    # way the probe below reaps the leader and finds the group gone; a live
+    # group that refuses the signal still fails in the final wait.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
     deadline = time.monotonic() + TERM_GRACE_SECONDS
     while time.monotonic() < deadline:
         # Reap an exited leader before probing the process group. On Linux an

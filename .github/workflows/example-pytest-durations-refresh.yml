@@ -17,8 +17,7 @@ on:
       run-for-real:
         description: >-
           Leave false (default) for the static call-graph self-check — every job
-          stays gated off and only the input/secret SHAPES are validated. The
-          dispatcher (example-callers.yml) passes this through.
+          stays gated off and only the input/secret SHAPES are validated.
         type: boolean
         default: false
 
@@ -40,7 +39,7 @@ jobs:
       run-node: true
       ts-coverage-command: "echo 'TS coverage runs in the consumer js-ts job.'"
     secrets:
-      gh-token: dummy-token-shape-check-only
+      gh-token: dummy-token-shape-check-only  # pragma: allowlist secret (a placeholder for the call shape)
 
   # Minimal shape: defaults for everything optional, exercising the contract for
   # a consumer with no Node half and the default artifact/durations paths.

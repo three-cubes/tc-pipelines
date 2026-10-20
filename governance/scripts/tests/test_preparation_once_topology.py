@@ -16,8 +16,18 @@ import yaml
 pytestmark = pytest.mark.contract
 
 ROOT = Path(__file__).resolve().parents[3]
-WORKFLOWS = ROOT / ".github" / "workflows"
-SKELETONS = ROOT / "governance" / "skeletons" / "workflows"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = ROOT if (ROOT / ".github" / "workflows").is_dir() else ROOT.parents[1]
+# tc-pipelines governance/ lives in assurance/governance/ (ADR-0001 D4).
+GOVERNANCE_ROOT = next(
+    root
+    for root in (PLATFORM_ROOT / "assurance" / "governance", PLATFORM_ROOT / "governance")
+    if root.is_dir()
+)
+WORKFLOWS = PLATFORM_ROOT / ".github" / "workflows"
+SKELETONS = GOVERNANCE_ROOT / "skeletons" / "workflows"
 GATE = WORKFLOWS / "python-quality-gate.yml"
 EVALUATOR_JOBS = ("quality", "quality-shard", "quality-non-shard", "coverage-combine")
 
@@ -88,14 +98,9 @@ def test_quality_lanes_do_not_repeat_the_trusted_preparation_policy() -> None:
     }
 
 
-@pytest.mark.parametrize(
-    "path",
-    [SKELETONS / "ci.yml.tmpl"],
-)
-def test_required_context_is_explicitly_red_when_preparation_changed_the_pr(
-    path: Path,
-) -> None:
-    jobs = _load(path)["jobs"]
+# The consumer skeletons wire the same protocol a bootstrapped repository runs.
+def test_required_context_is_explicitly_red_when_preparation_changed_the_pr() -> None:
+    jobs = _load(SKELETONS / "ci.yml.tmpl")["jobs"]
     check = jobs["check"]
     assert "gate" in _needs(check)
     assert str(check.get("if", "")) == "always()"
@@ -105,22 +110,10 @@ def test_required_context_is_explicitly_red_when_preparation_changed_the_pr(
     assert "exit 1" in step["run"]
 
 
-@pytest.mark.parametrize(
-    "path",
-    [WORKFLOWS / "auto-merge.yml", SKELETONS / "auto-merge.yml.tmpl"],
-)
-def test_existing_post_ci_run_writes_preparation_before_considering_merge(
-    path: Path,
-) -> None:
-    jobs = _load(path)["jobs"]
-    writeback = jobs["preparation-writeback"]
-    assert "preparation-writeback.yml" in str(writeback.get("uses", ""))
-
-    merge = jobs["merge"]
-    assert "preparation-writeback" in _needs(merge)
-    condition = str(merge.get("if", ""))
-    assert "needs.preparation-writeback.result == 'success'" in condition
-    assert "needs.preparation-writeback.outputs.result == 'no-artifact'" in condition
+def test_existing_post_ci_run_writes_preparation_and_arms_no_merge() -> None:
+    jobs = _load(SKELETONS / "preparation-writeback.yml.tmpl")["jobs"]
+    assert set(jobs) == {"preparation-writeback"}
+    assert "preparation-writeback.yml" in str(jobs["preparation-writeback"].get("uses", ""))
 
 
 def test_writeback_result_protocol_is_explicit() -> None:

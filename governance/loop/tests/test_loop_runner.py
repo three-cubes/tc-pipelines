@@ -18,7 +18,7 @@ The load-bearing fail-safe cases (each asserts NO dispatch):
 
 Run (with the rest of the harness) from the repo root::
 
-    python3 -m unittest discover -s governance/loop/tests -v
+    python3 -m unittest discover -s orchestration/loops/tests -v
 """
 
 from __future__ import annotations
@@ -33,7 +33,12 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+pytestmark = pytest.mark.integration
+
 
 import loop_runner as runner_mod
 from loop_dispatcher import (
@@ -333,7 +338,13 @@ class CliTest(unittest.TestCase):
     def _snapshot(self, items) -> str:
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
             json.dump({"issues": items}, fh)
-            return fh.name
+        self.addCleanup(Path(fh.name).unlink)
+        return fh.name
+
+    def _state_file(self) -> str:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        return os.path.join(directory.name, "loop-state.json")
 
     def _issue_doc(self, id="SGO-198", state="backlog"):
         return {
@@ -351,11 +362,8 @@ class CliTest(unittest.TestCase):
     def test_dry_run_default_records_no_side_effects(self):
         path = self._snapshot([self._issue_doc()])
         buf = io.StringIO()
-        with (
-            mock.patch.object(runner_mod, "guardrails_validated", lambda: True),
-            redirect_stdout(buf),
-        ):
-            rc = runner_mod.main(["--issues-file", path])
+        with redirect_stdout(buf):
+            rc = runner_mod.main(["--issues-file", path], guardrails_validator=lambda: True)
         out = buf.getvalue()
         self.assertEqual(rc, 0)
         self.assertIn("RECORDED", out)
@@ -365,11 +373,8 @@ class CliTest(unittest.TestCase):
     def test_json_output_is_machine_readable(self):
         path = self._snapshot([self._issue_doc()])
         buf = io.StringIO()
-        with (
-            mock.patch.object(runner_mod, "guardrails_validated", lambda: True),
-            redirect_stdout(buf),
-        ):
-            rc = runner_mod.main(["--json", "--issues-file", path])
+        with redirect_stdout(buf):
+            rc = runner_mod.main(["--json", "--issues-file", path], guardrails_validator=lambda: True)
         self.assertEqual(rc, 0)
         doc = json.loads(buf.getvalue())
         self.assertEqual(doc["decision"], "recorded")
@@ -379,12 +384,9 @@ class CliTest(unittest.TestCase):
 
     def test_armed_live_over_snapshot_logs_only(self):
         path = self._snapshot([self._issue_doc()])
-        state = os.path.join(tempfile.mkdtemp(), "loop-state.json")
+        state = self._state_file()
         buf = io.StringIO()
-        with (
-            mock.patch.object(runner_mod, "guardrails_validated", lambda: True),
-            redirect_stdout(buf),
-        ):
+        with redirect_stdout(buf):
             # A durable --state-file is REQUIRED for an armed+live tick (else
             # the guardrails would be inert). soak_ticks defaults to 0 here.
             rc = runner_mod.main(
@@ -396,7 +398,8 @@ class CliTest(unittest.TestCase):
                     path,
                     "--state-file",
                     state,
-                ]
+                ],
+                guardrails_validator=lambda: True,
             )
         self.assertEqual(rc, 0)
         doc = json.loads(buf.getvalue())
@@ -411,11 +414,10 @@ class CliTest(unittest.TestCase):
         # up front (a non-durable ledger resets every tick -> inert guardrails).
         path = self._snapshot([self._issue_doc()])
         buf = io.StringIO()
-        with (
-            mock.patch.object(runner_mod, "guardrails_validated", lambda: True),
-            redirect_stdout(buf),
-        ):
-            rc = runner_mod.main(["--json", "--armed", "--live", "--issues-file", path])
+        with redirect_stdout(buf):
+            rc = runner_mod.main(
+                ["--json", "--armed", "--live", "--issues-file", path], guardrails_validator=lambda: True
+            )
         self.assertEqual(rc, 3)
         doc = json.loads(buf.getvalue())
         self.assertEqual(doc["decision"], "refused")
@@ -423,15 +425,19 @@ class CliTest(unittest.TestCase):
 
     def test_armed_live_refused_when_harness_red_exits_nonzero(self):
         path = self._snapshot([self._issue_doc()])
+        # An armed live tick needs a durable store, or it exits 3 on the missing
+        # store before the harness is consulted.
+        state = self._state_file()
         buf = io.StringIO()
-        with (
-            mock.patch.object(runner_mod, "guardrails_validated", lambda: False),
-            redirect_stdout(buf),
-        ):
-            rc = runner_mod.main(["--json", "--armed", "--live", "--issues-file", path])
+        with redirect_stdout(buf):
+            rc = runner_mod.main(
+                ["--json", "--armed", "--live", "--issues-file", path, "--state-file", state],
+                guardrails_validator=lambda: False,
+            )
         self.assertEqual(rc, 3)  # a closed gate surfaces to the schedule
         doc = json.loads(buf.getvalue())
         self.assertEqual(doc["decision"], "refused")
+        self.assertFalse(doc["harness_validated"])
 
     def test_no_source_dry_run_is_green_skip(self):
         saved = os.environ.pop("LINEAR_API_KEY", None)
@@ -476,7 +482,7 @@ class _FakeTransport:
         return self.status, self.body
 
 
-def _gha_sink(transport, *, token="tok-abc", repo="three-cubes/tc-pipelines"):
+def _gha_sink(transport, *, token="tok-abc", repo="three-cubes/tc-pipelines"):  # pragma: allowlist secret
     return GitHubActionsDispatchSink(
         token=token,
         repo=repo,
@@ -542,7 +548,7 @@ class GitHubActionsDispatchSinkTest(unittest.TestCase):
         # explicitly built with the opt-in (the armed+live path — see _build_sink).
         fake = _FakeTransport()
         sink = GitHubActionsDispatchSink(
-            token="tok-abc",
+            token="tok-abc",  # pragma: allowlist secret
             repo="three-cubes/tc-pipelines",
             workflow="loop-implement.yml",
             ref="main",
@@ -621,6 +627,7 @@ class BuildSinkAutoMergeTest(unittest.TestCase):
         return runner_mod._build_sink(args)
 
     def test_armed_live_opt_in_enables_auto_merge(self):
+        # pragma: allowlist nextline secret
         with mock.patch.dict(os.environ, {"LOOP_DISPATCH_TOKEN": "tok"}, clear=False):
             sink = self._sink_for(
                 [
@@ -638,6 +645,7 @@ class BuildSinkAutoMergeTest(unittest.TestCase):
 
     def test_opt_in_without_live_does_not_enable_auto_merge(self):
         # --enable-auto-merge passed, but NOT live: must NOT propagate.
+        # pragma: allowlist nextline secret
         with mock.patch.dict(os.environ, {"LOOP_DISPATCH_TOKEN": "tok"}, clear=False):
             sink = self._sink_for(
                 [
@@ -652,6 +660,7 @@ class BuildSinkAutoMergeTest(unittest.TestCase):
         self.assertFalse(sink.enable_auto_merge)
 
     def test_armed_live_without_opt_in_does_not_enable_auto_merge(self):
+        # pragma: allowlist nextline secret
         with mock.patch.dict(os.environ, {"LOOP_DISPATCH_TOKEN": "tok"}, clear=False):
             sink = self._sink_for(
                 [

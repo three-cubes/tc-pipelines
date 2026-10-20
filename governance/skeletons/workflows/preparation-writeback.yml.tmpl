@@ -1,0 +1,36 @@
+---
+name: "preparation writeback"
+
+# Applies a pull request's preparation receipt for {{REPO}}: when the "Quality gate" workflow
+# finishes for a PR that needed preparation (for example Ruff), the trusted writer commits the
+# prepared head, so the required `Quality gate` context can pass on it. It arms no merge: GitHub's
+# native auto-merge and the merge queue do that.
+#
+# Prerequisites (org-admin, one-time): repo/org vars AZURE_CLIENT_ID / AZURE_TENANT_ID /
+# AZURE_SUBSCRIPTION_ID for the WIF identity that mints the App token from kv-tc-agents.
+
+on:
+  workflow_run:
+    workflows: ["Quality gate"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  preparation-writeback:
+    if: ${{ github.event.workflow_run.event == 'pull_request' }}
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      pull-requests: read
+    uses: three-cubes/tc-pipelines/.github/workflows/preparation-writeback.yml@{{PIPELINES_SHA}}
+    with:
+      repository: ${{ github.repository }}
+      workflow-run-id: ${{ github.event.workflow_run.id }}
+      trusted-validator-ref: "{{PIPELINES_SHA}}" # pragma: allowlist secret
+      repository-owner: ${{ github.repository_owner }}
+      repository-name: ${{ github.event.repository.name }}
+      azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+      azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+      azure-subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}

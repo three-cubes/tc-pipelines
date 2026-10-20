@@ -11,7 +11,7 @@ once** (idempotent). It also refuses to run at all unless auto-dispatch is armed
 
 Run (stdlib only, no deps, no network — the sinks/verifier seams are injected)::
 
-    python3 -m unittest discover -s governance/loop/tests -v
+    python3 -m unittest discover -s orchestration/loops/tests -v
 """
 
 from __future__ import annotations
@@ -20,7 +20,12 @@ import sys
 import unittest
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+pytestmark = pytest.mark.unit
+
 
 from loop_governor import (
     CircuitBreakerOpen,
@@ -321,12 +326,12 @@ class EscalationTest(unittest.TestCase):
         self.assertEqual(sink.emitted[0].reason, "first reason")
 
     def test_escalation_carries_assignee_and_issue_state(self):
-        gov, _ = _armed(escalation_assignee="dan@danmcmahon.com.au")
+        gov, _ = _armed(escalation_assignee="alex.jordan@example.com")
         gov.record_attempt("PLA-51")
         gov.record_cost("PLA-51", 1.5, tokens=1200)
         esc = gov.escalate("PLA-51", "over budget", scope="budget")
         self.assertIsInstance(esc, Escalation)
-        self.assertEqual(esc.assignee, "dan@danmcmahon.com.au")
+        self.assertEqual(esc.assignee, "alex.jordan@example.com")
         self.assertEqual(esc.attempts, 1)
         self.assertEqual(esc.cost_spent, 1.5)
         self.assertEqual(esc.tokens_spent, 1200)

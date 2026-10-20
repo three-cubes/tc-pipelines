@@ -44,16 +44,16 @@ one coordinated SDLC release.
 
 ## 4. Merge governance (the model)
 
-Agents create commits locally with canonical `three-cubes-agent[bot]` metadata and no credential. A trusted host broker performs off-CI remote writes with a repository-scoped, short-lived token for the selected **per-agent App** (`tc-agent-builder`/`shape`/`consultant`/`growth`); Actions uses the WIF-backed composite. Agent harnesses do not receive Key Vault access or tokens, and Actions repository secrets are not a local plaintext retrieval path. The full credential boundary, capability-vs-enforcement model, and App set are the [**Agent SDLC-access + HITL standard**](agent-sdlc-access-and-hitl.md) + [`agent-app-manifests/`](agent-app-manifests/). The merge model:
+Agents create commits locally with canonical `three-cubes-agent[bot]` metadata and no credential. A trusted host broker performs off-CI remote writes with a repository-scoped, short-lived token for the selected **per-agent App** (`tc-agent-builder`/`shape`/`consultant`/`growth`); Actions uses the WIF-backed composite. Agent harnesses do not receive Key Vault access or tokens, and Actions repository secrets are not a local plaintext retrieval path. The full credential boundary, capability-vs-enforcement model, and App set are the [**Agent SDLC-access + HITL standard**](agent-sdlc-access-and-hitl.md) + [`agent-app-manifests/`](agent-app-manifests). The merge model:
 
 - **Autonomous on green** for ordinary work — a green gate auto-merges, no human, no admin bypass.
 - **HITL only on the control plane** — the gate's own definition (CI, `[tool.tc_fitness]`, schemas, validators, dep pins, governance) needs a human (`@three-cubes/maintainers`) via **CODEOWNERS**, so an agent can never weaken the gate that gates it.
-- **De-churned** — no forced up-to-date rebase, no stale-dismiss (see the org rulesets [`governance/rulesets/main-product.json`](rulesets/main-product.json) + [`governance/rulesets/main-core.json`](rulesets/main-core.json) + [`governance/CODEOWNERS`](CODEOWNERS)).
+- **De-churned** — no forced up-to-date rebase (see the org rulesets [`governance/rulesets/main-product.json`](rulesets/main-product.json) + [`governance/rulesets/main-core.json`](rulesets/main-core.json) + [`governance/CODEOWNERS`](CODEOWNERS)).
 - **Clean authorship is CI-enforced, not convention** (decision D1) — the reusable gates ship a toggleable `no-attribution` leg (`meta-quality-gate.yml`, symmetric in `python-quality-gate.yml`; `run-no-attribution` input, default on) that rejects AI/LLM self-attribution residue in **every PR commit message and the PR title + body**, read-only (CI never rewrites history), via the single shared tc-fitness `no_llm_attribution` detector the local commit-msg strip hook and the fitness gate also use. It publishes the stable required-status-check context **`no-attribution`**; the org rulesets [`governance/rulesets/main-product.json`](rulesets/main-product.json) + [`governance/rulesets/main-core.json`](rulesets/main-core.json) gate `main` on it — the two required contexts are **`Quality gate`** + **`no-attribution`**. Renaming the leg's job means updating that context in lockstep.
 
 This model is **safe only because the gate is hard + fast** (§1–§2). Harden + verify a repo's gate before flipping it to autonomous.
 
-The **failure-driven auto-dispatch loop** that rides this model — its explicit state machine, the deterministic-glue vs judgment split, and the 5 hard guardrails that must be *proven to fire* before any lights-out flag flips — is specified in [`governance/autonomous-loop.md`](autonomous-loop.md) (decision record: [`governance/decisions/ADR-LOOP-STATE-MACHINE.md`](decisions/ADR-LOOP-STATE-MACHINE.md); validation harness: [`governance/loop/`](loop/)). **No auto-dispatch flag flips until that harness is green** (SP-C-1 / PLA-309).
+The **failure-driven auto-dispatch loop** that rides this model — its explicit state machine, the deterministic-glue vs judgment split, and the 5 hard guardrails that must be *proven to fire* before any lights-out flag flips — is specified in [`governance/autonomous-loop.md`](autonomous-loop.md) (decision record: [`governance/decisions/ADR-LOOP-STATE-MACHINE.md`](decisions/ADR-0004-autonomous-loop-state-machine.md); validation harness: [`orchestration/loops/`](../../orchestration/loops/)). **No auto-dispatch flag flips until that harness is green** (SP-C-1 / PLA-309).
 
 ## 5. The inner-loop contract
 
@@ -76,7 +76,7 @@ change as their inputs.
 
 Repositories still on the compatibility path run their documented `make check`
 entrypoint. Their migration work is tracked through
-[`../docs/MIGRATION.md`](../docs/MIGRATION.md); individual uv, pre-commit and
+[`../docs/MIGRATION.md`](../../execution/pipelines/docs/MIGRATION.md); individual uv, pre-commit and
 workflow commands are implementation details of that entrypoint.
 
 ## 6. For agents (the anti-reinvention rule)
@@ -92,7 +92,7 @@ this reason.
 ## 7. Engineering standards library (`standards/`)
 
 The canonical body of each engineering standard lives once, here, in
-[`standards/`](standards/). A repo's own docs **reference** these — they do not re-copy them. When a
+[`standards/`](standards). A repo's own docs **reference** these — they do not re-copy them. When a
 pattern is weak, improve it here; every repo converges up. (The SDLC-access + HITL, gate-hardening,
 security-scan, and Autonomous-Delivery standards keep their existing homes at the `governance/` top
 level — see §3–§4 — and are not duplicated below.)
@@ -109,7 +109,7 @@ level — see §3–§4 — and are not duplicated below.)
 | SDLC & workflow | [`process-shared-repo-pr-review-and-merge.md`](standards/process-shared-repo-pr-review-and-merge.md) | Review + merge process for shared repos the author can't self-approve. |
 | SDLC & workflow | [`code-review-rules.md`](standards/code-review-rules.md) | What automated review examines, the actionable finding shape, and how the PR's agent resolves each thread. |
 | SDLC & workflow | [`agent-process-controls.md`](standards/agent-process-controls.md) | The control hierarchy for agent-behaviour risks — push high-value risks from guidance up to structural gates. |
-| Quality & fitness | [`quality-ratchet.md`](standards/quality-ratchet.md) | Touched-file coverage ratchet — lift without papering. |
+| Quality & fitness | [`quality-ratchet.md`](standards/quality-ratchet.md) | Touched-file quality ratchets run in-repo on committed or merge-base evidence — lift without papering. |
 | Quality & fitness | [`mutation-testing-survival-ratchet.md`](standards/mutation-testing-survival-ratchet.md) | Diff-scoped mutation + survivors ratchet. |
 | Quality & fitness | [`core-assurance-contract.md`](standards/core-assurance-contract.md) | Behavioural proof for fitness checks, published pipeline surfaces and coordinated SDLC releases. |
 | Quality & fitness | [`agent-actionable-feedback.md`](standards/agent-actionable-feedback.md) | Every error carries `fix:`/`next:`/`run:`. |
@@ -132,9 +132,9 @@ level — see §3–§4 — and are not duplicated below.)
 | Deploy & ops | [`snapshot-before-apply.md`](standards/snapshot-before-apply.md) | Recovery point before any destructive apply (concrete: VM OS-disk snapshot). |
 | Deploy & ops | [`deployment-verification.md`](standards/deployment-verification.md) | Recovery-point-before + verification-probe-after, generalised beyond one cloud. |
 | Deploy & ops | [`infrastructure-deployment-fitness.md`](standards/infrastructure-deployment-fitness.md) | Structured runtime filesystem, access, transaction and evidence contracts. |
-| Agent orchestration | [`subagent-orchestration.md`](standards/subagent-orchestration.md) | Single owner, no parallel git ops, no live ops, bounded output. |
+| Agent orchestration | [`subagent-orchestration.md`](standards/subagent-orchestration.md) | Single owner, no parallel git ops, no live ops, bounded output, spawn preflight, test-first sub-agent specs. |
 | Agent orchestration | [`sub-agent-orchestration-lessons-2026-05-17.md`](standards/sub-agent-orchestration-lessons-2026-05-17.md) | Field lessons that extend the orchestration standard. |
-| Agent orchestration | [`parallel-agent-discipline.md`](standards/parallel-agent-discipline.md) | Dispatching parallel streams without collision. |
+| Agent orchestration | [`parallel-agent-discipline.md`](standards/parallel-agent-discipline.md) | Dispatching parallel streams without collision; reading live state before encoding a runtime fact. |
 | MCP tooling | [`mcp-engineering-standard.md`](standards/mcp-engineering-standard.md) | Tool-design contract: structured I/O, validate companions, drop-and-warn. |
 | MCP tooling | [`mcp-tooling-canonical-pattern.md`](standards/mcp-tooling-canonical-pattern.md) | MCP server language/layout/helpers/contract-tests. |
 | MCP tooling | [`mcp-performance-and-affordance-measurement.md`](standards/mcp-performance-and-affordance-measurement.md) | Perf SLO bands + affordance scoring for a capability. |

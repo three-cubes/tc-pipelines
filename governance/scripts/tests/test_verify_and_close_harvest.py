@@ -21,7 +21,11 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "verify-and-close.yml"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export REPO_ROOT is that
+# root. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+WORKFLOW = PLATFORM_ROOT / ".github" / "workflows" / "verify-and-close.yml"
 
 SUMMARY_CAP, DECISIONS_CAP = 3500, 1500
 SHA = "a1" * 20

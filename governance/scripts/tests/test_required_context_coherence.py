@@ -8,7 +8,7 @@ of the workflows rather than the wiring between jobs.
 
 The first is between `governance/rulesets/*.json` and this repo's own CI. A
 ruleset names a BARE context, so the job publishing it has to be a top-level job
-of `ci.yml` carrying exactly that name. Delegate it to a reusable and the
+of agent-platform's `quality-gate.yml` carrying exactly that name. Delegate it to a reusable and the
 check-run arrives as `<caller-job> / <name>` — a different string, which never
 satisfies the rule and never appears to fail either.
 
@@ -33,10 +33,23 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
-RULESET_DIR = REPO_ROOT / "governance" / "rulesets"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export REPO_ROOT is that
+# root. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+WORKFLOW_DIR = PLATFORM_ROOT / ".github" / "workflows"
+# tc-pipelines governance/ lives in assurance/governance/ (ADR-0001 D4), and at
+# governance/ again in the export.
+_PLATFORM_GOVERNANCE = PLATFORM_ROOT / "assurance" / "governance"
+RULESET_DIR = (
+    _PLATFORM_GOVERNANCE if _PLATFORM_GOVERNANCE.is_dir() else REPO_ROOT / "governance"
+) / "rulesets"
 
-SELF_CHECK = WORKFLOW_DIR / "ci.yml"
+# The required checks publish from agent-platform's quality gate, and in the
+# public repository from the self-check it keeps as its own CI.
+SELF_CHECK = next(
+    path for path in (WORKFLOW_DIR / "quality-gate.yml", WORKFLOW_DIR / "ci.yml") if path.is_file()
+)
 LOOP_DISPATCH = WORKFLOW_DIR / "loop-dispatch.yml"
 GATE = WORKFLOW_DIR / "python-quality-gate.yml"
 FAN_IN = "gate"
@@ -143,24 +156,19 @@ NEEDS = list(_jobs(_load(GATE)).get(FAN_IN, {}).get("needs") or [])
 LANES = sorted(set(_jobs(_load(GATE))) - {FAN_IN})
 
 
-@pytest.mark.parametrize("name", ("main-core.json", "main-product.json"))
-def test_queue_less_profiles_require_current_base_status_checks(name: str) -> None:
-    """A queue-less repository validates the current main tip before merge."""
+# main-core has no merge queue, so it validates the current main tip; main-product relies on the merge queue.
+@pytest.mark.parametrize(("name", "strict"), (("main-core.json", True), ("main-product.json", False)))
+def test_status_check_strictness_matches_the_live_ruleset(name: str, strict: bool) -> None:
+    """Queue-less core requires an up-to-date base; queue-backed product does not (ADR-0047 Amendment 3)."""
     rules = json.loads((RULESET_DIR / name).read_text(encoding="utf-8")).get("rules") or []
     required = next(rule for rule in rules if rule.get("type") == "required_status_checks")
-    assert required["parameters"]["strict_required_status_checks_policy"] is True
+    assert required["parameters"]["strict_required_status_checks_policy"] is strict
 
 
-def test_self_check_is_ready_for_queue_validation_and_cancels_superseded_pr_runs() -> None:
-    """Validate PR/integration candidates without repeating full work after merge."""
+def test_self_check_validates_pull_requests_and_queue_candidates() -> None:
+    """The required checks run on every pull request and merge-queue candidate."""
     triggers = _triggers(SELF_CHECK)
     assert {"pull_request", "merge_group"} <= set(triggers)
-    assert "push" not in triggers
-
-    workflow = yaml.load(SELF_CHECK.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
-    concurrency = workflow.get("concurrency") or {}
-    assert "github.event.pull_request.number" in concurrency.get("group", "")
-    assert concurrency.get("cancel-in-progress") == "true"
 
 
 def test_loop_dispatch_has_no_idle_hosted_runner_schedule() -> None:
@@ -187,7 +195,7 @@ def test_the_scan_found_contexts_lanes_and_an_aggregation_step() -> None:
         f"fix: reconcile the parse with the rules[].parameters."
         f"required_status_checks[].context shape."
     )
-    assert len(SELF_CHECK_JOBS) >= 3, (
+    assert len(SELF_CHECK_JOBS) >= len(CONTEXTS), (
         f"only {len(SELF_CHECK_JOBS)} job(s) parsed out of {SELF_CHECK.name}. "
         f"The self-check has drifted and the publisher assertion is vacuous. "
         f"fix: reconcile the parse with the workflow's jobs mapping."

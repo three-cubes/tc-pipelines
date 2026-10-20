@@ -15,12 +15,9 @@ does not exist, or a step whose body never writes the key, hands the caller an
 empty string that a downstream `if:` then reads as false.
 
 The `required: true` declarations on `python-gate-body` are load-bearing beyond
-documentation. `test_internal_call_contracts.py` computes each caller's
-obligation as `spec.get("required") and "default" not in spec`, so adding a
-`default:` to one of them drops it from that set and every gate lane silently
-stops being required to forward it — with no failing test anywhere. Eleven of
-the twenty are held by that computation alone; they are not in that test's
-CONSUMER_FORWARDED list.
+documentation. A caller is obliged to pass an input that is required and has no
+default (`spec.get("required") and "default" not in spec`), so adding a
+`default:` to one of them releases every gate lane from forwarding it, silently.
 
 Only `using: composite` actions are in scope. A node or docker action receives
 its inputs as `INPUT_*` environment variables read by the program it runs, so
@@ -291,8 +288,7 @@ def test_every_declared_output_resolves_to_a_step_that_sets_it(action_id: str) -
 @pytest.mark.parametrize("name", GATE_BODY_INPUTS)
 def test_gate_body_input_stays_required_unless_deliberately_optional(name: str) -> None:
     spec = _load(REPO_ROOT / GATE_BODY / "action.yml")["inputs"][name] or {}
-    # The same derivation test_internal_call_contracts.py applies to decide
-    # whether a caller is obliged to pass this input.
+    # Whether a caller is obliged to pass this input.
     obliges_the_caller = bool(spec.get("required")) and "default" not in spec
 
     if name in DELIBERATELY_OPTIONAL:
@@ -306,8 +302,8 @@ def test_gate_body_input_stays_required_unless_deliberately_optional(name: str) 
 
     assert obliges_the_caller, (
         f"{GATE_BODY}: `{name}` must stay `required: true` with no `default:`. "
-        f"test_internal_call_contracts.py derives each caller's obligation as "
-        f"`spec.get('required') and 'default' not in spec`, so a default here "
+        f"A caller's obligation is `spec.get('required') and 'default' not in "
+        f"spec`, so a default here "
         f"drops `{name}` from that set and every gate lane silently stops being "
         f"required to forward it — lanes then run differently configured gates "
         f"behind one required status context. "

@@ -1,0 +1,17 @@
+# tc-pipelines' lint and format policy, carried with the code so the public
+# export and this repository apply the same rules. Actions run on Python 3.12
+# runners, so the target stays py312.
+line-length = 110
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "S", "RUF"]
+# S603/S607: the actions exist to run fixed tools (git, uv, gh, az, the pinned
+# scanners) with argument lists, never a shell string.
+ignore = ["E501", "RUF022", "S603", "S607"]
+
+[lint.per-file-ignores]
+# Tests assert and carry placeholder credentials as fixtures; their YAML loader
+# subclasses yaml.SafeLoader.
+"**/tests/**" = ["S101", "S105", "S106", "S108", "S506"]
+

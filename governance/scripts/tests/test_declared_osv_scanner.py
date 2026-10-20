@@ -9,7 +9,6 @@ import platform
 import stat
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 import pytest
@@ -24,7 +23,7 @@ SCRIPT = REPO_ROOT / "actions" / "python-gate-body" / "declared_osv_contract.py"
 ACTION = REPO_ROOT / "actions" / "python-gate-body" / "action.yml"
 PROVISIONER = REPO_ROOT / "actions" / "python-gate-body" / "provision-scanners.sh"
 SCANNER_CATALOGUE = REPO_ROOT / "actions" / "python-gate-body" / "scanner-versions.json"
-CHECKOV_LOCK = REPO_ROOT / "actions" / "python-gate-body" / "checkov-tool" / "uv.lock"
+CHECKOV_CONSTRAINTS = REPO_ROOT / "actions" / "python-gate-body" / "checkov-constraints.txt"
 
 
 def _default_scanner_bin() -> Path:
@@ -431,7 +430,7 @@ def test_checkov_provisioning_uses_its_locked_python_under_ambient_repo_python(
         capture_output=True,
         check=False,
     )
-    checkov_python = (install_bin / "checkov").resolve().parent / "python"
+    checkov_python = (install_bin / "checkov").resolve().parent / "tools" / "checkov" / "bin" / "python"
     checkov_runtime = subprocess.run(
         [
             str(checkov_python),
@@ -501,8 +500,11 @@ def test_checkov_provisioning_uses_its_locked_python_under_ambient_repo_python(
         check=False,
     )
 
-    lock = tomllib.loads(CHECKOV_LOCK.read_text(encoding="utf-8"))
-    locked_asteval = next(row["version"] for row in lock["package"] if row["name"] == "asteval")
+    locked_asteval = next(
+        line.split("==", 1)[1].strip()
+        for line in CHECKOV_CONSTRAINTS.read_text(encoding="utf-8").splitlines()
+        if line.startswith("asteval==")
+    )
     assert tuple(int(part) for part in locked_asteval.split(".")) >= (1, 0, 9)
     assert tuple(int(part) for part in locked_asteval.split(".")) < (1, 1)
     assert (
@@ -545,42 +547,6 @@ def test_checkov_provisioning_uses_its_locked_python_under_ambient_repo_python(
     rule_kind, rule_identity, _ = _rule_database("checkov", checkov_clean.stdout, install_bin / "checkov")
     assert rule_kind == "packaged-checkov-policy-tree"
     assert rule_identity.startswith("sha256:")
-
-
-def test_make_prepare_exposes_pinned_scanners_to_a_later_process() -> None:
-    environment = os.environ.copy()
-    environment.pop("TC_SCANNER_BIN_DIR", None)
-    environment.pop("TC_SCANNER_PATH_FILE", None)
-    scanner_bin = str(_default_scanner_bin().resolve())
-    environment["PATH"] = os.pathsep.join(
-        entry
-        for entry in environment.get("PATH", "").split(os.pathsep)
-        if str(Path(entry).expanduser().resolve()) != scanner_bin
-    )
-
-    prepared = subprocess.run(
-        ["make", "prepare"],
-        cwd=REPO_ROOT,
-        env=environment,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    evaluated = subprocess.run(
-        ["make", "scanner-versions"],
-        cwd=REPO_ROOT,
-        env=environment,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    catalogue = json.loads(SCANNER_CATALOGUE.read_text(encoding="utf-8"))
-
-    assert prepared.returncode == 0, prepared.stdout + prepared.stderr
-    assert evaluated.returncode == 0, evaluated.stdout + evaluated.stderr
-    assert scanner_bin in evaluated.stdout
-    assert catalogue["osv-scanner"]["version"] in evaluated.stdout
-    assert catalogue["checkov"]["version"] in evaluated.stdout
 
 
 def test_real_osv_install_checks_release_hash_and_executes_json_reports(

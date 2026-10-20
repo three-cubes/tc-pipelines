@@ -15,7 +15,11 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+WORKFLOWS = PLATFORM_ROOT / ".github" / "workflows"
 GATE = WORKFLOWS / "python-quality-gate.yml"
 REFRESH = WORKFLOWS / "pytest-durations-refresh.yml"
 BODY = REPO_ROOT / "actions" / "python-gate-body" / "action.yml"

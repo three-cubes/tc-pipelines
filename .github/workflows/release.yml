@@ -115,14 +115,14 @@ jobs:
     name: Tag + GitHub Release (from CHANGELOG)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: ${{ inputs.fetch-depth }}
 
       - name: Mint three-cubes-agent token for release
         id: app
-        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@933274c58b631acf54d94e95d7495daf9180fdac # post-v2.2.0
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@b0268816c0dfa911da7b59b03b8b58f7292e7295 # post-v2.2.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}

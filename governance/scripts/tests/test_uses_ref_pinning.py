@@ -9,9 +9,8 @@ this repo's references to its own actions and workflows. Nothing may sit on a
 tag, `@main`, or a branch.
 
 actionlint and yamllint accept any well-formed ref, so this test pins the shape.
-`test_self_pin_freshness.py` separately reads full git history and proves that a
-self-pin executes the current target content. CI checks out full history for
-that contract.
+Dependabot moves a self-pin when the public repository tags a release, which the
+export of agent-platform produces (ledger workflow-pin-history-tooling).
 """
 
 from __future__ import annotations
@@ -25,11 +24,15 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
 
 SOURCE_GLOBS = (
-    ".github/workflows/*.yml",
-    "actions/*/action.yml",
-    ".github/actions/*/action.yml",
+    (PLATFORM_ROOT, ".github/workflows/*.yml"),
+    (REPO_ROOT, "actions/*/action.yml"),
+    (REPO_ROOT, ".github/actions/*/action.yml"),
 )
 
 # A local path carries no `@ref` by design: Actions resolves it against the
@@ -63,8 +66,8 @@ FLOATING_BY_DESIGN: dict[str, tuple[int, str]] = {}
 
 def _source_files() -> list[Path]:
     found: set[Path] = set()
-    for pattern in SOURCE_GLOBS:
-        found.update(REPO_ROOT.glob(pattern))
+    for root, pattern in SOURCE_GLOBS:
+        found.update(root.glob(pattern))
     return sorted(found)
 
 
@@ -101,7 +104,7 @@ def _uses_sites(path: Path) -> list[tuple[int, str]]:
 def _sites() -> list[tuple[str, int, str]]:
     """(repo-relative path, line, ref), sorted so ids are stable."""
     return sorted(
-        (str(path.relative_to(REPO_ROOT)), line, ref)
+        (str(path.relative_to(PLATFORM_ROOT)), line, ref)
         for path in _source_files()
         for line, ref in _uses_sites(path)
     )
@@ -134,14 +137,14 @@ def _actions_surfaces_on_disk() -> set[Path]:
     action globs together contribute a small enough share that either could go
     unnoticed under any floor loose enough to survive a legitimate deletion.
     """
-    found = set((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+    found = set((PLATFORM_ROOT / ".github" / "workflows").glob("*.yml"))
     found.update(path for path in REPO_ROOT.rglob("action.yml") if ".git" not in path.parts)
     return found
 
 
 def test_the_scan_reads_every_actions_surface_on_disk() -> None:
     missed = sorted(
-        str(path.relative_to(REPO_ROOT)) for path in _actions_surfaces_on_disk() - set(_source_files())
+        str(path.relative_to(PLATFORM_ROOT)) for path in _actions_surfaces_on_disk() - set(_source_files())
     )
     assert not missed, (
         f"{missed} declare Actions surfaces that SOURCE_GLOBS does not reach, so "
@@ -156,7 +159,7 @@ DECLARES_USES = re.compile(r"^\s*uses:", re.MULTILINE)
 def test_the_walk_reaches_every_file_that_declares_uses() -> None:
     """A walk that stopped descending would shrink the suite, not fail it."""
     silent = sorted(
-        str(path.relative_to(REPO_ROOT))
+        str(path.relative_to(PLATFORM_ROOT))
         for path in _source_files()
         if DECLARES_USES.search(path.read_text(encoding="utf-8")) and not _uses_sites(path)
     )
@@ -171,7 +174,8 @@ def test_the_walk_reaches_every_file_that_declares_uses() -> None:
 
 def test_the_scan_found_uses_sites() -> None:
     """A scan that silently matches nothing would pass every assertion below."""
-    assert len(SITES) >= 120, (
+    # Near 80% of the 98 sites present at the import from tc-pipelines.
+    assert len(SITES) >= 80, (
         f"only {len(SITES)} `uses:` sites discovered across {SOURCE_GLOBS} — the "
         f"structural walk has drifted, so ref pinning is no longer being checked. "
         f"fix: confirm the globs still name every workflow and action file, and "
@@ -255,9 +259,8 @@ def test_uses_ref_is_pinned_the_way_the_canon_requires(path: str, line: int, ref
             "major such as `@v1` only works while something advances that tag "
             "on every release; nothing here does, so it froze and a step "
             "loaded a revision of the composite that no longer emitted the "
-            "output the workflow read — silently, because "
-            "test_internal_call_contracts.py validates against the LOCAL file, "
-            "not the ref that runs."
+            "output the workflow read — silently, because a check of the "
+            "LOCAL file says nothing about the ref that runs."
         )
     else:
         remedy = (
