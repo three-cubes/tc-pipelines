@@ -2,4 +2,4 @@
 name = "tc-sdlc-mixed-consumer"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = ["idna==3.10"]
+dependencies = ["idna==3.15"]
