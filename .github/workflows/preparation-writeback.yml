@@ -56,7 +56,7 @@ jobs:
       # immutable validator checkout; it has no consumer write authority.
       - id: bootstrap
         name: Mint scoped token for private tc-pipelines tools
-        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@933274c58b631acf54d94e95d7495daf9180fdac # post-v2.2.0
+        uses: three-cubes/tc-pipelines/.github/actions/github-app-token@b0268816c0dfa911da7b59b03b8b58f7292e7295 # post-v2.2.0
         with:
           client-id: ${{ inputs.azure-client-id }}
           tenant-id: ${{ inputs.azure-tenant-id }}
@@ -76,7 +76,7 @@ jobs:
       # The validator comes from the immutable tc-pipelines revision, never the
       # PR checkout.  This checkout is the only source code this job executes.
       - name: Checkout trusted receipt validator
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: three-cubes/tc-pipelines
           ref: ${{ inputs.trusted-validator-ref }}
@@ -84,7 +84,7 @@ jobs:
           token: ${{ steps.bootstrap.outputs.token }}
           persist-credentials: false
       - name: Install the trusted preparation toolchain
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.12.5"
           python-version: "3.12"

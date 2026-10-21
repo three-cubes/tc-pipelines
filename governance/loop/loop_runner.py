@@ -63,7 +63,7 @@ Stdlib only, no third-party deps — the same discipline the rest of ``loop/``
 keeps. The Linear transport is an injected seam (via the :class:`Dispatcher`), so
 selection/gating/dispatch decisions are fully testable offline.
 
-Run the CLI (from ``governance/loop/``), dry-run + record-only by default::
+Run the CLI (from ``orchestration/loops/``), dry-run + record-only by default::
 
     python3 -m loop_runner --json --limit 1 --issues-file snapshot.json
 
@@ -75,7 +75,7 @@ Arming is a deliberate act (``--armed --live``). The DEFAULT sink is still the
 safe :class:`LoggingDispatchSink` (records, spawns nothing); the REAL runtime is
 :class:`GitHubActionsDispatchSink` (GHA-hosted headless ``claude -p`` per item),
 opt-in via ``--sink github-actions`` and reached ONLY on the armed + live +
-past-soak path — see ``governance/loop/ARMING.md``.
+past-soak path — see ``orchestration/loops/ARMING.md``.
 """
 
 from __future__ import annotations
@@ -375,7 +375,7 @@ class GitHubActionsHeadlessSink:
             "GitHubActionsHeadlessSink is the historical STUB description — the live "
             "GHA-hosted `claude -p` spawn is now realized by GitHubActionsDispatchSink "
             "(parameterised with the dispatch token + orchestrator repo). See that "
-            "class and governance/loop/ARMING.md."
+            "class and orchestration/loops/ARMING.md."
         )
 
 
@@ -384,8 +384,8 @@ class AgentPlatformSink:
     """STUB · candidate spawn seam: hand off to the standing agent-platform runner.
 
     Wiring note: on dispatch, this seam would POST the contract to the standing
-    tc-agent-zone / vm-openclaw agent-platform runner (the persistent OpenClaw
-    gateway), which owns agent lifecycle, the subagent-spawning decision hook
+    agent-platform runner (a persistent agent gateway on a managed host), which
+    owns agent lifecycle, the subagent-spawning decision hook
     (SP-C-5: no delegation without a linked work item), and the token-logger spend
     path (SGO-44) that feeds the governor's budget counters back. It is attractive
     because the platform already enforces identity + the delegation guardrail at
@@ -399,8 +399,8 @@ class AgentPlatformSink:
     def dispatch(self, contract: DispatchContract) -> DispatchResult:
         raise NotImplementedError(
             "AgentPlatformSink is a documented STUB candidate — the live hand-off "
-            "to the tc-agent-zone / vm-openclaw runner is intentionally not wired. "
-            "See the class docstring and governance/loop/ARMING.md."
+            "to the standing agent-platform runner is intentionally not wired. "
+            "See the class docstring and orchestration/loops/ARMING.md."
         )
 
 
@@ -426,7 +426,7 @@ class LinearDelegationSink:
         raise NotImplementedError(
             "LinearDelegationSink is a documented STUB candidate — the live "
             "Linear delegate=agent mutation is intentionally not wired. See the "
-            "class docstring and governance/loop/ARMING.md."
+            "class docstring and orchestration/loops/ARMING.md."
         )
 
 
@@ -1066,7 +1066,10 @@ def render_result(result: RunResult) -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None, *, guardrails_validator: Callable[[], bool] = guardrails_validated
+) -> int:
+    """Run one tick. ``guardrails_validator`` is the lights-out proof (default: run the harness)."""
     args = build_arg_parser().parse_args(argv)
     dry_run = not args.live
 
@@ -1106,8 +1109,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # Run the guardrail harness AT MOST ONCE this tick and share the result with
     # both the dispatcher (its arming proof) and the runner (its live self-check).
-    harness_ok = guardrails_validated()
-    validator: Callable[[], bool] = lambda: harness_ok
+    harness_ok = guardrails_validator()
+
+    def validator() -> bool:
+        return harness_ok
 
     runner, governor = _build_runner(args, source, validator, state_store)
 

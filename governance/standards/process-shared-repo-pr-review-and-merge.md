@@ -10,7 +10,9 @@ A shared-repo PR needs a review the author **cannot self-provide** (the org's `m
 Automated review applies [`code-review-rules.md`](code-review-rules.md). The PR's agent works each finding through that standard's *Acting on a finding* protocol before the human review.
 
 ## Merge — auto-merge on green after the review
-Once the required human review is in and the gate is green, the PR **merges itself**: `auto-merge-on-green.yml` fires on the Quality-gate `workflow_run` completion and, when the fan-in "CI gate" check-run is green, arms `gh pr merge --auto --merge` as the App. The required contexts are **Quality gate** + **SonarCloud scan** + **SonarCloud Code Analysis** (a hardened gate also requires **Mutation**); use the merge-commit method, never squash. No human runs the merge.
+Once the required human review is in and the gate is green, the PR **merges itself**: the lane arms GitHub's native auto-merge (`gh pr merge --auto --merge`). The required contexts are **Quality gate** + **no-attribution** ([`CANONICAL-ORG-RULESET.md`](../CANONICAL-ORG-RULESET.md)); use the merge-commit method, never squash. No human runs the merge.
+
+Judge merge readiness on the required contexts. `codecov/patch` is non-required and can report red on a healthy PR: new lines covered only by the integration tier trip the patch target while the required coverage gate stays green. Confirm the required checks, then optionally add a unit test for the flagged line.
 
 `gh pr merge --admin` is the **narrow, human-authorised exception** — a logged owner override for when every required check is green and a human review exists. It is never a routine path and never self-authorised by an agent; a ruleset with no bypass actors blocks even admins, so the override is a deliberate human act. It does not relax the never-merge-over-a-red-gate rule for routine work.
 

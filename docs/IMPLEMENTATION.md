@@ -47,6 +47,21 @@ legacy apply path.
 
 ## Definition of done and evidence status
 
+> **Re-baselined 2026-10-06 (PLA-448, PLA-467):** tc-sdlc v4 is a thin Nx plugin, so most foundation criteria are met by the standard tool instead of tc-sdlc code:
+>
+> | Criteria | Met by |
+> |---|---|
+> | F2–F4 | Nx's project graph, `nx affected`, task runner and cache |
+> | F5–F7 | mise, uv, pnpm and Corepack |
+> | F9–F11 | Identical Nx task hashes across environments; `devcontainer build`, `docker/build-push-action` and `actions/attest-build-provenance` |
+> | F12–F15 | A CI qualification matrix over the fixture consumers; `nx release`; ephemeral runners |
+>
+> F1 (catalogue sync) and F8 (the fitness executor) stay as tc-sdlc v4 surfaces.
+>
+> F17's row is stale. Foundation PR #157 merged on 2026-09-22 with nine failing checks, #159 followed the same day, and nothing has been released since v2.2.0.
+>
+> A2–A6 now target agent-platform rather than tc-agent-zone. Progress is tracked in the Linear project "agent-platform on the AI SDLC target state".
+
 This ledger is the canonical progress view for the AI SDLC delivery. A row is
 `VERIFIED` only when its implementation is committed and its behavioural tests
 have passed against that commit. Work in another worktree, a successful probe,
@@ -62,27 +77,27 @@ States:
 
 | ID | Acceptance criterion | State | Verified evidence | Remaining work |
 |---|---|---|---|---|
-| F1 | One versioned declaration, catalogue and generated lock reject stale or partial upgrades. | VERIFIED | Task 1 independently reviewed at `a64ddea`; public CLI and schema tests exercise validation and lock generation. | None. |
-| F2 | One deterministic graph computes dependency-closed affected work and stable task identities. | VERIFIED | Task 2 independently reviewed at `5029696`; graph tests cover downstream closure and identity invariants. | None. |
-| F3 | Resource-aware execution runs independent tasks concurrently and retains terminal diagnostics for failure, stall and cancellation. | VERIFIED | Task 3 independently reviewed at `227a7bb`; runtime tests exercise resource admission, process termination and terminal receipts. | None. |
-| F4 | Preparation is deterministic and reaches a fixed point; evaluation is read-only; reusable evidence is identity-bound. | VERIFIED | Task 4 independently reviewed at `ea61ca0`, `8aad84b` and `631422e`; preparation, evaluation, cache and sabotage tests pass. | None. |
-| F5 | Native macOS/Linux bootstrap owns exact Node, pnpm, Python and uv execution state without ambient user configuration. | VERIFIED | Bootstrap and lifecycle implementation through `896bd4c`; package suite 131/131, Darwin integration 19/19 and Docker lifecycle probes 2/2 passed. Independent review reproduced both final recovery regressions against the parent and passed the fixes. | None for the native bootstrap boundary. |
-| F6 | Concurrent bootstrap, state invalidation and maintenance preserve one valid current/predecessor state across crash, alias and replacement races. | VERIFIED | Bootstrap lifecycle implementation through `8e0bc391`; build, package suite 151/151, focused public recovery 3/3, Darwin integration 25/25 and Docker lifecycle 2/2 passed. Independent review reproduced referenced and pre-reference corruption, invalid authority and live-lease cases through the public CLI and found no material issue. | None. |
-| F7 | Python-only, pnpm-only and mixed consumers use real locked dependencies through the packed public CLI. | VERIFIED | Disposable-consumer implementation through `4eaa0234`; build, package suite 151/151 and packed public journeys 5/5 passed. Independent review verified exact Python and Node dependencies, mixed downstream closure, local dependency-shadow resistance, hostile launcher-environment isolation, executable packaging from paths containing spaces and zero-download offline frozen replay from an isolated seeded store. | None. |
-| F8 | `tc-fitness` `0.17.1` runs once as an independently executable, repository-scoped graph task and a version mismatch is rejected. | VERIFIED | Implementation at `062e16e`; direct packed acceptance at `03e136a` and `dcf742f` uses genuine bootstrap state, validates owned and nested evidence, proves exactly one fitness task, preserves the checkout and verifies scratch removal. The exact-head fast suite passed 153/153 and the full repository gate passed 1,991/1,991. | None. |
-| F9 | Native, canonical-image and hosted runs bind the same source, lock, input and task identities. | IN PROGRESS | The exact multi-platform image producer completed one local-registry qualification; that image-only proof is retained but is not release admission. | Run every disposable consumer on native and exact-image boundaries; add hosted identity evidence; parse terminal receipts and compare recomputed identities. |
-| F10 | Warm affected feedback is under 60 seconds and concurrency honours detected CPU and declared resources. | IN PROGRESS | Scheduler resource semantics are verified by Task 3. | Measure the retained consumer result rather than a self-reported value; prove one-core/multi-core determinism, maximum safe workers, observed peak concurrency and the hard warm-loop budget. |
-| F11 | The immutable amd64/arm64 image is published by digest with provenance, SBOM and installed-tool verification. | IN PROGRESS | The image-only producer published and re-used an exact local-registry index with both platform probes passing. | Integrate the reviewed producer; rerun the exact image proof after Task 6 and release-transport changes; retain cleanup results. |
-| F12 | Public components are accepted at their own command and receipt boundaries; native, image and hosted composers then prove handoffs; release admission derives every claim from retained qualification evidence. | IN PROGRESS | Bootstrap, preparation, `check`, `check-all` and fitness have direct packed acceptance through `769042d`. Native consumer composition passes 17/17 without detached receipt races. | Implement and accept image production, image qualification and hosted composition; then prove their receipt handoffs through release admission. |
-| F13 | Only a successful image plus functional qualification may generate the catalogue and Dev Container files. | IN PROGRESS | Unqualified tracked catalogue and Dev Container authority was removed at `318656a`; generation now requires both receipt inputs on the release branch. | Complete validator integration and prove failed, stale or altered inputs cannot create either output. |
-| F14 | A trusted bot writes exactly the two generated outputs to the unchanged PR head with an exact Git lease. | IN PROGRESS | Event selection, output allowlist, bot identity and lease-safe transport have focused tests on the release branch. | Integrate the workflow; verify immutable credential code, normal Git hooks, post-hook byte checks, early-failure evidence and real hosted writeback. |
-| F15 | All commands clean owned scratch and containers while retaining required release and failure evidence. | IN PROGRESS | Native lifecycle cleanup and recovery are verified through Task 5; image producer cleanup passed its local-registry run. | Assert registry, builder, container, image and state cleanup in the final exact-image journey and preserve referenced release artefacts. |
-| F16 | The consolidated branch passes the repository's complete local admission path with a clean worktree. | IN PROGRESS | F1–F8 have passing behavioural evidence on independently reviewed component commits. The exact head passes 153 package tests, direct evaluation and fitness acceptance, the 1,991-test repository gate and the Docker builder. | Complete F9–F15, then pass Darwin integration, exact-image qualification, Python assurance and the complete local admission path on the exact head. |
-| F17 | PR CI evaluates that exact head once, retains terminal evidence and has no unresolved review conversations. | IN PROGRESS | PR #157 exists as the single foundation PR. Its remote head predates the accepted Task 5 work. | Push once after F6–F16 pass locally; resolve review findings; obtain green required checks and review. |
+| F1 | One versioned declaration, catalogue and generated lock reject stale or partial upgrades. | VERIFIED (v4) | The package build derives the release catalogue from the producer's pins (agent-platform #90); the consumer's `@three-cubes/tc-sdlc:sync` generator holds `mise.toml`, workflow action pins and `fitnessVersion` to it, and `nx sync:check` fails on drift (#92, proved in the fixture e2e). | None. |
+| F2 | One deterministic graph computes dependency-closed affected work and stable task identities. | VERIFIED (Nx) | Nx's project graph, inferred by the tc-sdlc plugin (#87), and `nx affected` with `nrwl/nx-set-shas` (#72); `layer_boundaries` holds every edge to ADR-0001 D3. | None. |
+| F3 | Resource-aware execution runs independent tasks concurrently and retains terminal diagnostics for failure, stall and cancellation. | VERIFIED (Nx) | Nx's task runner (`parallel`, per-target `parallelism`) and its terminal output; each run's receipt records every task's status and exit code (#92). | None. |
+| F4 | Preparation is deterministic and reaches a fixed point; evaluation is read-only; reusable evidence is identity-bound. | VERIFIED (Nx, make) | `make prepare`, then evaluation only on a clean tree (`assert-clean`, `assert-evaluation-clean`); Nx's cache keys each result on its declared inputs, and an unchanged affected run is served entirely from it (fixture e2e, #91). | None. |
+| F5 | Native macOS/Linux bootstrap owns exact Node, pnpm, Python and uv execution state without ambient user configuration. | VERIFIED (mise, uv, pnpm) | One pin file installed by mise (#78); `make bootstrap` is `mise install`, `uv sync --locked` and `pnpm install --frozen-lockfile`. | None. |
+| F6 | Concurrent bootstrap, state invalidation and maintenance preserve one valid current/predecessor state across crash, alias and replacement races. | SUPERSEDED | mise, uv and pnpm own their install state and its locking; no tc-sdlc state remains to protect. | None. |
+| F7 | Python-only, pnpm-only and mixed consumers use real locked dependencies through the packed public CLI. | VERIFIED (v4) | The python, pnpm and mixed fixture consumers adopt the built package with `init`, install from their locks and run `nx affected` and the fitness gate (#91), as the package's `e2e` target in every affected gate run. | None. |
+| F8 | `tc-fitness` runs once as an independently executable, repository-scoped graph task and a version mismatch is rejected. | VERIFIED (v4) | The inferred `fitness` target and `@three-cubes/tc-sdlc:fitness` executor, which rejects an installed engine that differs from the catalogue or lock (#89); `make smoke`, `check` and `check-all` run it. | None. |
+| F9 | Native, canonical-image and hosted runs bind the same source, lock, input and task identities. | IN PROGRESS | Nx task hashes depend only on declared inputs, so native and hosted runs of one commit agree. | Run the Quality gate and Nightly in the published image digest (PLA-468). |
+| F10 | Warm affected feedback is under 60 seconds and concurrency honours detected CPU and declared resources. | IN PROGRESS | `make smoke` passes in 38 seconds locally through the Nx `fitness` target. | Measure the gate's p90 and Actions minutes in CI (PLA-466). |
+| F11 | The immutable amd64/arm64 image is published by digest with provenance, SBOM and installed-tool verification. | VERIFIED | `toolchain-image.yml` builds both platforms with `docker/build-push-action`, publishes by digest with an SBOM and provenance, and attests it with `actions/attest-build-provenance` (#86; first publish from main on 2026-10-06). | None. |
+| F12 | Public components are accepted at their own command and receipt boundaries; native, image and hosted composers then prove handoffs; release admission derives every claim from retained qualification evidence. | IN PROGRESS | The fixture e2e qualifies the built package (#91); the Quality gate uploads each run's receipts (#92). | Release through `nx release` (PLA-469). |
+| F13 | Only a successful image plus functional qualification may generate the catalogue and Dev Container files. | SUPERSEDED | The catalogue is a build artefact, never committed (#90); the Dev Container pins the published, attested image digest. | Move the pins by pull request after each publish (PLA-468). |
+| F14 | A trusted bot writes exactly the two generated outputs to the unchanged PR head with an exact Git lease. | SUPERSEDED | The three-cubes-agent App opens the digest pull request (PLA-468); the gate reviews it like any change. | Repair the Azure WIF sign-in it depends on (PLA-474). |
+| F15 | All commands clean owned scratch and containers while retaining required release and failure evidence. | VERIFIED (runners) | Ephemeral GitHub runners; the fixture e2e removes its scratch repositories; receipts are retained as workflow artefacts. | None. |
+| F16 | The consolidated branch passes the repository's complete local admission path with a clean worktree. | VERIFIED (per PR) | Each change passes `make check BASE=origin/main` on a clean tree and `make no-attribution` before it is pushed (#87–#94). | None. |
+| F17 | PR CI evaluates that exact head once, retains terminal evidence and has no unresolved review conversations. | VERIFIED (per PR) | Each pull request merges only after the Quality gate passes on its exact head with no open review thread (#87–#94). | None. |
 
-The foundation PR is usable when F1–F17 are `VERIFIED`. A generated catalogue
-or Dev Container file by itself is not completion; both must be the output of
-the same successful image and functional qualification chain.
+Rows marked `VERIFIED (<tool>)` or `SUPERSEDED` close against the standard
+tool that meets them (re-baseline above); their v3 implementation is retired
+with tc-sdlc v3 (PLA-470).
 
 ### End-to-end adoption and production acceptance
 
@@ -91,7 +106,7 @@ program outcome and are not hidden inside the foundation PR's completion claim.
 
 | ID | Acceptance criterion | State | Dependency |
 |---|---|---|---|
-| A1 | Publish the coordinated `tc-pipelines` release: package, immutable workflow commit, image digest, schemas and compatible `tc-fitness` version. | NOT STARTED | F1–F17. |
+| A1 | Publish the coordinated `tc-pipelines` release: package, immutable workflow commit, image digest, schemas and compatible `tc-fitness` version. | IN PROGRESS | `nx release` publishes `@three-cubes/tc-sdlc` v4 with its release catalogue (PLA-469). |
 | A2 | Adopt the released product in `tc-agent-zone` with one `sdlc.yaml`, one generated lock and stable Make entrypoints. | NOT STARTED | A1. |
 | A3 | Represent Python, pnpm, Go, generators, fitness and qualification journeys in the consumer graph; remove duplicate orchestration and duplicate post-merge evaluation after parity. | NOT STARTED | A2. |
 | A4 | Build a Hermes candidate once, harvest and bind current learning artefacts, and qualify the candidate before production mutation. | NOT STARTED | A3. |

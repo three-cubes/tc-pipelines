@@ -9,6 +9,7 @@ Sub-agents protect the main session's context window and let independent analysi
 - **Read-only by default:** prefer read-only inventory, audit and review tasks unless an implementation slice is truly independent.
 - **No parallel git operations:** branch, commit, merge and PR operations stay with the parent agent.
 - **No live operations:** sub-agents must not deploy, restart services or mutate live config unless explicitly authorised and designed for that operation.
+- **Preflight the allowed set:** confirm the target sub-agent id is in this session's allowed set before spawning; the set is session-scoped. See [§Spawn preflight](#spawn-preflight).
 - **Failure path required:** each delegation says what to do if blocked.
 - **Scoped loop:** each sub-agent runs its own orient → frame-done → check instance on its slice (the agent operating loop); the parent keeps the outer loop and integrates.
 - **Parent owns effectiveness:** the parent specifies the capability and source-of-truth the sub-agent needs; under-specified delegation is the parent's defect, not the sub-agent's.
@@ -58,7 +59,50 @@ delegation is the parent's defect, not the sub-agent's.** A sub-agent that used
 the wrong tool or returned thin work was, in almost every case, handed a brief
 missing its source-of-truth (5) or its capability (6).
 
+When the source-of-truth is a work-tracker item, the delegation includes its
+concrete issue identifier or URL. The sub-agent reads that item first, then
+searches or lists related items as needed. Follow-up work addresses items and
+projects by the returned ids, not by title.
+
 See `delegation-brief` skill for the full format.
+
+## Test-first sub-agent specs
+
+A sub-agent spec for any behaviour change is test-first by construction: name the
+target behaviour, write the tests, prove they fail against the current behaviour,
+then implement to green. The sub-agent returns the captured red-before-green
+evidence — the failing run and the passing run — as its definition-of-done proof;
+a task closes only on a green run preceded by a red one.
+
+Order the spec so the test precedes the implementation:
+
+1. **behaviour** — the exact input → observable output the change must produce;
+2. **failing test** — write the test(s) that assert that behaviour;
+3. **red proof** — run them against the current code and capture the FAIL, failing
+   for the stated reason rather than a setup error;
+4. **implement to green** — make the minimal change that passes;
+5. **return red-before-green** — hand back both captures (the red run, then the
+   green run) plus the diff.
+
+Paste this skeleton into the delegation prompt:
+
+```
+Behaviour: <input> → <observable output>.
+1. Write a test asserting that behaviour.
+2. Run it against the current code; capture the FAIL (it fails for the stated reason).
+3. Implement the minimal change to make it pass.
+4. Return: the red run, the green run, and the diff.
+Definition-of-done: red-before-green evidence attached; every green has a prior red.
+```
+
+**Self-check.** Lead every spec with the failing test. Rewrite a spec worded
+"fix X, then write tests" before spawning, so the test observes the old behaviour
+fail before the change turns it green.
+
+**Layering.** This spec shape is the layer-4 process control that pairs with the
+layer-2 gates: the gates require a changed line to carry a test; the spec makes the
+sub-agent prove that test failed first. Canon:
+[`agent-process-controls.md`](agent-process-controls.md).
 
 ## Scoped sub-agent types (lanes)
 
@@ -110,3 +154,25 @@ D15) fails the build if any `subagents.allowAgents`
 target does not resolve to an `agents.list` entry, names a channel-bound primary, or
 is a lane that omits its `skills` / `workspace` or re-enables onward spawning — so a
 mis-wired delegation is caught before it reaches a live spawn.
+
+## Spawn preflight
+
+The allowed sub-agent id set is **session-scoped**: this session's agent config
+fixes it, and it varies between sessions. The runtime rejects a spawn to an id
+outside that set before any sub-agent exists. Run this preflight on every spawn:
+
+1. **Query the allowed set first.** Call the runtime's allowed-subagents query
+   before spawning, and spawn only with an id returned for this session.
+2. **Read the set live each time.** Take the id from the current query result
+   rather than from your own agent name or an id seen in an earlier session.
+3. **Gate any wait on spawn success.** Yield or wait for completion only after the
+   spawn reports success.
+4. **On rejection, report and act.** Return one actionable line naming the
+   attempted id and the allowed set, then retry with an allowed id or do the work
+   inline in this turn, e.g.
+   `spawn rejected: 'research-lane' not allowed (allowed: claude, codex) — retrying as 'claude'`.
+
+The preflight sits **inside** the delegation contract. It changes only *which* id
+the parent spawns and *whether* it waits; the lane or slot contract still sets the
+sub-agent's capability. The parent still owns integration and final quality, all
+git operations, and every live operation.

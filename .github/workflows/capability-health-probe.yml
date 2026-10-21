@@ -42,7 +42,10 @@ name: 'Reusable — Capability health probe (post-deploy live-connector runtime 
 #         vm-name: vm-openclaw
 #         # The probe command is run ON the VM. Keep the pure logic in your repo;
 #         # it must self-source the gateway env and read the LIVE config.
-#         probe-command: bash /opt/tc-agent-zone/current/agentops/apply/run-nightly-capability-probe.sh
+#         # The host's deploy root (execution/docs/standards/deploy-root.md). The
+#         # workflow exports it as TC_DEPLOY_ROOT before the probe command runs.
+#         deploy-root: ${{ vars.TC_DEPLOY_ROOT }}
+#         probe-command: bash "$TC_DEPLOY_ROOT/current/agentops/apply/run-nightly-capability-probe.sh"
 #         run-as-user: openclaw
 #         deep: ${{ github.event.inputs.deep || 'true' }}
 #         azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -74,9 +77,20 @@ on:
           lives in the consumer repo; the command must self-source the gateway
           env and read the LIVE config. The deep/shallow flag is appended by
           this workflow. Example:
-            bash /opt/tc-agent-zone/current/agentops/apply/run-nightly-capability-probe.sh
+            bash "$TC_DEPLOY_ROOT/current/agentops/apply/run-nightly-capability-probe.sh"
         required: true
         type: string
+      deploy-root:
+        description: |
+          The host's deploy root (execution/docs/standards/deploy-root.md): an
+          absolute path of letters, digits, `.`, `_`, `-` and `/`. When set it is
+          exported as TC_DEPLOY_ROOT before the probe command runs, so a command
+          that expands "$TC_DEPLOY_ROOT" resolves it in a clean remote shell.
+          Empty (default) exports nothing, and a command that needs the variable
+          must set it itself.
+        required: false
+        type: string
+        default: ''
       run-as-user:
         description: |
           Unprivileged user to `sudo -u <user> -H bash -l` into before running the
@@ -159,7 +173,7 @@ jobs:
       id-token: write
     steps:
       - name: WIF Azure login
-        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@f82eb3c5ea0addbfa13c41f4034e5ba107620aed # v2.2.1
+        uses: three-cubes/tc-pipelines/.github/actions/wif-azure-login@b0268816c0dfa911da7b59b03b8b58f7292e7295 # v2.2.1
         with:
           client-id: ${{ inputs.azure-client-id }}
           tenant-id: ${{ inputs.azure-tenant-id }}
@@ -174,9 +188,16 @@ jobs:
           PROBE_COMMAND: ${{ inputs.probe-command }}
           RUN_AS_USER: ${{ inputs.run-as-user }}
           CONFIG_PATH: ${{ inputs.config-path }}
+          DEPLOY_ROOT: ${{ inputs.deploy-root }}
           DEEP: ${{ inputs.deep }}
         run: |
           set -euo pipefail
+
+          # `deploy-root` is a free-text input — validate before it is embedded.
+          if [[ -n "$DEPLOY_ROOT" && ! "$DEPLOY_ROOT" =~ ^/[A-Za-z0-9._/-]*$ ]]; then
+            echo "::error::deploy-root must be an absolute path of letters, digits, '.', '_', '-' and '/'; got: $DEPLOY_ROOT"
+            exit 1
+          fi
 
           # `deep` is a free-text input — validate before it is embedded. Never
           # trust a dispatch/choice value unchecked.
@@ -194,6 +215,11 @@ jobs:
           INNER="${PROBE_COMMAND} ${FLAG}"
           if [[ -n "$CONFIG_PATH" ]]; then
             INNER="export OPENCLAW_CONFIG=$(printf '%q' "$CONFIG_PATH"); ${INNER}"
+          fi
+          # Bind the deploy root first, so every later expansion of
+          # TC_DEPLOY_ROOT (the probe command's own) sees it.
+          if [[ -n "$DEPLOY_ROOT" ]]; then
+            INNER="export TC_DEPLOY_ROOT=$(printf '%q' "$DEPLOY_ROOT"); ${INNER}"
           fi
           if [[ -n "$RUN_AS_USER" ]]; then
             REMOTE="sudo -u $(printf '%q' "$RUN_AS_USER") -H bash -lc $(printf '%q' "$INNER")"
@@ -361,7 +387,7 @@ jobs:
 
       - name: Publish capability-health result artifact
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ runner.temp }}/capability-health/

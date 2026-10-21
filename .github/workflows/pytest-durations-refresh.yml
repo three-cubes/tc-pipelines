@@ -153,7 +153,7 @@ jobs:
           exit 1
 
       - name: Run the suite and store durations
-        uses: three-cubes/tc-pipelines/actions/python-gate-body@933274c58b631acf54d94e95d7495daf9180fdac # post-v2.2.0
+        uses: three-cubes/tc-pipelines/actions/python-gate-body@b0268816c0dfa911da7b59b03b8b58f7292e7295 # post-v2.2.0
         with:
           python-version: ${{ inputs.python-version }}
           uv-version: ${{ inputs.uv-version }}
@@ -219,7 +219,7 @@ jobs:
           PY
 
       - name: Upload the refreshed map
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ inputs.durations-path }}

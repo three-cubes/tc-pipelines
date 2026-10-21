@@ -15,23 +15,10 @@ in it. That is the state the documented CHANGELOG flow leaves `## [Unreleased]`
 in — the preparation action moves its bullets into a dated section before the tag is
 cut.
 
-A missing section costs the record rather than the run.
-`governance/standards/sdlc-release-workflow.md` requires the candidate PR to add
-the dated section, and consumers pinned to `@vN` read it to decide whether to
-move the pin. Every tag in LEGACY_TAGS_WITHOUT_NOTES lacks one, so that range
-carries no such record.
-
-The tag and CHANGELOG still need the release-history coverage check below, but
-the reusable no longer accepts an independently maintained heading label that
-can make its release notes drift from its tag.
-
-Only tag -> section is checked. A section with no tag is the correct state of a
-candidate PR, which adds the dated section before the tag is pushed, so the
-reverse direction would be unsatisfiable on every such PR.
-
-Tags cut before this guard are frozen in LEGACY_TAGS_WITHOUT_NOTES with their
-reason, making the guard a ratchet: satisfiable as the repo stands, and binding
-on every tag cut from here.
+These tests run the reusable's real preparation and extraction steps over
+fixture repositories. tc-pipelines' check that each of its own release tags has
+a CHANGELOG section read that repository's tags and stays with it (ledger
+reusable-workflow-contract-ci).
 """
 
 from __future__ import annotations
@@ -46,119 +33,15 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CHANGELOG = REPO_ROOT / "CHANGELOG.md"
-RELEASE = REPO_ROOT / ".github" / "workflows" / "release.yml"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export REPO_ROOT is that
+# root. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+RELEASE = PLATFORM_ROOT / ".github" / "workflows" / "release.yml"
 PREPARE_RELEASE = REPO_ROOT / "actions" / "prepare-release-metadata" / "prepare_release.py"
 
 EXTRACT_STEP = "Extract release notes from CHANGELOG"
 PREPARE_STEP = "Validate prepared release metadata"
-
-# Only `vX.Y.Z` ships. A bare-major tag (`v1`) is the floating alias consumers
-# pin: it moves rather than releasing, so it never owns a section of its own.
-# Stated as a shape rule so a future `v2` needs no edit here.
-RELEASE_TAG = re.compile(r"^v(\d+\.\d+\.\d+)$")
-
-# Tags cut before this guard existed. Their record survives only in tag
-# annotations and merge-commit subjects, which name the branch or the release
-# theme but not the consumer-facing input changes, so a section written now
-# would be a reconstruction rather than the reviewed candidate's own statement.
-LEGACY_TAGS_WITHOUT_NOTES = frozenset(
-    {
-        "v1.1.0",
-        "v1.2.0",
-        "v1.3.1",
-        "v1.4.0",
-        "v1.5.0",
-        "v1.6.0",
-        "v1.7.0",
-        "v1.8.0",
-        "v1.8.1",
-        "v1.8.2",
-        "v1.8.3",
-        "v1.8.4",
-        "v1.9.0",
-        "v1.10.0",
-        "v1.11.0",
-        "v1.11.1",
-        "v1.12.0",
-        "v1.13.0",
-        "v1.14.0",
-        "v1.15.0",
-        "v1.16.0",
-        "v1.16.1",
-    }
-)
-
-
-def _release_tags() -> list[str]:
-    result = subprocess.run(
-        ["git", "tag", "--list"],
-        capture_output=True,
-        text=True,
-        cwd=str(REPO_ROOT),
-        check=False,
-    )
-    if result.returncode != 0:
-        return []
-    return sorted(tag for tag in result.stdout.split() if RELEASE_TAG.match(tag))
-
-
-def _has_section(version: str) -> bool:
-    text = CHANGELOG.read_text(encoding="utf-8")
-    return re.search(rf"^## \[{re.escape(version)}\]", text, re.MULTILINE) is not None
-
-
-RELEASE_TAGS = _release_tags()
-ENFORCED_TAGS = [tag for tag in RELEASE_TAGS if tag not in LEGACY_TAGS_WITHOUT_NOTES]
-
-
-def test_the_scan_found_release_tags() -> None:
-    """A tagless checkout parametrizes the coverage assertion to nothing."""
-    assert len(RELEASE_TAGS) >= len(LEGACY_TAGS_WITHOUT_NOTES), (
-        f"only {len(RELEASE_TAGS)} release tags visible, fewer than the "
-        f"{len(LEGACY_TAGS_WITHOUT_NOTES)} already declared legacy. A checkout "
-        f"without tags collapses the coverage case below to nothing, so it "
-        f"passes without testing a single release. "
-        f"fix: set `fetch-depth: 0` on the `tests` job checkout in "
-        f".github/workflows/ci.yml — the default fetches no tags."
-    )
-
-
-@pytest.mark.parametrize("tag", ENFORCED_TAGS)
-def test_released_tag_has_a_changelog_section(tag: str) -> None:
-    version = RELEASE_TAG.match(tag).group(1)
-    major = version.split(".")[0]
-    assert _has_section(version), (
-        f"tag {tag} has no `## [{version}]` section in CHANGELOG.md. "
-        f"governance/standards/sdlc-release-workflow.md has preparation move "
-        f"the `## [Unreleased]` bullets into a dated section before the tag is "
-        f"pushed. Without it release.yml extracts zero bytes and stops the "
-        f"release, and a consumer "
-        f"pinned to @v{major} has no written record of what changed. "
-        f"fix: add a `## [{version}] — <date>` section in the PR that cuts the "
-        f"release, before the tag is pushed."
-    )
-
-
-@pytest.mark.parametrize("tag", sorted(LEGACY_TAGS_WITHOUT_NOTES))
-def test_legacy_exception_still_names_a_tag_without_a_section(tag: str) -> None:
-    """A stale exception widens the set of tags allowed to ship blank notes."""
-    version = RELEASE_TAG.match(tag).group(1)
-    assert not _has_section(version), (
-        f"LEGACY_TAGS_WITHOUT_NOTES exempts {tag}, but CHANGELOG.md now carries "
-        f"a `## [{version}]` section for it. "
-        f"fix: delete the entry, so the exemption cannot outlive its reason and "
-        f"quietly cover a tag that no longer needs it."
-    )
-    # A tagless checkout is reported once by the scan meta-test; asserting tag
-    # existence there too would bury that single cause under an entry per tag.
-    if RELEASE_TAGS:
-        assert tag in RELEASE_TAGS, (
-            f"LEGACY_TAGS_WITHOUT_NOTES names {tag}, which is not a tag in this "
-            f"repo. "
-            f"fix: correct the name or drop the entry — an exemption naming "
-            f"nothing exempts nothing and hides the typo that made it inert."
-        )
 
 
 def _extract_step_run() -> str:
@@ -402,9 +285,16 @@ def _extract_step_against(tmp_path: Path, body: str) -> tuple[int, str]:
         f"path and would otherwise read a stale /tmp file. "
         f"fix: point NOTES_REDIRECT at the step's current notes path."
     )
-    notes = tmp_path / "release-notes.md"
+    # Every scratch file the step names under /tmp moves into this test's own
+    # directory, so cases running in parallel never share a notes file.
+    notes = tmp_path / Path(redirect.group(1)).name
     (tmp_path / "CHANGELOG.md").write_text(_changelog_fixture(RELEASE_LABEL, body), encoding="utf-8")
-    script = step.replace(redirect.group(1), str(notes))
+    scratch = re.compile(r"(?<![\w/])/tmp/([A-Za-z0-9._-]+)")
+    script = scratch.sub(lambda m: str(tmp_path / m.group(1)), step)
+    # tmp_path itself may sit under /tmp, so check the step's own names, not the result.
+    assert not scratch.search(script.replace(str(tmp_path), "")), (
+        f"`{EXTRACT_STEP}` names a /tmp path this guard cannot isolate"
+    )
     result = _bash(script, tmp_path, RELEASE_VERSION)
     written = notes.read_text(encoding="utf-8") if notes.exists() else ""
     return result.returncode, written

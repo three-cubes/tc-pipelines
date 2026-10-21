@@ -1,7 +1,5 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
+# A uv workspace member: `uv run --frozen agent-token` from the repository root
+# runs its command, and its dependencies are declared here.
 [project]
 name = "tc-agent-tools"
 version = "0.2.0"
@@ -10,15 +8,23 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["pyjwt[crypto]>=2,<3"]  # [crypto] -> cryptography, required for RS256 App JWTs
 
-[dependency-groups]
-test = ["pytest>=8,<9"]
-
 [project.scripts]
 # `agent-token` -> short-lived per-agent App installation token on stdout.
-agent-token = "tc_agent_tools.agent_token:main"
+agent-token = "tc_agent_tools.agent_token:main"  # pragma: allowlist secret (a command name)
+# `queue-pr` -> enrol one agent-platform pull request in the merge queue, as the App.
+queue-pr = "tc_agent_tools.queue_pr:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["tc_agent_tools"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
+[tool.tc_sdlc]
+# Files outside this project that its tests execute or read; the inferred Nx test
+# target hashes them, so a change to either marks tc-agent-tools affected.
+test_inputs = [
+  "{workspaceRoot}/execution/operations/scripts/bootstrap-host.sh",
+  "{workspaceRoot}/Makefile",
+]

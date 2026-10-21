@@ -39,11 +39,11 @@ permissions from the JSON so you don't hand-tick them:
    **Never commit the `.pem`.**
 
 A trusted host broker mints an installation token per off-CI operation from the
-App ID and private key, using [`agent-token`](../../tools/README.md) as its
+App ID and private key, using [`agent-token`](https://github.com/three-cubes/tc-pipelines/blob/main/tools/README.md) as its
 lower-level implementation. The broker confines the token to one remote-write
 subprocess and never returns credentials or its Azure session to the agent
 harness. In CI, the
-[`github-app-token`](../../.github/actions/github-app-token/action.yml)
+[`github-app-token`](../../../execution/pipelines/.github/actions/github-app-token/action.yml)
 composite mints the equivalent token over WIF for authorised workflow steps.
 See the canon doc for the complete credential boundary.
 

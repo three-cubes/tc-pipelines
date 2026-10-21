@@ -9,14 +9,15 @@ description: |
   aren't enough).
 
   Typical usage:
-    - uses: three-cubes/tc-pipelines/.github/actions/apply-on-vm-via-runcommand@f82eb3c5ea0addbfa13c41f4034e5ba107620aed # v2.2.1
+    - uses: three-cubes/tc-pipelines/.github/actions/apply-on-vm-via-runcommand@<sha> # vX.Y.Z, a release that declares deploy-root
       with:
         resource-group: RG-AGENTS-CORE
         vm-name: vm-openclaw
+        deploy-root: ${{ vars.TC_DEPLOY_ROOT }}
         script: |
           set -e
           export HOME=/root
-          cd /data/development/tc-agent-zone
+          cd "$TC_DEPLOY_ROOT"
           git pull --ff-only
           bash devsecops/apply/apply-openclaw-config.sh --no-snapshot
 
@@ -35,6 +36,16 @@ inputs:
   script:
     description: Bash script body to execute as root on the VM.
     required: true
+  deploy-root:
+    description: |
+      The host's deploy root (execution/docs/standards/deploy-root.md): an
+      absolute path of letters, digits, `.`, `_`, `-` and `/`. When set it is
+      exported as TC_DEPLOY_ROOT before the script body runs, so a script that
+      expands "$TC_DEPLOY_ROOT" resolves it in the clean remote shell. Empty
+      (default) exports nothing, and a script that needs the variable must set
+      it itself.
+    required: false
+    default: ''
   fail-on-script-error:
     description: |
       If "true" (default), the action fails when az vm run-command itself
@@ -58,9 +69,18 @@ runs:
         RG: ${{ inputs.resource-group }}
         VM: ${{ inputs.vm-name }}
         SCRIPT_BODY: ${{ inputs.script }}
+        DEPLOY_ROOT: ${{ inputs.deploy-root }}
         FAIL_ON_ERR: ${{ inputs.fail-on-script-error }}
       run: |
         set -euo pipefail
+        # `deploy-root` is a free-text input — validate before it is embedded.
+        if [[ -n "$DEPLOY_ROOT" && ! "$DEPLOY_ROOT" =~ ^/[A-Za-z0-9._/-]*$ ]]; then
+          echo "::error::deploy-root must be an absolute path of letters, digits, '.', '_', '-' and '/'; got: $DEPLOY_ROOT"
+          exit 1
+        fi
+        if [[ -n "$DEPLOY_ROOT" ]]; then
+          SCRIPT_BODY="export TC_DEPLOY_ROOT=$(printf '%q' "$DEPLOY_ROOT")"$'\n'"${SCRIPT_BODY}"
+        fi
         MSG=$(az vm run-command invoke \
           --resource-group "$RG" \
           --name "$VM" \

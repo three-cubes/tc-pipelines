@@ -6,7 +6,7 @@ an injected fake, matching the stdlib-only / no-network discipline of the loop.
 
 Run (with the guardrail harness) from the repo root::
 
-    python3 -m unittest discover -s governance/loop/tests -v
+    python3 -m unittest discover -s orchestration/loops/tests -v
 """
 
 from __future__ import annotations
@@ -20,7 +20,12 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from typing import ClassVar
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+pytestmark = pytest.mark.integration
+
 
 import loop_dispatcher as disp
 import loop_state_machine as loop
@@ -666,7 +671,7 @@ class HttpSourcePaginatedFetchTest(unittest.TestCase):
         src = HttpLinearSource("lin_api_x", opener=self._build_opener(calls))
         src.fetch("INIT")
 
-        # 1 project-ids hop + 1 request PER PROJECT PER PAGE (A×2 + B×1) = 4.
+        # 1 project-ids hop + 1 request PER PROJECT PER PAGE (A x2 + B x1) = 4.
         self.assertEqual(len(calls), 4)
 
         # the first request is the cheap project-ids hop (no `issues` field), and
@@ -749,6 +754,7 @@ class JsonSourceTest(unittest.TestCase):
             with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
                 json.dump(doc, fh)
                 path = fh.name
+            self.addCleanup(Path(path).unlink)
             got = JsonIssueSource(Path(path)).fetch("init")
             self.assertEqual([i.id for i in got], ["PLA-1"])
 
@@ -757,7 +763,8 @@ class CliTest(unittest.TestCase):
     def _snapshot(self, items) -> str:
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
             json.dump({"issues": items}, fh)
-            return fh.name
+        self.addCleanup(Path(fh.name).unlink)
+        return fh.name
 
     def test_dry_run_prints_queue_no_side_effects(self):
         path = self._snapshot(

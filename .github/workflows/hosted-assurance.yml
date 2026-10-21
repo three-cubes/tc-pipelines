@@ -140,7 +140,7 @@ jobs:
     uses: ./.github/workflows/fitness-engine-canary.yml
     with:
       python-version: ${{ needs.select.outputs.python_version }}
-      candidate-ref: ac490ef70b0862985ca81714cd70ffe78762c194
+      candidate-ref: ac490ef70b0862985ca81714cd70ffe78762c194  # pragma: allowlist secret (a commit SHA)
       consumer-repo: ${{ github.repository }}
       consumer-ref: ${{ inputs.head }}
       driver-ref: ${{ inputs.head }}

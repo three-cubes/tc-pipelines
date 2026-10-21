@@ -35,17 +35,54 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+WORKFLOW_DIR = PLATFORM_ROOT / ".github" / "workflows"
 
 RESULT_REF = re.compile(r"needs\.([A-Za-z0-9_-]+)\.result")
 
+# The public tc-pipelines repository's own CI. It sits in execution/pipelines/.github/workflows/
+# here, which the export maps to .github/workflows/, so only the exported layout resolves it.
+PUBLIC_REPOSITORY_WORKFLOWS = frozenset({"ci.yml"})
+
 # (workflow, job) -> why the job reports outside the fan-in's closure.
-CLOSURE_EXEMPT = {
+CLOSURE_EXEMPT: dict[tuple[str, str], str] = {
     ("ci.yml", "no-attribution"): (
-        "Emitted as its own BARE required status context. The org-main-core "
-        "ruleset gates on `no-attribution`, and a nested `meta / no-attribution` "
-        "cannot satisfy that context."
+        "The public repository's self-check emits it as its own BARE required status "
+        "context. The org-main-core ruleset gates on `no-attribution`, and a nested "
+        "`meta / no-attribution` cannot satisfy that context."
     ),
+}
+
+# (workflow, job) -> why an always() job that reads a lane result is a notifier,
+# not a merge signal. A notifier runs only when a lane did not succeed and
+# reports that elsewhere; its own conclusion gates nothing.
+NOTIFIERS = {
+    ("nightly.yml", "alert"): (
+        "Alerts Linear when the scheduled nightly tier does not succeed; Nightly "
+        "is not a required status context."
+    ),
+    ("nightly-watchdog.yml", "alert"): (
+        "Alerts Linear when no scheduled Nightly success is fresh; the watchdog "
+        "is not a required status context."
+    ),
+    ("ci-credentials.yml", "alert"): (
+        "Alerts Linear when a scheduled check finds a stored CI credential no longer "
+        "works; the workflow is not a required status context."
+    ),
+    **{
+        (workflow, "alert"): (
+            "Alerts Linear (PLA-421) when a scheduled kairix run in memory/ does not "
+            "succeed; the workflow is not a required status context."
+        )
+        for workflow in (
+            "memory-eval-locomo-nightly.yml",
+            "memory-soak-suite.yml",
+            "memory-mutation-suite.yml",
+        )
+    },
 }
 
 
@@ -85,6 +122,8 @@ def _fan_ins() -> list[tuple[str, str, dict]]:
             if "always()" not in str(job.get("if", "")):
                 continue
             if any(name in _needs(other) for other in jobs.values()):
+                continue
+            if (path.name, name) in NOTIFIERS:
                 continue
             if not RESULT_REF.search(json.dumps(job)):
                 continue
@@ -155,7 +194,9 @@ LANES = [(workflow, name, lane) for workflow, name, job in FAN_INS for lane in _
 
 def test_the_scan_found_fan_in_aggregators() -> None:
     """A scan that silently matches nothing would pass every assertion below."""
-    assert len(FAN_INS) >= 2, (
+    # Sized to the population imported from tc-pipelines: python-quality-gate's
+    # fan-in, with five lanes.
+    assert len(FAN_INS) >= 1, (
         f"only {len(FAN_INS)} terminal always() aggregator(s) discovered — the "
         f"job `if:` shapes have drifted, so the fan-ins that carry the required "
         f"status contexts are no longer being checked."
@@ -163,28 +204,60 @@ def test_the_scan_found_fan_in_aggregators() -> None:
 
 
 def test_the_scan_found_lanes_to_check() -> None:
-    assert len(LANES) >= 6, (
+    assert len(LANES) >= 4, (
         f"only {len(LANES)} fan-in lane(s) discovered — the `needs:` shapes have "
         f"drifted, so lane consumption is no longer being checked."
     )
 
 
-def test_both_ways_of_carrying_a_lane_result_are_still_exercised() -> None:
+@pytest.mark.parametrize(
+    ("job", "consumed"),
+    [
+        (
+            {"steps": [{"env": {"R_A": "${{ needs.a.result }}"}, "run": '[ "$R_A" = success ] || exit 1'}]},
+            True,
+        ),
+        ({"steps": [{"run": '[ "${{ needs.a.result }}" = success ] || exit 1'}]}, True),
+        ({"steps": [{"env": {"R_A": "${{ needs.a.result }}"}, "run": 'echo "lane a: $R_A"'}]}, False),
+        ({"steps": [{"run": 'echo "${{ needs.a.result }}" >> "$GITHUB_STEP_SUMMARY"'}]}, False),
+    ],
+    ids=[
+        "env-bound and tested",
+        "inline and tested",
+        "env-bound but only printed",
+        "inline but only summarised",
+    ],
+)
+def test_both_ways_of_carrying_a_lane_result_are_judged(job: dict, consumed: bool) -> None:
     """The consumption scan resolves a lane through an env binding OR a direct
-    expression. A scan that lost either path would pass vacuously on the half it
-    can no longer see."""
-    via_env, via_expression = [], []
-    for workflow, name, job in FAN_INS:
-        for lane in _needs(job):
-            _, bound = _carriers(job, lane)
-            target = via_env if bound else via_expression
-            target.append(f"{workflow}:{name}:{lane}")
-    assert via_env and via_expression, (
-        f"lane results are no longer carried both ways (env-bound: {via_env}, "
-        f"inline expression: {via_expression}), so one branch of _consumes() is "
-        f"never exercised and could rot unnoticed. "
-        f"fix: keep a fan-in of each shape, or drop the unused branch."
+    expression. Each branch is exercised here directly, so neither depends on a
+    workflow of that shape happening to exist."""
+    assert _consumes(job, "a") is consumed
+
+
+def _declared_jobs(workflow: str) -> dict | None:
+    """The jobs of a workflow an exemption names, or ``None`` when this layout does not
+    carry it: agent-platform's own workflows in the public export, and the public
+    repository's own CI in agent-platform."""
+    path = WORKFLOW_DIR / workflow
+    in_export = PLATFORM_ROOT == REPO_ROOT
+    if not path.is_file() and in_export != (workflow in PUBLIC_REPOSITORY_WORKFLOWS):
+        return None
+    return _jobs(_load(path))
+
+
+def _stale(entries: object) -> list[str]:
+    return sorted(
+        f"{workflow}:{job}"
+        for workflow, job in entries
+        if (jobs := _declared_jobs(workflow)) is not None and job not in jobs
     )
+
+
+def test_every_notifier_names_a_live_job() -> None:
+    """A stale notifier entry would silently excuse a job that no longer exists."""
+    stale = _stale(NOTIFIERS)
+    assert not stale, f"NOTIFIERS names job(s) that no longer exist: {stale}. fix: remove them."
 
 
 # ── a lane the fan-in waits for must reach a line that decides ───────────────
@@ -279,11 +352,7 @@ def test_every_job_reaches_the_fan_in(workflow: str, job_name: str) -> None:
 
 def test_every_closure_exemption_names_a_live_job() -> None:
     """A stale exemption would silently excuse a job that no longer exists."""
-    stale = sorted(
-        f"{workflow}:{job}"
-        for workflow, job in CLOSURE_EXEMPT
-        if job not in _jobs(_load(WORKFLOW_DIR / workflow))
-    )
+    stale = _stale(CLOSURE_EXEMPT)
     assert not stale, (
         f"CLOSURE_EXEMPT names job(s) that no longer exist: {stale}. "
         f"fix: remove them, or the exemption outlives the job it explains."

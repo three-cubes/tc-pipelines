@@ -58,7 +58,7 @@ runs:
         resolve_version uv_version "$INPUT_UV_VERSION" .uv-version 0.12.5 valid_uv_version
         resolve_version python_version "$INPUT_PYTHON_VERSION" .python-version 3.12 valid_python_request
     - name: Install pinned uv (cached)
-      uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       with:
         version: ${{ steps.toolchain.outputs.uv_version }}
         python-version: ${{ steps.toolchain.outputs.python_version }}

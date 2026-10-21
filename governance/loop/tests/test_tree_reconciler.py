@@ -9,7 +9,7 @@ never the wire.
 
 Run (with the rest of the loop harness) from the repo root::
 
-    python3 -m unittest discover -s governance/loop/tests -v
+    python3 -m unittest discover -s orchestration/loops/tests -v
 """
 
 from __future__ import annotations
@@ -24,7 +24,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+pytestmark = pytest.mark.integration
+
 
 import tree_reconciler as tr
 from tree_reconciler import (
@@ -511,7 +516,8 @@ class CliTest(unittest.TestCase):
     def _write(self, doc) -> str:
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
             json.dump(doc, fh)
-            return fh.name
+        self.addCleanup(Path(fh.name).unlink)
+        return fh.name
 
     def test_dry_run_reports_findings_no_side_effects(self):
         snap = {

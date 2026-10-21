@@ -64,7 +64,8 @@ candidate receipt. Contributors do not maintain duplicate fallback versions.
 ## Release notes
 
 Feature PRs provide user-visible notes through structured PR metadata or an
-`Unreleased` section when the product needs curated wording. The release task
+`Unreleased` section in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+format when the product needs curated wording. The release task
 collects the merged entries, links work items and produces the final versioned
 notes.
 
@@ -82,7 +83,10 @@ The candidate graph:
 4. builds the package once;
 5. verifies package contents, metadata, import and CLI surfaces;
 6. records artefact digests and provenance;
-7. publishes after the protected environment decision.
+7. publishes after the protected environment decision, authenticating to the
+   registry through OIDC trusted publishing (`id-token: write`);
+8. installs the published artefact from the registry and smoke-tests its import
+   and CLI surfaces to produce the package availability receipt.
 
 Reference consumer fixtures install the built package artefact, rather than a
 source checkout, before publication.

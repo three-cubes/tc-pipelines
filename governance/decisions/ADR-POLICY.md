@@ -25,7 +25,7 @@ linear:
 > org-wide cross-cutting decisions are canon *here*; product decisions stay in their repo — and
 > the **namespacing** that lets a cross-repo index exist without renumbering anything. The
 > per-repo product decisions themselves are indexed in
-> [`ADR-INDEX.md`](ADR-INDEX.md); this file is the org register + the rules.
+> [`ADR-INDEX.md`](README.md); this file is the org register + the rules.
 
 ## Context
 
@@ -104,11 +104,11 @@ authoritative text — read the source.
 | `STD-IDENTITY` | Agents author every commit + PR as the canonical `three-cubes-agent` GitHub App, never a human identity — so review is possible and attribution is clean. | `STANDARDS.md` §4; `AUTONOMOUS-DELIVERY-STANDARD.md` D1; `README.md` (agent identity); `AGENTS.md` |
 | `STD-MERGE` | Autonomous-on-green for ordinary work; HITL only on the control plane; de-churned (no forced up-to-date rebase, no stale-dismiss); never merge over a red gate. | `STANDARDS.md` §4–5; `AUTONOMOUS-DELIVERY-STANDARD.md` D3; `gate-hardening.md` |
 | `RULESET-D1` | The org-level `main` rulesets: block deletion + force-push; PR required with **0 approvals (autonomous)** on product repos (**1** on CORE) + code-owner review; **not strict** (no forced rebase) + **no stale-dismiss** (approvals stick); required checks = Quality gate + no-attribution. | `governance/rulesets/main-product.json` / `main-core.json` / `main-baseline.json`; `governance/README.md` |
-| `CODEOWNERS-D1` | Two-tier review routing: only the control plane (the gate's own definition) is owned — **no `* @OWNER`** — so work merges autonomously while gate-defining changes need a human. | `governance/CODEOWNERS`; `governance/README.md` |
+| `CODEOWNERS-D1` | Two-tier review routing: only the control plane (the gate's own definition) is owned — **no `* @OWNER`** — so work merges autonomously while gate-defining changes need a human. agent-platform's held set is defined by ADR-0047. | `governance/CODEOWNERS`; `governance/README.md`; ADR-0047 (agent-platform) |
 | `GATE-HARDEN` | Before a repo flips to 0-review its gate must clear the Gate-Hardening bar — a hard bar on new/changed code + monotonic ratchet on legacy debt, determinism non-negotiable. **Harden then flip, never flip first.** | `governance/gate-hardening.md` |
 | `QG-CONVERGE` | The reusable Python gate shrinks to `checkout → setup-uv-cached → uv run tc-fitness run`; every step lives in each repo's `[tool.tc_fitness]`, so `make check == CI` by construction. | `.github/workflows/python-quality-gate.yml`; `STANDARDS.md` §2–3; `CHANGELOG.md` |
 | `MUT-RATCHET` | Mutation is diff-scoped and ratcheted: an escaped mutant on a changed line fails; the survivors baseline only ratchets down; Mutation is **not currently a required status check** (deferred until the workflow is wired). | `governance/gate-hardening.md`; `.github/workflows/mutation-gate.yml` |
-| `DEP-D1` | Dependency policy: 3-day-cooldown, grouped dependabot (pip + npm + github-actions, security-toggle-off) + a Renovate customManager pinning the tc-fitness engine version (no silent drift). | `governance/dependabot.yml`; `governance/renovate.json` |
+| `DEP-D1` | Dependency policy: 3-day-cooldown, grouped updates, and the tc-fitness engine version pinned with no silent drift. **Amended 2026-10-14 (PLA-573): Renovate is the single updater; amended 2026-10-16: agent-platform drops the cooldown** (see "Amendments" below); the original Dependabot half (pip + npm + github-actions, security-toggle-off) is superseded for agent-platform. | agent-platform's `renovate.json`; superseded: `governance/dependabot.yml` |
 | `REPO-MERGE` | Two CORE paved-road repos — tc-pipelines (reusable CI + governance templates) and tc-fitness (the gate engine); consumers pin `@v1` / engine `@vX` + lockfile SHA; **promote prior work up into CORE, never fork-and-inline.** | `AUTONOMOUS-DELIVERY-STANDARD.md` (paved road); `STANDARDS.md` §3 |
 | `VERS-D1` | Semantic major pinning for reusables: `@vN` majors, breaking input/output changes cut a new major, **no `latest` tag** (undeclared moving targets break trust). | `docs/IMPLEMENTATION.md` (current compatibility versioning policy); `README.md` |
 | `WIF-D1` | Azure deploys authenticate via Workload Identity Federation (OIDC): CI mints a short-lived token at runtime and stores no service-principal secret in GitHub. | `governance/agent-sdlc-access-and-hitl.md`; `README.md` |
@@ -137,6 +137,47 @@ safe lights-out merge, Linear-as-control-surface, and the D5–D8 defaults) sit 
 the program-level frame; `STD-IDENTITY` / `STD-MERGE` are their in-force paved-road expression and are
 the rows you cite from CI and governance.
 
+## Amendments
+
+Per decision 5, a register row is amended by appending here, never by rewriting history; the
+row above points at the amendment and the superseded half stays readable below.
+
+### `DEP-D1` amended — Renovate is the single updater (2026-10-14, PLA-573)
+
+**Decision.** In agent-platform, Renovate is the only dependency updater. It runs from
+`.github/workflows/renovate.yml` as the `three-cubes-agent` App, under the root `renovate.json`, which extends
+Renovate's own `config:best-practices` preset and adds only what the repository needs. **Amended 2026-10-16: the
+3-day cooldown is dropped** for agent-platform: there is no `minimumReleaseAge`, no uv `exclude-newer` and no pnpm
+`minimumReleaseAge`, and Renovate's release-age behaviour is the preset's default. The control that replaces it is the
+code-owner review of the gate-critical inputs: CODEOWNERS held the manifests that pin them, and every gate-critical
+dependency is pinned exactly there (`assurance/checks/tests/test_gate_critical_pins_are_exact.py`). **Amended 2026-10-18
+(PLA-674): that hold is released.** The required jobs install the gate's tooling from the base, so a pull request's
+lockfile or manifest cannot change what judges it ([ADR-0047](ADR-0047-codeowners-hold-the-control-plane-only.md)
+amendment 4); the exact pins stay. Dependabot version updates are off
+(`.github/dependabot.yml` is removed); Dependabot security alerts stay on as a signal only: Renovate opens the fix for a manifest dependency,
+and the steward opens it for a lock-only (transitive) one, which Renovate's extractor does not see.
+Nothing automerges: the dependency steward
+(`execution/operations/runbooks/dependency-steward.md`) takes each pull request through review
+and the merge queue.
+
+**Why.** Dependabot could not do what the platform needs:
+
+1. It cannot update the single pin files: `.tool-versions`, `scanner-versions.json` and
+   Dockerfile digests.
+2. Its pull requests are authored by `dependabot[bot]`, which `queue-pr` refuses
+   (PLA-534), so agents fell back to raw `gh pr merge` around the queue. Renovate's are authored
+   by the agent App, so `queue-pr` admits them.
+3. It cannot run the generators that own derived files (Code Review Rule 5). Renovate's
+   native lockfile updates regenerate `uv.lock` and `pnpm-lock.yaml` in the same branch, and one
+   post-upgrade task regenerates OSV Scanner's checksums.
+4. It could not group a tool family across ecosystems, so one version lived in several pull
+   requests. Renovate moves a tool family everywhere it is pinned in one.
+
+**Superseded.** The Dependabot half of the original row (pip + npm + github-actions,
+security-toggle-off, grouped `dependabot.yml`) and the `dependabot-automerge` path for
+agent-platform's own pull requests. `governance/dependabot.yml` stays a template for repositories
+that keep Dependabot. The `dependabot/*` and `renovate/*` branch-name exemptions are unchanged.
+
 ## `adr_number_unique` — the one real collision, and the follow-up
 
 Namespacing removes every *cross-repo* number clash. It does **not** by itself fix an *intra-repo,
@@ -147,7 +188,7 @@ cross-directory* clash, and tc-agent-zone has exactly one:
 
 — two `ADR-013`s in one repo, in two directories. The current single-directory, uppercase-only
 `adr_number_unique` scan misses this. The go-forward remediation (tracked as follow-ups in
-[`ADR-INDEX.md`](ADR-INDEX.md), owned by **SGO-176 / SGO-179**, out of scope for this additive policy
+[`ADR-INDEX.md`](README.md), owned by **SGO-176 / SGO-179**, out of scope for this additive policy
 doc):
 
 1. **SGO-179** hardens `adr_number_unique` to take a list of `record_dirs` + a case-insensitive

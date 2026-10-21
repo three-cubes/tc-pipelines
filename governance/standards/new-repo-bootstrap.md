@@ -124,4 +124,4 @@ governance/scripts/check-repository-merge-settings.sh three-cubes/<name>
 8. Remove compatibility files after their consumer count reaches zero.
 
 The detailed migration states and completion evidence are in
-[`../../docs/MIGRATION.md`](../../docs/MIGRATION.md).
+[`../../docs/MIGRATION.md`](../../../execution/pipelines/docs/MIGRATION.md).

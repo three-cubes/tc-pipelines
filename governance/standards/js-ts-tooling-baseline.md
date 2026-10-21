@@ -41,7 +41,7 @@ purpose: >
 | Shared eslint config | `eslint.config.js` (flat config) | repo root |
 | Pre-commit hook | `.pre-commit-config.yaml` (eslint hook) | repo root |
 | CI workflow | `.github/workflows/ci.yml` | repo |
-| Dependabot config | `.github/dependabot.yml` (npm ecosystem) | repo |
+| Dependency updater config | `renovate.json` (agent-platform; `.github/dependabot.yml` elsewhere) | repo |
 
 ## 1. Materialising pnpm locally
 
@@ -68,13 +68,13 @@ an unrelated ambient Corepack selection. The host prerequisite remains directly
 verifiable:
 
 ```bash
-node --version    # expect to match .nvmrc (24.x)
+node --version    # expect to match .nvmrc (26.x)
 ```
 
 If `node` is wrong, either:
 
 - `nvm use` from the repo root (reads `.nvmrc`), or
-- install Node 24.x from your OS package manager.
+- install Node 26.x from your OS package manager.
 
 ### CI
 
@@ -180,14 +180,22 @@ pnpm up -i
 
 Commit both `package.json` and `pnpm-lock.yaml` in the same commit.
 
-### Dependabot path
+### Updater path
 
-`.github/dependabot.yml` runs the npm ecosystem daily. Patch bumps auto-merge after CI green; major-version bumps are reviewed manually because they often ship rule-semantics changes (especially eslint, @typescript-eslint, sonarjs).
+In agent-platform Renovate (`renovate.json`, DEP-D1) is the only updater: it uses Renovate's standard preset and regenerates `pnpm-lock.yaml` natively in the same branch. Elsewhere `.github/dependabot.yml` runs npm, `uv` and GitHub Actions as one weekly
+`dependency-train`, with a 3-day cooldown across all update types. Eligible npm
+updates across the root pnpm workspace land in that one cross-ecosystem PR and
+share the root `pnpm-lock.yaml`; every package resolves through that single root
+lockfile. The complete train is reviewed and qualified together; major-version
+changes receive explicit release-note and compatibility review because they often
+ship rule-semantics changes (especially eslint, @typescript-eslint, sonarjs).
 
-When reviewing a Dependabot PR, check:
+When reviewing the dependency train, check:
 
-- CI is green (`pnpm -r lint`, `pnpm -r build`, `pnpm -r test`, sonar quality ratchet).
-- The bump is in scope for the grouped-update strategy (Dependabot config controls grouping).
+- CI is green (`pnpm -r lint`, `pnpm -r build`, coverage tests and the repository
+  quality gate).
+- Every changed package and lockfile belongs to the declared multi-ecosystem
+  train, and every npm package is represented by the root `pnpm-lock.yaml`.
 - Major-version bumps include a release-notes link in the PR body so the reviewer can scan for breaking changes.
 
 ## 6. Reading the eslint output + fixing each rule class

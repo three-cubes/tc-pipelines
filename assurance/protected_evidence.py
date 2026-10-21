@@ -64,9 +64,18 @@ def verify_runtime(directory, evidence, policy, head):
 
 
 def validate_provenance(run, selection, policy):
+    """The producer run is the authorised one, at the commit the release operator approved.
+
+    The producer may be a consumer repository, so its run's ``head_sha`` is that repository's
+    commit, never ``selection["candidate_head"]`` (the tc-pipelines candidate). The pipeline
+    candidate stays bound where the runtime receipt is verified (``--expected-source-sha``).
+    """
     repo, run_id, attempt = policy["repository"], policy["run_id"], policy["attempt_id"]
+    producer = policy.get("producer_commit")
+    if not isinstance(producer, str) or len(producer) != 40 or set(producer) - set("0123456789abcdef"):
+        raise ReceiptError("protected policy must name the approved producer commit")
     if (
-        run["head_sha"] != selection["candidate_head"]
+        run["head_sha"] != producer
         or run["status"] != "completed"
         or run["conclusion"] != "success"
         or run["path"] != policy["workflow_path"]
@@ -79,11 +88,56 @@ def validate_provenance(run, selection, policy):
         raise ReceiptError("protected evidence lacks authorised successful provenance")
 
 
+def run_artifacts(root, repo, run_id, api):
+    """Every artifact of the run: the endpoint returns at most 100 per page."""
+    found, page = [], 1
+    while True:
+        response = api(root, f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100&page={page}")
+        batch = response["artifacts"]
+        found.extend(batch)
+        if not batch or len(found) >= response["total_count"]:
+            return found
+        page += 1
+
+
+def attempt_window(root, repo, run_id, attempt, api):
+    """First job start and last job completion of one run attempt, from the attempt's own jobs."""
+    started, completed, page = [], [], 1
+    while True:
+        response = api(
+            root, f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100&page={page}"
+        )
+        jobs = response["jobs"]
+        started.extend(job["started_at"] for job in jobs if job.get("started_at"))
+        completed.extend(job["completed_at"] for job in jobs if job.get("completed_at"))
+        if not jobs or page * 100 >= response["total_count"]:
+            break
+        page += 1
+    if not started or not completed:
+        raise ReceiptError("protected run attempt has no executed jobs")
+    return min(started), max(completed)
+
+
+def attempt_artifacts(root, repo, run_id, attempt, api):
+    """The run's artifacts that the selected attempt created.
+
+    The artifacts endpoint is scoped to the run and its metadata names no attempt, so a re-run leaves
+    earlier attempts' artifacts beside the approved one. Attempts do not overlap, so an artifact
+    belongs to the attempt whose job window contains its ``created_at`` (UTC timestamps compare as text).
+    """
+    start, end = attempt_window(root, repo, run_id, attempt, api)
+    return [
+        artifact
+        for artifact in run_artifacts(root, repo, run_id, api)
+        if start <= str(artifact.get("created_at") or "") <= end
+    ]
+
+
 def verify_provenance(root, directory, receipt, selection, policy, api):
     repo, run_id, attempt = policy["repository"], policy["run_id"], policy["attempt_id"]
     run = api(root, f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}")
     validate_provenance(run, selection, policy)
-    artifacts = api(root, f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100")["artifacts"]
+    artifacts = attempt_artifacts(root, repo, run_id, attempt, api)
     selected = [a for a in artifacts if a["name"] == policy["artifact_name"] and not a["expired"]]
     if len(selected) != 1 or selected[0]["digest"] != policy["artifact_digest"]:
         raise ReceiptError("protected artifact is missing or not authorised by release policy")

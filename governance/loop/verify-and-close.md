@@ -102,7 +102,7 @@ actionable *run-harvest-first* message. A close with no harvest is impossible �
 missing harvest is surfaced, never silently dropped.
 
 The machine-checkable predicate half of this invariant lives next to the loop
-state machine: [`governance/loop/harvest_gate.py`](harvest_gate.py) — `has_harvest`
+state machine: [`orchestration/loops/harvest_gate.py`](harvest_gate.py) — `has_harvest`
 / `assert_closed_carries_harvest` (provenance-stamped, idempotent), with the
 sabotage test (*force-close with no harvest is refused; close after harvest
 succeeds*) in [`tests/test_harvest_gate.py`](tests/test_harvest_gate.py). The

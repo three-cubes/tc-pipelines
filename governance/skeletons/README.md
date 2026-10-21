@@ -9,12 +9,12 @@ These are **repo-agnostic structure with placeholders**, not another repo's file
 
 | Skeleton | Renders to (repo root) | What it is |
 |---|---|---|
-| [`CLAUDE.md`](CLAUDE.md) | `CLAUDE.md` | Pointer-reference index for stable SDLC commands, identity, evidence and canonical homes. |
-| [`AGENTS.md`](AGENTS.md) | `AGENTS.md` | Agent entrypoint — the authoring-vs-runtime boundary + the D1 no-attribution rule. |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | `CONTRIBUTING.md` | Contributor loop — setup, branch/commit/PR mechanics, the gate-is-the-contract rule. |
-| [`ETHOS.md`](ETHOS.md) | `ETHOS.md` | The 7 platform principles (verbatim Rules; repo fills the "How to apply" examples). |
-| [`RESOLVER.md`](RESOLVER.md) | `RESOLVER.md` | Intent → location map — keeps the "whose 3am incident is this?" model; repo authors its own domain table. |
-| [`SCORECARD.md`](SCORECARD.md) | `SCORECARD.md` | The 5-pillar / 50-binary-check health frame; repo-specific checks marked `TODO`. |
+| [`CLAUDE.md`](CLAUDE.md.tmpl) | `CLAUDE.md` | Pointer-reference index for stable SDLC commands, identity, evidence and canonical homes. |
+| [`AGENTS.md`](AGENTS.md.tmpl) | `AGENTS.md` | Agent entrypoint — the authoring-vs-runtime boundary + the D1 no-attribution rule. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md.tmpl) | `CONTRIBUTING.md` | Contributor loop — setup, branch/commit/PR mechanics, the gate-is-the-contract rule. |
+| [`ETHOS.md`](ETHOS.md.tmpl) | `ETHOS.md` | The 7 platform principles (verbatim Rules; repo fills the "How to apply" examples). |
+| [`RESOLVER.md`](RESOLVER.md.tmpl) | `RESOLVER.md` | Intent → location map — keeps the "whose 3am incident is this?" model; repo authors its own domain table. |
+| [`SCORECARD.md`](SCORECARD.md.tmpl) | `SCORECARD.md` | The 5-pillar / 50-binary-check health frame; repo-specific checks marked `TODO`. |
 | [`_canonical-standards-banner.md`](_canonical-standards-banner.md) | *(inlined)* | The shared "🛑 Canonical standards" banner, factored out and `INCLUDE`-d by every skeleton. |
 | [`claude-settings.postToolUse.json`](claude-settings.postToolUse.json) | `.claude/settings.json` *(jq-merged)* | The `PostToolUse` hook block bootstrap deep-merges (idempotent, not appended). |
 

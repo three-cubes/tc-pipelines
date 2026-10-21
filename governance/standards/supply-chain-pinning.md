@@ -68,10 +68,12 @@ listed separately in the review summary.
 
 ## Current compatibility path
 
-Existing workflows contain direct SHA references and use
-`test_self_pin_freshness`, `test_uses_ref_pinning` and the current consumer-repin
-dispatcher. These remain enforced until the release-catalogue materialiser has
-passed the equivalent nested-reference and consumer-upgrade fixtures.
+Existing workflows contain direct SHA references. `test_uses_ref_pinning` holds
+each to a full SHA, and the repository's updater (Renovate in agent-platform,
+Dependabot's github-actions ecosystem elsewhere) moves them when a release is tagged; it replaced the self-pin freshness test and the
+consumer-repin dispatcher. That remains the path until the release-catalogue
+materialiser has passed the equivalent nested-reference and consumer-upgrade
+fixtures.
 
 After parity, the materialiser replaces manual self-pin and consumer-repin
 procedures. Literal immutable references remain because GitHub requires them;

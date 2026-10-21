@@ -128,7 +128,7 @@ def worktrees(repo: Path) -> list[dict[str, str]]:
         return []
     entries: list[dict[str, str]] = []
     current: dict[str, str] = {}
-    for line in result.output.splitlines() + [""]:
+    for line in [*result.output.splitlines(), ""]:
         if not line:
             if current:
                 entries.append(current)
@@ -493,7 +493,7 @@ def process_repo(repo: Path, registry: dict[str, Any], apply: bool) -> int:
 def process_caches(registry: dict[str, Any], apply: bool) -> None:
     safe_roots = [Path(root) for root in registry.get("safe_cache_roots", [])]
     seen: dict[Path, int] = {}
-    for index, entry in enumerate(registry.get("caches", [])):
+    for _index, entry in enumerate(registry.get("caches", [])):
         raw = entry.get("path")
         if isinstance(raw, str) and raw:
             path = Path(raw).expanduser().resolve()

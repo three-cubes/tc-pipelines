@@ -32,7 +32,7 @@ Stdlib only, no third-party deps — the same discipline
 (:class:`IssueSource`), so selection/ordering/gating are fully testable offline
 and the same code runs live against Linear's GraphQL API.
 
-Run the CLI (from ``governance/loop/``)::
+Run the CLI (from ``orchestration/loops/``)::
 
     python3 -m loop_dispatcher --dry-run --limit 3 --issues-file snapshot.json
 
@@ -465,7 +465,7 @@ def guardrails_validated(
 
     This IS the proof :meth:`loop_state_machine.LoopEngine.arm_auto_dispatch`
     demands: auto-dispatch may not arm unless the guardrails are proven to fire.
-    Runs the ``governance/loop/tests`` guardrail harness in-process (stdlib
+    Runs the ``orchestration/loops/tests`` guardrail harness in-process (stdlib
     ``unittest``, no network). It targets the guardrail-validation module
     specifically (the lights-out gate), not the dispatcher's own tests, so a CLI
     invocation does not re-enter itself.
@@ -1077,14 +1077,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None, *, guardrails_validator: Callable[[], bool] = guardrails_validated
+) -> int:
+    """Plan one cycle. ``guardrails_validator`` is the lights-out proof (default: run the harness)."""
     args = build_arg_parser().parse_args(argv)
     source = _source_from_args(args)
     config = loop.GuardrailConfig(
         per_issue_budget=args.per_issue_budget,
         global_budget=args.global_budget,
     )
-    dispatcher = Dispatcher(source, config=config, default_user=args.user)
+    dispatcher = Dispatcher(
+        source, config=config, default_user=args.user, guardrails_validator=guardrails_validator
+    )
     plan = dispatcher.plan(args.initiative, limit=args.limit, cost_per_issue=args.cost)
 
     if args.json:

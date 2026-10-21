@@ -1,16 +1,21 @@
 # tc-pipelines
 
+> **Read-only mirror.** The source of this repository is `execution/pipelines/` in
+> `three-cubes/agent-platform`, and this repository is its one-way export (ADR-0001 D6).
+> Make every change there; it reaches this repository only as the export pull request from
+> the export identity, and a pull request from anyone else is closed and redone there.
+
 `tc-pipelines` is the shared Three Cubes AI SDLC product. It provides the
 versioned development environment, task orchestration, CI workflows, release
 and deployment protocols, evidence contracts and governance templates used by
 Three Cubes repositories.
 
 The canonical architecture is
-[`governance/standards/ai-sdlc-product-architecture.md`](governance/standards/ai-sdlc-product-architecture.md).
-[`RESOLVER.md`](RESOLVER.md) routes changes to their canonical home.
+[`governance/standards/ai-sdlc-product-architecture.md`](../../assurance/governance/standards/ai-sdlc-product-architecture.md).
+[`RESOLVER.md`](../../RESOLVER.md) routes changes to their canonical home.
 
 Run `make assurance` for the [published-surface inventory and disposable consumer
-lab](assurance/README.md). It retains local behavioural evidence separately from
+lab](https://github.com/three-cubes/tc-pipelines/blob/main/assurance/README.md). It retains local behavioural evidence separately from
 hosted adapter and release-admission proof.
 
 ## Product model
@@ -147,11 +152,11 @@ single-host application stack.
 
 The current container-only deployment path uses the protected-state and
 predecessor-image recovery contract documented in
-[`snapshot-before-apply.md`](governance/standards/snapshot-before-apply.md) while
+[`snapshot-before-apply.md`](../../assurance/governance/standards/snapshot-before-apply.md) while
 the typed Ansible/Compose transaction is implemented.
 
 The complete contract is
-[`governance/standards/ci-release-deployment-architecture.md`](governance/standards/ci-release-deployment-architecture.md).
+[`governance/standards/ci-release-deployment-architecture.md`](../../assurance/governance/standards/ci-release-deployment-architecture.md).
 
 ## Governance and identity
 
@@ -161,17 +166,17 @@ reviewed by the human code owner. Agents create local commits with canonical
 short-lived GitHub App credentials for remote writes.
 
 The access contract is
-[`governance/agent-sdlc-access-and-hitl.md`](governance/agent-sdlc-access-and-hitl.md).
+[`governance/agent-sdlc-access-and-hitl.md`](../../assurance/governance/agent-sdlc-access-and-hitl.md).
 The canonical standards index is
-[`governance/STANDARDS.md`](governance/STANDARDS.md).
+[`governance/STANDARDS.md`](../../assurance/governance/STANDARDS.md).
 
 ## Contributing
 
 Read, in order:
 
 1. [`AGENTS.md`](AGENTS.md)
-2. [`RESOLVER.md`](RESOLVER.md)
-3. [`governance/STANDARDS.md`](governance/STANDARDS.md)
+2. [`RESOLVER.md`](../../RESOLVER.md)
+3. [`governance/STANDARDS.md`](../../assurance/governance/STANDARDS.md)
 4. the standard governing the surface being changed
 
 Run the current self-gate with:

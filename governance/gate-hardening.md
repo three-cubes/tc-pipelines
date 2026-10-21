@@ -73,7 +73,7 @@ kata has no app code to cover; its gate hardens via **structural completeness**,
 
 - schema conformance + referential integrity across id-spaces *(already enforced)*
 - **every capability MUST declare ≥1 `tests:` entry + a route-test (incl. the `<unmatched>`
-  case) + its conformance rules** — enforce in `scripts/validate.py`
+  case) + its conformance rules** — enforce in `assurance/checks/delivery_data_validator.py`
 - manifest completeness — no unregistered or orphan files *(already)*
 - generated-doc freshness (`render-*.py --check`) *(already)*
 - zero-tolerance secret-scan *(already)*

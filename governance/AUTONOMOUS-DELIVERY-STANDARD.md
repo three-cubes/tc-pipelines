@@ -13,7 +13,7 @@ is deterministic and every commit is clean-identity by machine, not by conventio
 Two hard-won lessons shape everything below:
 1. **Humans move up-and-out, not away.** Per-turn "approve?" prompts fail (measured ~93% blind approval +
    approval fatigue). Agents own execution; humans own the plan + the merge boundary on the control plane.
-2. **"Green" ≠ correct.** Agents reward-hack visible tests, so auto-merge-on-green is safe only when green
+2. **"Green" ≠ correct.** Agents reward-hack visible tests, so native auto-merge is safe only when green
    means *more than the agent's own suite*: merge-queue re-test + mutation + independent-verifier + honest coverage.
 
 ## Locked decisions

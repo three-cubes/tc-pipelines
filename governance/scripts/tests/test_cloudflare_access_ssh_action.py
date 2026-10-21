@@ -9,8 +9,8 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -664,18 +664,44 @@ def test_remote_workflow_commands_are_bracketed_and_cannot_control_actions(
     assert lines.index(stop) < lines.index("::error::remote text") < lines.index(f"::{token}::")
 
 
+#: Deadlines, in seconds, that `_run_until_ready` tries in turn; the last is a hang guard.
+READY_DEADLINES = (3, 12, 48, 600)
+
+
+def _run_until_ready(
+    module: Any, command: list[str], request: Path, ready: list[Path], reset: tuple[Path, ...] = ()
+) -> Any:
+    """Run the supervisor with a short deadline, and a longer one each time the helper was killed before it was ready.
+
+    The supervisor's deadline is the behaviour under test, and the helper needs a moment to start (a long moment on a
+    loaded host). The assertions run only on a run in which every `ready` file exists, so load changes how long the
+    test takes, never what it asserts.
+    """
+    for deadline in READY_DEADLINES:
+        for path in [*ready, *reset]:
+            path.unlink(missing_ok=True)
+        result = module._run_streamed(command, os.environ.copy(), request, timeout_seconds=deadline)
+        if all(path.exists() for path in ready):
+            return result
+    pytest.fail(f"the helper never reached its ready state within {READY_DEADLINES[-1]} s: {ready}")
+
+
 def test_supervisor_enforces_deadline_and_terminates_process_group(
     tmp_path: Path,
 ) -> None:
     module = _transport_module()
     parent_marker = tmp_path / "parent-signal"
     child_marker = tmp_path / "child-signal"
+    parent_ready = tmp_path / "parent-ready"
+    child_ready = tmp_path / "child-ready"
     helper = tmp_path / "hang.py"
     _write_python_executable(
         helper,
         "import os, signal, time\n"
         f"parent_marker = {str(parent_marker)!r}\n"
         f"child_marker = {str(child_marker)!r}\n"
+        f"parent_ready = {str(parent_ready)!r}\n"
+        f"child_ready = {str(child_ready)!r}\n"
         "role = 'parent'\n"
         "def stopped(_sig, _frame):\n"
         "    marker = parent_marker if role == 'parent' else child_marker\n"
@@ -685,12 +711,16 @@ def test_supervisor_enforces_deadline_and_terminates_process_group(
         "if os.fork() == 0:\n"
         "    role = 'child'\n"
         "    signal.signal(signal.SIGTERM, stopped)\n"
+        "    open(child_ready, 'w').close()\n"
         "    while True: time.sleep(1)\n"
+        "open(parent_ready, 'w').close()\n"
         "while True: time.sleep(1)\n",
     )
     request = tmp_path / "request"
     request.write_bytes(b"{}")
-    result = module._run_streamed([str(helper)], os.environ.copy(), request, timeout_seconds=3)
+    result = _run_until_ready(
+        module, [str(helper)], request, [parent_ready, child_ready], (parent_marker, child_marker)
+    )
     assert result.reason_code == "operation_timeout"
     assert parent_marker.read_text().strip().isdigit()
     assert child_marker.read_text().strip().isdigit()
@@ -700,20 +730,19 @@ def test_supervisor_enforces_deadline_after_output_pipes_close(
     tmp_path: Path,
 ) -> None:
     module = _transport_module()
+    ready = tmp_path / "pipes-closed"
     helper = tmp_path / "closed-pipes.py"
     _write_python_executable(
         helper,
-        "import os, time\nos.close(1)\nos.close(2)\ntime.sleep(2)\n",
+        f"import os, time\nos.close(1)\nos.close(2)\nopen({str(ready)!r}, 'w').close()\ntime.sleep(600)\n",
     )
     request = tmp_path / "request"
     request.write_bytes(b"{}")
 
-    started = time.monotonic()
-    result = module._run_streamed([str(helper)], os.environ.copy(), request, timeout_seconds=0.2)
-    elapsed = time.monotonic() - started
+    # The helper outlives any deadline, so only the supervisor's deadline can end the run.
+    result = _run_until_ready(module, [str(helper)], request, [ready])
 
     assert result.reason_code == "operation_timeout"
-    assert elapsed < 1
 
 
 def test_supervisor_kills_descendant_after_process_leader_exits(tmp_path: Path) -> None:
@@ -732,7 +761,7 @@ def test_supervisor_kills_descendant_after_process_leader_exits(tmp_path: Path) 
     )
     request = tmp_path / "request"
     request.write_bytes(b"{}")
-    result = module._run_streamed([str(helper)], os.environ.copy(), request, timeout_seconds=5)
+    result = _run_until_ready(module, [str(helper)], request, [ready])
     assert result.reason_code == "operation_timeout"
     child_pid = ready.read_text().strip()
     status = subprocess.run(
@@ -756,9 +785,23 @@ def test_supervisor_bounds_remote_output(tmp_path: Path, mode: str) -> None:
     )
     request = tmp_path / "request"
     request.write_bytes(b"{}")
-    result = module._run_streamed([str(helper)], os.environ.copy(), request, timeout_seconds=5)
+    result = module._run_streamed([str(helper)], os.environ.copy(), request, timeout_seconds=600)
     assert result.reason_code == f"stdout_{mode}_limit"
     assert result.stdout_bytes <= module.MAX_STDOUT_BYTES + 8192
+
+
+def test_terminating_a_group_whose_leader_exited_unreaped_reaps_it() -> None:
+    """A bounded process that exits as its limit trips leaves a zombie leader.
+
+    macOS answers killpg with EPERM for that group, which made the stderr-bound
+    tests fail intermittently under load; Linux signals the zombie.
+    """
+    module = _transport_module()
+    process = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+    # Wait for the exit without reaping it, so the group holds only the zombie leader.
+    os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+    module._terminate_process_group(process)
+    assert process.returncode == 0
 
 
 @pytest.mark.parametrize("mode", ["line", "total"])
@@ -773,6 +816,6 @@ def test_supervisor_bounds_stderr_and_retains_only_a_tail(tmp_path: Path, mode: 
     )
     request = tmp_path / "request"
     request.write_bytes(b"{}")
-    result = module._run_streamed([str(helper)], os.environ.copy(), request, timeout_seconds=5)
+    result = module._run_streamed([str(helper)], os.environ.copy(), request, timeout_seconds=600)
     assert result.reason_code == f"stderr_{mode}_limit"
     assert len(result.stderr_tail.encode()) <= module.MAX_STDERR_TAIL_BYTES

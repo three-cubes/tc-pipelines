@@ -8,10 +8,6 @@ name: example — security-scan (reusable self-check)
 # not in a consumer's pipeline. The RUNTIME exercise lives in
 # security-scan-self.yml (which runs on this repo's PRs).
 #
-# De-serialised layout (parallel-dev friction fix): each reusable owns its OWN
-# `example-<reusable>.yml`; `example-callers.yml` is a thin dispatcher that fans
-# out to every file here — see its header for the "add your file" convention.
-#
 # NEVER runs the underlying work by default: `workflow_call` only and every job is
 # gated on `run-for-real` (default false); the call graph is validated statically
 # regardless of the gate, the bodies never execute under the default dispatch.
@@ -24,9 +20,8 @@ on:
       run-for-real:
         description: >-
           Leave false (default) for the static call-graph self-check — every job
-          stays gated off and only the input/secret SHAPES are validated. The
-          dispatcher (example-callers.yml) passes this through; flipping it true
-          would attempt a real scan and is not the point of this self-check.
+          stays gated off and only the input/secret SHAPES are validated. Flipping it
+          true would attempt a real scan and is not the point of this self-check.
         type: boolean
         default: false
 

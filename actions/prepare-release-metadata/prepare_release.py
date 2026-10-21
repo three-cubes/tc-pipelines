@@ -46,8 +46,10 @@ def _bump_project_version(part: str, tag_prefix: str) -> str:
     if bumped.returncode != 0:
         detail = bumped.stderr.strip() or bumped.stdout.strip() or "uv version failed"
         raise ValueError(detail)
+    # The version is parsed, so it must come back without colour codes, even when
+    # the caller forces colour (FORCE_COLOR, as Nx sets for its tasks).
     resolved = subprocess.run(
-        ["uv", "version", "--short"],
+        ["uv", "version", "--short", "--color", "never"],
         capture_output=True,
         text=True,
         check=False,

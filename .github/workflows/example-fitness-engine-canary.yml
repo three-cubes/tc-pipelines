@@ -43,7 +43,7 @@ jobs:
       consumer-repo: three-cubes/kairix
       consumer-ref: main
     secrets:
-      gh-token: dummy-token-shape-check-only
+      gh-token: dummy-token-shape-check-only  # pragma: allowlist secret (a placeholder)
 
   canary-taz:
     if: ${{ inputs.run-for-real }}
@@ -51,7 +51,7 @@ jobs:
     with:
       # taz-shaped: a workspace consumer, so the gate-command syncs the workspace
       # lock; exercises the gate-command + driver-ref input shapes statically.
-      candidate-ref: 1a2b3c4d5e6f7081920a1b2c3d4e5f6071829304
+      candidate-ref: 1a2b3c4d5e6f7081920a1b2c3d4e5f6071829304  # pragma: allowlist secret (a commit SHA)
       consumer-repo: three-cubes/tc-agent-zone
       consumer-ref: main
       gate-command: "uv lock --upgrade-package three-cubes-fitness && uv sync --locked --all-packages --group dev && uv run tc-fitness run"

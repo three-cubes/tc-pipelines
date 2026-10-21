@@ -4,6 +4,7 @@ import functools
 import hashlib
 import http.server
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -15,6 +16,8 @@ import yaml
 from test_hosted_assurance import ROOT, git, hosted_module, repository
 
 pytestmark = pytest.mark.contract
+
+HOSTED = ".github/workflows/hosted-assurance.yml"
 
 
 def test_arbitrary_hashed_files_cannot_satisfy_protected_admission(tmp_path):
@@ -69,7 +72,7 @@ def test_arbitrary_hashed_files_cannot_satisfy_protected_admission(tmp_path):
     }
     (directory / "receipt.json").write_text(json.dumps(receipt))
     # This was accepted despite all three files being arbitrary text.
-    with pytest.raises(ValueError, match="protected|runtime"):
+    with pytest.raises(ValueError, match=r"protected|runtime"):
         module.admit(tmp_path, directory)
 
 
@@ -134,13 +137,14 @@ def test_plan_binds_receipt_identity_to_the_explicit_actions_environment(tmp_pat
 
 
 @pytest.mark.parametrize("defect", [None, "head_sha", "status", "conclusion", "id", "run_attempt"])
-def test_pr_api_run_uses_candidate_branch_identity_not_tested_merge(defect):
+def test_pr_api_run_uses_candidate_branch_identity_then_needs_a_direct_dispatch(defect):
     module = hosted_module()
     selection = {
         "head": "a" * 40,
         "candidate_head": "b" * 40,
         "workflow_run_id": "42",
         "attempt": 2,
+        "repository": "fixtures/pipelines",
     }
     run = {
         "head_sha": "b" * 40,
@@ -148,13 +152,91 @@ def test_pr_api_run_uses_candidate_branch_identity_not_tested_merge(defect):
         "conclusion": "success",
         "id": 42,
         "run_attempt": 2,
+        "path": "ci.yml",
+        "event": "pull_request",
+        "repository": {"full_name": "fixtures/pipelines"},
+        "referenced_workflows": [
+            {"path": "fixtures/pipelines/" + HOSTED + "@refs/pull/7/merge", "sha": "a" * 40}
+        ],
     }
     if defect:
         run[defect] = "a" * 40 if defect == "head_sha" else "wrong"
         with pytest.raises(ValueError, match="GitHub"):
             module.validate_run(run, selection)
     else:
-        module.validate_run(run, selection)
+        # The candidate identity holds, but a pull-request run only called the workflow.
+        with pytest.raises(ValueError, match="hosted-assurance workflow"):
+            module.validate_run(run, selection)
+
+
+def hosted_run(**changes):
+    run = {
+        "head_sha": "a" * 40,
+        "status": "completed",
+        "conclusion": "success",
+        "id": 42,
+        "run_attempt": 2,
+        "path": HOSTED,
+        "event": "workflow_dispatch",
+        "repository": {"full_name": "fixtures/pipelines"},
+        "referenced_workflows": [],
+    }
+    return {**run, **changes}
+
+
+HOSTED_SELECTION = {
+    "head": "a" * 40,
+    "candidate_head": "a" * 40,
+    "workflow_run_id": "42",
+    "attempt": 2,
+    "repository": "fixtures/pipelines",
+}
+
+
+def test_admission_accepts_the_hosted_workflow_as_a_direct_dispatch():
+    module = hosted_module()
+    module.validate_run(hosted_run(), HOSTED_SELECTION)
+
+
+def test_admission_refuses_a_reusable_call_that_only_names_the_hosted_workflow():
+    """referenced_workflows lists a called workflow whether or not its job ran, and the run's artifacts
+    carry no producer identity, so a matching entry alone cannot prove the trusted workflow produced them."""
+    module = hosted_module()
+    called = hosted_run(
+        path=".github/workflows/ci.yml",
+        event="pull_request",
+        referenced_workflows=[{"path": "fixtures/pipelines/" + HOSTED + "@refs/heads/main", "sha": "a" * 40}],
+    )
+    with pytest.raises(ValueError, match="hosted-assurance workflow"):
+        module.validate_run(called, HOSTED_SELECTION)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"path": ".github/workflows/mimic.yml"},
+        {"path": ".github/workflows/mimic.yml", "event": "push"},
+        {"path": HOSTED + "@forged.yml"},
+        {"event": "push"},
+        {"repository": {"full_name": "fixtures/elsewhere"}},
+        {
+            "path": ".github/workflows/ci.yml",
+            "referenced_workflows": [
+                {"path": "fixtures/pipelines/.github/workflows/mimic.yml@refs/heads/main", "sha": "a" * 40}
+            ],
+        },
+        {
+            "path": ".github/workflows/ci.yml",
+            "referenced_workflows": [
+                {"path": "fixtures/pipelines/" + HOSTED + "@refs/heads/main", "sha": "c" * 40}
+            ],
+        },
+    ],
+)
+def test_admission_rejects_a_same_head_run_that_did_not_execute_the_hosted_workflow(changes):
+    module = hosted_module()
+    with pytest.raises(ValueError, match="hosted-assurance workflow"):
+        module.validate_run(hosted_run(**changes), HOSTED_SELECTION)
 
 
 @pytest.mark.parametrize(
@@ -163,7 +245,7 @@ def test_pr_api_run_uses_candidate_branch_identity_not_tested_merge(defect):
         None,
         "actor",
         "workflow",
-        "candidate",
+        "producer",
         "status",
         "conclusion",
         "run",
@@ -178,7 +260,10 @@ def test_protected_provenance_protocol_requires_authorised_terminal_run(defect):
 
     # Protocol validation only: these records are never minted as hosted proof.
     selection = {"candidate_head": "a" * 40, "head": "b" * 40}
+    # The producer is a consumer repository: its commit is neither pipeline identity.
+    producer = "d" * 40
     policy = {
+        "producer_commit": producer,
         "repository": "fixtures/runtime",
         "run_id": 42,
         "attempt_id": 2,
@@ -187,7 +272,7 @@ def test_protected_provenance_protocol_requires_authorised_terminal_run(defect):
         "environment": "protected-status",
     }
     run = {
-        "head_sha": selection["candidate_head"],
+        "head_sha": producer,
         "status": "completed",
         "conclusion": "success",
         "path": policy["workflow_path"],
@@ -204,7 +289,7 @@ def test_protected_provenance_protocol_requires_authorised_terminal_run(defect):
         run["repository"]["full_name"] = "fixtures/unauthorised"
     elif defect in {
         "workflow",
-        "candidate",
+        "producer",
         "status",
         "conclusion",
         "run",
@@ -213,7 +298,7 @@ def test_protected_provenance_protocol_requires_authorised_terminal_run(defect):
     }:
         key = {
             "workflow": "path",
-            "candidate": "head_sha",
+            "producer": "head_sha",
             "run": "id",
             "attempt": "run_attempt",
         }.get(defect, defect)
@@ -227,6 +312,8 @@ def test_protected_provenance_protocol_requires_authorised_terminal_run(defect):
 
 @pytest.mark.parametrize("finding", [False, True])
 def test_semgrep_scans_actual_fixture_source(tmp_path, finding):
+    scratch = tmp_path / ".semgrep-tmp"
+    scratch.mkdir()
     path = tmp_path / "assurance/fixtures/python/project/src/control.py"
     path.parent.mkdir(parents=True)
     path.write_text("eval('1 + 1')\n" if finding else "answer = 1 + 1\n")
@@ -249,10 +336,12 @@ def test_semgrep_scans_actual_fixture_source(tmp_path, finding):
             ".",
         ],
         cwd=tmp_path,
+        # semgrep leaves a semgrep-mcp directory in its temporary directory; give it one inside tmp_path.
+        env={**os.environ, "TMPDIR": str(scratch)},
         capture_output=True,
         text=True,
         check=False,
-        timeout=120,
+        timeout=600,
     )
     data = json.loads(result.stdout)
     assert "assurance/fixtures/python/project/src/control.py" in data["paths"]["scanned"]
@@ -327,7 +416,7 @@ def test_raw_job_log_transport_accepts_ansi_and_retains_http_failure(tmp_path):
         assert "404" in (tmp_path / "missing.stderr").read_text()
     finally:
         server.shutdown()
-        thread.join(timeout=5)
+        thread.join(timeout=600)
         server.server_close()
 
 
@@ -369,7 +458,7 @@ def test_raw_job_log_transport_recovers_from_transient_github_egress_failure(tmp
         assert "attempts=3" in target.with_suffix(".stderr").read_text()
     finally:
         server.shutdown()
-        thread.join(timeout=5)
+        thread.join(timeout=600)
         server.server_close()
 
 

@@ -1,0 +1,49 @@
+name: example — meta-quality-gate (reusable self-check)
+
+# Static call-graph self-check for the `meta-quality-gate.yml` reusable
+# (actionlint, yamllint, licence, branch naming, no-attribution). Every job here
+# `uses:` it via its LOCAL path with a real consumer's input shape, so actionlint
+# + GitHub's reusable-workflow resolver validate input names and types against
+# the reusable's `workflow_call:` contract at parse time — a mismatch fails HERE,
+# not in a consumer's pipeline.
+#
+# tc-pipelines called this reusable from its own self-check (`ci.yml`'s `meta`
+# job); agent-platform's gate runs the same legs through tc-fitness instead, so
+# this file is the caller that keeps the contract resolved.
+#
+# NEVER runs the underlying work by default: `workflow_call` only and every job is
+# gated on `run-for-real` (default false); the call graph is validated statically
+# regardless of the gate, the bodies never execute under the default dispatch.
+
+on:
+  workflow_call:
+    inputs:
+      run-for-real:
+        description: >-
+          Leave false (default) for the static call-graph self-check — every job
+          stays gated off and only the input SHAPES are validated.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Shaped like tc-pipelines' own self-check: the YAML roots of a repository
+  # that ships workflows and composite actions, Apache-2.0, and no-attribution
+  # left to a standalone job that publishes the bare required context.
+  meta-pipelines:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/meta-quality-gate.yml
+    with:
+      actionlint-version: "1.7.12"
+      yamllint-version: "1.38.0"
+      yamllint-config: "{extends: relaxed, rules: {line-length: disable, document-start: disable}}"
+      yamllint-paths: ".github/workflows actions .github/actions"
+      spdx-id: "Apache-2.0"
+      run-no-attribution: false
+
+  # A product repository taking every default leg.
+  meta-defaults:
+    if: ${{ inputs.run-for-real }}
+    uses: ./.github/workflows/meta-quality-gate.yml

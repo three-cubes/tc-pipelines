@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -17,16 +18,22 @@ import urllib.request
 from pathlib import Path
 from typing import Any, NoReturn
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10; installed by the shared gate action.
-    import tomli as tomllib
-
 HERE = Path(__file__).resolve().parent
-CHECKOV_PROJECT = HERE / "checkov-tool"
-# Checkov has a separate 3.12 lock; never inherit the consumer's UV_PYTHON.
+# Checkov runs as a uv tool in its own environment on its own interpreter; never
+# inherit the consumer's UV_PYTHON.
 CHECKOV_PYTHON = "3.12"
+# Checkov declares asteval==1.0.6, affected by GHSA-89v8-rhwq-hf77 and
+# GHSA-9w56-46f6-3qhx; the tool environment resolves the fixed release instead.
+ASTEVAL_OVERRIDE = "asteval>=1.0.9,<1.1"
+ASTEVAL_FLOOR = (1, 0, 9)
+ASTEVAL_CEILING = (1, 1)
 SCANNER_CATALOGUE = HERE / "scanner-versions.json"
+# The complete Checkov tool environment, every distribution pinned (generated; see its header).
+CHECKOV_CONSTRAINTS = HERE / "checkov-constraints.txt"
+CALLER_INTERPRETER_ENV = frozenset({"UV_PYTHON", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"})
+# Distributions that must never be in the Checkov tool environment: python-ecdsa is
+# unpatched upstream.
+FORBIDDEN_DISTRIBUTIONS = frozenset({"ecdsa", "python-ecdsa"})
 SEMVER = re.compile(r"\d+\.\d+\.\d+\Z")
 MARKER = ".tc-pipelines-scanner"
 
@@ -60,48 +67,6 @@ def _versions() -> dict[str, Any]:
     ):
         _fail("catalogued OSV Scanner hashes must cover macOS and Linux amd64/arm64")
     return data
-
-
-def _checkov_version() -> tuple[str, str]:
-    expected_version = _versions()["checkov"]["version"]
-    try:
-        result = subprocess.run(
-            [
-                "uv",
-                "lock",
-                "--project",
-                str(CHECKOV_PROJECT),
-                "--check",
-                "--python",
-                CHECKOV_PYTHON,
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode:
-            _fail(f"Checkov tool lock is stale or invalid: {result.stderr.strip()}")
-        lock = tomllib.loads((CHECKOV_PROJECT / "uv.lock").read_text(encoding="utf-8"))
-        project = tomllib.loads((CHECKOV_PROJECT / "pyproject.toml").read_text(encoding="utf-8"))
-    except (OSError, KeyError, ValueError) as error:
-        raise ProvisionError(f"cannot read Checkov tool lock: {error}") from error
-    matches = [row.get("version") for row in lock.get("package", []) if row.get("name") == "checkov"]
-    if matches != [expected_version]:
-        _fail("Checkov tool lock must resolve the version in scanner-versions.json")
-    if project.get("project", {}).get("dependencies") != [f"checkov=={expected_version}"]:
-        _fail("Checkov tool project must be regenerated from scanner-versions.json")
-    asteval_versions = [row.get("version") for row in lock.get("package", []) if row.get("name") == "asteval"]
-    if len(asteval_versions) != 1 or not isinstance(asteval_versions[0], str):
-        _fail("Checkov tool lock must resolve exactly one asteval package")
-    try:
-        asteval_parts = tuple(int(part) for part in asteval_versions[0].split("."))
-    except ValueError:
-        _fail("Checkov tool lock has an invalid asteval version")
-    if not (asteval_parts >= (1, 0, 9) and asteval_parts < (1, 1)):
-        _fail("Checkov tool lock must keep asteval in the patched >=1.0.9,<1.1 range")
-    if any(row.get("name") in {"ecdsa", "python-ecdsa"} for row in lock.get("package", [])):
-        _fail("Checkov tool lock contains unpatched ecdsa")
-    return expected_version, asteval_versions[0]
 
 
 def _scanner_root() -> tuple[Path, Path]:
@@ -272,27 +237,65 @@ def _install_osv(root: Path, bin_dir: Path) -> None:
     print(f"Installed verified OSV Scanner {version} for {platform_key} in {binary}")
 
 
+def _canonical(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _checkov_constraints() -> dict[str, str]:
+    """The committed pins, by canonical distribution name; markers are not evaluated."""
+    try:
+        text = CHECKOV_CONSTRAINTS.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ProvisionError(f"cannot read the Checkov constraints: {error}") from error
+    pins: dict[str, str] = {}
+    for line in text.splitlines():
+        entry = line.split("#", 1)[0].split(";", 1)[0].strip()
+        if not entry:
+            continue
+        match = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9._-]*)==([0-9][0-9A-Za-z.!+]*)", entry)
+        if match is None:
+            _fail(f"Checkov constraints must pin each distribution with ==, got: {entry}")
+        pins[_canonical(match.group(1))] = match.group(2)
+    return pins
+
+
 def _install_checkov(root: Path, bin_dir: Path) -> None:
-    version, asteval_version = _checkov_version()
+    """Install Checkov as a uv tool, at the version scanner-versions.json pins."""
+    version = _versions()["checkov"]["version"]
     requested = os.environ.get("CHECKOV_VERSION")
     if requested and requested != version:
-        _fail(f"requested Checkov {requested} differs from locked version {version}")
+        _fail(f"requested Checkov {requested} differs from catalogued version {version}")
+    pins = _checkov_constraints()
+    if pins.get("checkov") != version:
+        _fail(f"Checkov constraints pin checkov {pins.get('checkov')}, not the catalogued {version}")
+    forbidden = sorted(FORBIDDEN_DISTRIBUTIONS & set(pins))
+    if forbidden:
+        _fail(f"Checkov constraints contain a forbidden distribution: {', '.join(forbidden)}")
     target = _owned_target(root, "checkov", version)
-    environment = target / ".venv"
-    if environment.is_symlink():
-        _fail(f"refusing to use a symlinked Checkov environment: {environment}")
-    uv_env = os.environ.copy()
-    uv_env["UV_PROJECT_ENVIRONMENT"] = str(environment)
+    tool_dir = target / "tools"
+    tool_bin = target / "bin"
+    if tool_dir.is_symlink() or tool_bin.is_symlink():
+        _fail(f"refusing to use a symlinked Checkov tool directory under {target}")
+    overrides = target / "overrides.txt"
+    overrides.write_text(ASTEVAL_OVERRIDE + "\n", encoding="utf-8")
+    # One clean scanner environment for the install and the inspection: the caller's interpreter state
+    # (a gate hands its own to child processes) would otherwise make either see another site-packages.
+    uv_env = {name: value for name, value in os.environ.items() if name not in CALLER_INTERPRETER_ENV}
+    uv_env["UV_TOOL_DIR"] = str(tool_dir)
+    uv_env["UV_TOOL_BIN_DIR"] = str(tool_bin)
     result = subprocess.run(
         [
             "uv",
-            "sync",
-            "--project",
-            str(CHECKOV_PROJECT),
-            "--locked",
+            "tool",
+            "install",
+            "--force",
             "--python",
             CHECKOV_PYTHON,
-            "--no-install-project",
+            "--overrides",
+            str(overrides),
+            "--constraints",
+            str(CHECKOV_CONSTRAINTS),
+            f"checkov=={version}",
         ],
         check=False,
         capture_output=True,
@@ -301,27 +304,56 @@ def _install_checkov(root: Path, bin_dir: Path) -> None:
     )
     if result.returncode:
         _fail(f"isolated Checkov environment installation failed: {result.stderr.strip()}")
-    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python = tool_dir / "checkov" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     verify = subprocess.run(
         [
             str(python),
             "-c",
-            "import importlib.metadata as m; "
-            "assert m.version('checkov') == '" + version + "'; "
-            "assert m.version('asteval') == '" + asteval_version + "'; "
-            "assert not any(d.metadata['Name'].lower() in {'ecdsa', 'python-ecdsa'} "
-            "for d in m.distributions())",
+            "import importlib.metadata as m, json; "
+            "print(json.dumps({d.metadata['Name']: d.version for d in m.distributions()}))",
         ],
         check=False,
         capture_output=True,
         text=True,
+        env=uv_env,
     )
     if verify.returncode:
-        _fail(f"isolated Checkov dependencies failed security verification: {verify.stderr.strip()}")
-    executable = environment / ("Scripts/checkov.exe" if os.name == "nt" else "bin/checkov")
+        _fail(f"isolated Checkov environment cannot be inspected: {verify.stderr.strip()}")
+    try:
+        installed = {_canonical(name): found for name, found in json.loads(verify.stdout).items()}
+    except (ValueError, AttributeError) as error:
+        _fail(f"isolated Checkov environment reported an unreadable distribution list: {error}")
+    if installed.get("checkov") != version:
+        _fail(f"isolated Checkov environment holds checkov {installed.get('checkov')}, not {version}")
+    installed_asteval = installed.get("asteval", "")
+    try:
+        asteval_parts = tuple(int(part) for part in installed_asteval.split("."))
+    except ValueError:
+        _fail(f"isolated Checkov environment has an invalid asteval version: {installed_asteval}")
+    if not ASTEVAL_FLOOR <= asteval_parts < ASTEVAL_CEILING:
+        _fail(
+            f"isolated Checkov environment must keep asteval in {ASTEVAL_OVERRIDE}, got {installed_asteval}"
+        )
+    present = sorted(FORBIDDEN_DISTRIBUTIONS & set(installed))
+    if present:
+        _fail(f"isolated Checkov environment contains a forbidden distribution: {', '.join(present)}")
+    drift = sorted(f"{name} {found}" for name, found in installed.items() if pins.get(name) != found)
+    if drift:
+        _fail("isolated Checkov environment differs from checkov-constraints.txt: " + ", ".join(drift))
+    tool_executable = tool_bin / ("checkov.exe" if os.name == "nt" else "checkov")
+    # Published through a wrapper: Checkov runs on its own interpreter, so a caller's
+    # PYTHONPATH (the gate hands its own to child processes) must not reach it.
+    executable = target / "checkov"
+    executable.write_text(
+        "#!/bin/sh\n"
+        "unset PYTHONPATH PYTHONHOME VIRTUAL_ENV\n"
+        f'exec {shlex.quote(str(tool_executable))} "$@"\n',
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
     _verify_version(executable, "checkov", version)
     _publish_executable(executable, bin_dir, "checkov", root)
-    print(f"Installed isolated Checkov {version} with asteval {asteval_version} in {environment}")
+    print(f"Installed isolated Checkov {version} with asteval {installed_asteval} in {tool_dir}")
 
 
 def main() -> int:

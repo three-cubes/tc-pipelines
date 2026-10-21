@@ -1,7 +1,7 @@
 # Common AI SDLC Adoption Playbook
 
 Use [`new-repo-bootstrap.md`](new-repo-bootstrap.md) for a new repository and
-[`../../docs/MIGRATION.md`](../../docs/MIGRATION.md) for an existing repository.
+[`../../docs/MIGRATION.md`](../../../execution/pipelines/docs/MIGRATION.md) for an existing repository.
 Both paths adopt the product defined by
 [`ai-sdlc-product-architecture.md`](ai-sdlc-product-architecture.md).
 
@@ -39,4 +39,4 @@ A converged repository has:
 | Product source, tests, journeys and deployment values | consumer repository |
 
 The consumer resolver records product-specific locations. The tc-pipelines
-[`RESOLVER.md`](../../RESOLVER.md) records shared locations.
+[`RESOLVER.md`](../../../RESOLVER.md) records shared locations.

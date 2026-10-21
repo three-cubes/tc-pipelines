@@ -11,7 +11,11 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RELEASE = REPO_ROOT / ".github" / "workflows" / "release.yml"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+RELEASE = PLATFORM_ROOT / ".github" / "workflows" / "release.yml"
 TAG_STEP = "Ensure exact release tag"
 
 

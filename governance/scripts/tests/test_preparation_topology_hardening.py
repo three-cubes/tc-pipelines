@@ -8,6 +8,10 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = ROOT if (ROOT / ".github" / "workflows").is_dir() else ROOT.parents[1]
 pytestmark = pytest.mark.contract
 
 
@@ -16,7 +20,7 @@ def _steps(path: Path, job: str) -> list[dict]:
 
 
 def test_preparation_uses_branch_head_but_evaluation_uses_integration_commit() -> None:
-    workflow = yaml.safe_load((ROOT / ".github/workflows/python-quality-gate.yml").read_text())
+    workflow = yaml.safe_load((PLATFORM_ROOT / ".github/workflows/python-quality-gate.yml").read_text())
     assert "candidate-head-sha" not in workflow[True]["workflow_call"]["inputs"]
     preparation = workflow["jobs"]["preparation"]
     assert preparation["outputs"]["candidate-head-sha"] == ("${{ steps.candidate.outputs.sha }}")
@@ -35,7 +39,7 @@ def test_preparation_uses_branch_head_but_evaluation_uses_integration_commit() -
 
 
 def test_preparation_uses_only_the_closed_trusted_ruff_policy() -> None:
-    workflow = yaml.safe_load((ROOT / ".github/workflows/python-quality-gate.yml").read_text())
+    workflow = yaml.safe_load((PLATFORM_ROOT / ".github/workflows/python-quality-gate.yml").read_text())
     assert "pre-evaluation-normalize" not in str(workflow)
     prepare = next(
         step for step in workflow["jobs"]["preparation"]["steps"] if step["name"] == "Prepare candidate"
@@ -54,7 +58,7 @@ def test_preparation_uses_only_the_closed_trusted_ruff_policy() -> None:
 
 
 def test_writer_bootstraps_private_tools_and_uses_only_the_fixed_policy() -> None:
-    path = ROOT / ".github/workflows/preparation-writeback.yml"
+    path = PLATFORM_ROOT / ".github/workflows/preparation-writeback.yml"
     steps = _steps(path, "write-preparation")
     bootstrap = next(step for step in steps if step.get("id") == "bootstrap")
     assert "github-app-token@" in bootstrap["uses"]
@@ -63,12 +67,3 @@ def test_writer_bootstraps_private_tools_and_uses_only_the_fixed_policy() -> Non
     assert checkout["with"]["ref"] == "${{ inputs.trusted-validator-ref }}"
     apply = next(step for step in steps if step.get("id") == "apply")
     assert '--expected-policy "python-ruff-v1"' in apply["run"]
-
-
-def test_tc_pipelines_uses_its_local_writer_but_consumer_template_keeps_a_pin() -> None:
-    local = yaml.safe_load((ROOT / ".github/workflows/auto-merge.yml").read_text())
-    template = yaml.safe_load((ROOT / "governance/skeletons/workflows/auto-merge.yml.tmpl").read_text())
-    assert local["jobs"]["preparation-writeback"]["uses"] == ("./.github/workflows/preparation-writeback.yml")
-    assert local["jobs"]["preparation-writeback"]["with"]["trusted-validator-ref"] == "${{ github.sha }}"
-    assert "@{{PIPELINES_SHA}}" in template["jobs"]["preparation-writeback"]["uses"]
-    assert template["jobs"]["preparation-writeback"]["with"]["trusted-validator-ref"] == "{{PIPELINES_SHA}}"

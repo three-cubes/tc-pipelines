@@ -19,7 +19,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-# Repo root: governance/loop/tests -> parents[3].
+import pytest
+
+pytestmark = pytest.mark.integration
+
+
+# Repo root: orchestration/loops/tests -> parents[3].
 _WORKFLOW = Path(__file__).resolve().parents[3] / ".github" / "workflows" / "loop-implement.yml"
 _DEFAULT_ALLOWED = "kairix kata tc-agent-zone tc-pipelines data-visualisation"
 

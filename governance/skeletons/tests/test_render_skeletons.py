@@ -53,7 +53,7 @@ def _resolve_includes(text: str) -> str:
 
 
 def render(name: str, context: dict[str, str]) -> str:
-    text = (SKELETON_DIR / name).read_text(encoding="utf-8")
+    text = (SKELETON_DIR / f"{name}.tmpl").read_text(encoding="utf-8")
     text = _resolve_includes(text)
     for token, value in context.items():
         text = text.replace("{{" + token + "}}", value)
@@ -62,7 +62,7 @@ def render(name: str, context: dict[str, str]) -> str:
 
 @pytest.mark.parametrize("name", SKELETONS)
 def test_skeleton_exists(name: str) -> None:
-    assert (SKELETON_DIR / name).is_file(), f"missing skeleton: {name}"
+    assert (SKELETON_DIR / f"{name}.tmpl").is_file(), f"missing skeleton: {name}.tmpl"
 
 
 @pytest.mark.parametrize("name", SKELETONS)
@@ -99,5 +99,5 @@ def test_banner_carries_canonical_homes_token() -> None:
 def test_every_skeleton_includes_the_banner_source() -> None:
     # Each skeleton must INCLUDE the factored banner rather than inlining its own copy.
     for name in SKELETONS:
-        raw = (SKELETON_DIR / name).read_text(encoding="utf-8")
+        raw = (SKELETON_DIR / f"{name}.tmpl").read_text(encoding="utf-8")
         assert BANNER in raw, f"{name} does not INCLUDE {BANNER}"

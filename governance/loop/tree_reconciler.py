@@ -36,13 +36,13 @@ issue fields and follows the same injected-transport discipline — selection/
 detection are pure transforms over an injected snapshot, so everything is testable
 offline and the same code runs live against Linear's GraphQL. The live read uses
 the **secret-free** Linear key path (fetched from Key Vault via WIF at run time,
-never a stored secret — see ``governance/loop/verify-and-close.md``): the CLI
+never a stored secret — see ``orchestration/loops/verify-and-close.md``): the CLI
 reads ``LINEAR_API_KEY`` from the environment the workflow populates from Key
 Vault, scoped to the reconcile step and never written to an output.
 
 Stdlib only, no third-party deps — the determinism the loop enforces.
 
-Run the CLI (from ``governance/loop/``)::
+Run the CLI (from ``orchestration/loops/``)::
 
     python3 -m tree_reconciler --dry-run --snapshot tree.json
 
@@ -726,7 +726,9 @@ def _read_json_list(path: str) -> list:
     return list(data)
 
 
-def _load_input(args: argparse.Namespace) -> ReconcilerInput:
+def _load_input(
+    args: argparse.Namespace, *, tree_source: Callable[[str], TreeSource] = HttpTreeSource
+) -> ReconcilerInput:
     """Resolve the three snapshots: a combined ``--snapshot`` file (offline) or a
     live Linear tree read (``LINEAR_API_KEY``, KV-fetched) plus the exported
     delegation ledger / branch list."""
@@ -745,7 +747,7 @@ def _load_input(args: argparse.Namespace) -> ReconcilerInput:
             "error: a live read needs --delegations-file (the delegation-ledger "
             "export) to reconcile the Linear tree against."
         )
-    issues = tuple(HttpTreeSource(api_key).fetch(args.initiative))
+    issues = tuple(tree_source(api_key).fetch(args.initiative))
     delegations = tuple(Delegation.from_dict(d) for d in _read_json_list(args.delegations_file))
     branches = (
         tuple(AgentBranch.from_dict(b) for b in _read_json_list(args.branches_file))
@@ -837,9 +839,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None, *, tree_source: Callable[[str], TreeSource] = HttpTreeSource
+) -> int:
+    """Run the reconciler. ``tree_source`` builds the live Linear transport from the API key."""
     args = build_arg_parser().parse_args(argv)
-    inp = _load_input(args)
+    inp = _load_input(args, tree_source=tree_source)
     now = _parse_ts(args.now) if args.now else None
     report = reconcile(
         inp.issues,

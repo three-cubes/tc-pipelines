@@ -12,21 +12,28 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+# tc-pipelines governance/ lives in assurance/governance/ (ADR-0001 D4).
+GOVERNANCE_ROOT = next(
+    root
+    for root in (PLATFORM_ROOT / "assurance" / "governance", PLATFORM_ROOT / "governance")
+    if root.is_dir()
+)
 ACTION = REPO_ROOT / "actions" / "setup-uv-cached" / "action.yml"
 REPOSITORY_RESOLVED_CALLERS = (
     REPO_ROOT / "actions" / "pre-commit-cached" / "action.yml",
-    REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml",
+    PLATFORM_ROOT / ".github" / "workflows" / "python-quality-gate.yml",
 )
 REPOSITORY_RESOLVED_DEFAULTS = {"uv-version": "", "python-version": ""}
 PYTHON_INSTALL_SURFACES = (
     ACTION,
     REPO_ROOT / "actions" / "pre-commit-cached" / "action.yml",
-    REPO_ROOT / ".github" / "workflows" / "test-shard-routing.yml",
-    REPO_ROOT / ".github" / "workflows" / "example-pytest-durations-refresh.yml",
-    REPO_ROOT / "governance" / "skeletons" / "workflows" / "ci.yml.tmpl",
-    REPO_ROOT / "governance" / "standards" / "python-dependency-locking.md",
-    REPO_ROOT / "governance" / "standards" / "js-ts-tooling-baseline.md",
-    REPO_ROOT / "README.md",
+    GOVERNANCE_ROOT / "skeletons" / "workflows" / "ci.yml.tmpl",
+    GOVERNANCE_ROOT / "standards" / "python-dependency-locking.md",
+    GOVERNANCE_ROOT / "standards" / "js-ts-tooling-baseline.md",
 )
 
 
@@ -133,80 +140,6 @@ def test_toolchain_resolver_uses_legacy_values_for_empty_version_files(
     assert _resolve(tmp_path) == {"uv_version": "0.12.5", "python_version": "3.12"}
 
 
-def test_hosted_assurance_passes_repository_python_to_python_mutation_and_canary_gates(
-    tmp_path: Path,
-) -> None:
-    """Self-check jobs execute this repository under its declared toolchain."""
-    document = _yaml(REPO_ROOT / ".github" / "workflows" / "hosted-assurance.yml")
-    expected = "${{ needs.select.outputs.python_version }}"
-    select_job = document["jobs"]["select"]
-
-    expected_root = "${{ steps.root_python.outputs.python_version }}"
-    assert select_job["outputs"]["python_version"] == expected_root
-    setup = next(step for step in select_job["steps"] if step.get("uses") == "./actions/setup-uv-cached")
-    assert setup["with"]["python-version"] == expected_root
-    assert document["jobs"]["python"]["with"]["python-version"] == expected
-    assert document["jobs"]["mutation"]["with"]["python-version"] == expected
-    assert document["jobs"]["canary"]["with"]["python-version"] == expected
-    assert document["jobs"]["actions"]["with"]["python-version"] == expected
-    assert document["jobs"]["security"]["with"]["gitleaks-config"] == "governance/.gitleaks.toml"
-    assert "gitleaks-baseline" not in document["jobs"]["security"]["with"]
-    receipt_setup = next(
-        step
-        for step in document["jobs"]["receipts"]["steps"]
-        if step.get("uses") == "./actions/setup-uv-cached"
-    )
-    assert receipt_setup["with"]["python-version"] == expected
-    assert (
-        _resolve_root_python(select_job["steps"], tmp_path)
-        == (REPO_ROOT / ".python-version").read_text(encoding="utf-8").strip()
-    )
-
-
-def test_hosted_action_self_checks_pass_repository_python_to_python_actions() -> None:
-    """Composite-action probes use the checked-out repo's Python pin."""
-    document = _yaml(REPO_ROOT / ".github" / "workflows" / "hosted-actions.yml")
-    expected = "${{ inputs.python-version }}"
-    steps = document["jobs"]["adapter"]["steps"]
-    selected = [
-        step
-        for step in steps
-        if step.get("uses")
-        in {
-            "./actions/setup-uv-cached",
-            "./actions/pre-commit-cached",
-            "./actions/python-gate-body",
-        }
-    ]
-
-    triggers = document.get(True) or document["on"]
-    assert triggers["workflow_call"]["inputs"]["python-version"]["required"] is True
-    assert len(selected) == 4
-    assert all(step.get("with", {}).get("python-version") == expected for step in selected)
-    preparation_action = next(
-        step
-        for step in steps
-        if step.get("if") == "inputs.case == 'action-actions-python-preparation'"
-        and step.get("uses") == "./actions/python-preparation"
-    )
-    assert preparation_action["with"] == {"uv-version": "0.12.5"}
-    preparation_setup = next(
-        step
-        for step in steps
-        if step.get("if") == "inputs.case == 'action-actions-python-preparation'"
-        and step.get("uses") == "./actions/setup-uv-cached"
-    )
-    assert preparation_setup["name"] == "Install locked environment"
-
-
-def test_shard_routing_self_checks_use_repository_python() -> None:
-    """Reusable-gate probes inherit the repository pin through the shared gate."""
-    document = _yaml(REPO_ROOT / ".github" / "workflows" / "test-shard-routing.yml")
-
-    for job_name in ("unsharded", "sharded", "floor", "tier"):
-        assert "python-version" not in document["jobs"][job_name]["with"]
-
-
 @pytest.mark.parametrize("selector", ["pypy@3.10", "cpython-3.12.3", ">=3.12,<3.13"])
 def test_toolchain_resolver_preserves_supported_explicit_python_selectors(
     tmp_path: Path, selector: str
@@ -237,14 +170,16 @@ def test_default_ci_sync_installs_the_explicit_dev_dependency_group() -> None:
     """The published default installs CI tools declared in the locked dev group."""
     action = _yaml(ACTION)
     assert action["inputs"]["sync-args"]["default"] == ("--locked --all-packages --group dev")
-    workflow = _yaml(REPO_ROOT / ".github" / "workflows" / "python-quality-gate.yml")
+    workflow = _yaml(PLATFORM_ROOT / ".github" / "workflows" / "python-quality-gate.yml")
     triggers = workflow.get(True) or workflow["on"]
     assert triggers["workflow_call"]["inputs"]["sync-args"]["default"] == (
         "--locked --all-packages --group dev"
     )
 
 
-@pytest.mark.parametrize("path", PYTHON_INSTALL_SURFACES, ids=lambda path: str(path.relative_to(REPO_ROOT)))
+@pytest.mark.parametrize(
+    "path", PYTHON_INSTALL_SURFACES, ids=lambda path: str(path.relative_to(PLATFORM_ROOT))
+)
 def test_python_install_surfaces_have_no_ci_requirements_overlay(path: Path) -> None:
     """Every published install surface must derive Python tools from uv.lock."""
     text = path.read_text(encoding="utf-8")

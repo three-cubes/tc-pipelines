@@ -83,7 +83,7 @@ with the safe `LoggingDispatchSink` and zero blast radius.)
 | # | Precondition | Evidence |
 |---|---|---|
 | 1 | **First cycle proven** — the dispatch → verify → close loop has completed at least one end-to-end cycle by hand, with a real merge closed via [`verify-and-close`](verify-and-close.md). | A closed Linear issue with a `verification-confirmed` comment. |
-| 2 | **Guardrail harness validated (fail-closed)** — `python3 -m unittest discover -s governance/loop/tests` is green (it IS the lights-out gate; `arm_auto_dispatch` refuses without it). `guardrails_validated` now also refuses a missing/renamed/truncated harness. | Green harness on `main`; the runner re-confirms it every tick. |
+| 2 | **Guardrail harness validated (fail-closed)** — `python3 -m unittest discover -s orchestration/loops/tests` is green (it IS the lights-out gate; `arm_auto_dispatch` refuses without it). `guardrails_validated` now also refuses a missing/renamed/truncated harness. | Green harness on `main`; the runner re-confirms it every tick. |
 | 3 | **Budget + retry caps configured** — the ceilings below are set deliberately for this fleet + cost model, not left at defaults by accident. | The `GuardrailConfig` in force (see the table); reviewed in the arming PR. |
 | 3a | **Durable cross-tick ledger wired** — the workflow materialises the `loop-state` git ref into `--state-file` and writes it back, so the governor's retry/budget/circuit-breaker counters accumulate across the fresh-process ticks (they are inert otherwise). An armed **live** tick with no durable store is refused. | The restore/persist steps in [`loop-dispatch.yml`](../../.github/workflows/loop-dispatch.yml); the cross-tick tests in `tests/test_loop_hardening.py` green. |
 | 3b | **Soak window configured** — `LOOP_SOAK_TICKS` set so the first N armed ticks stay record-only; the first armed cron tick never dispatches. | `LOOP_SOAK_TICKS` repo variable (default 3); the soak tests green. |
@@ -146,8 +146,8 @@ Three other candidates remain in `loop_runner.py` as documented STUBs (each rais
 - **`GitHubActionsHeadlessSink`** — the original un-parameterised description of
   the GHA-hosted seam, now realized as `GitHubActionsDispatchSink`.
 - **`AgentPlatformSink`** — hand the contract to the standing
-  `tc-agent-zone` / `vm-openclaw` runner (the persistent OpenClaw gateway). NOT
-  chosen — the GHA-hosted path needs no standing host and NOTHING touches openclaw.
+  agent-platform runner (a persistent agent gateway on a managed host). NOT
+  chosen — the GHA-hosted path needs no standing host and touches no runner host.
 - **`LinearDelegationSink`** — set the Linear `delegate = agent` so Linear's
   native agent integration picks the item up; dispatch becomes one idempotent
   Linear mutation.
@@ -157,7 +157,7 @@ Three other candidates remain in `loop_runner.py` as documented STUBs (each rais
 1. **Validate the harness.** Confirm it is green on `main`:
 
    ```sh
-   python3 -m unittest discover -s governance/loop/tests -v
+   python3 -m unittest discover -s orchestration/loops/tests -v
    ```
 
 2. **Set the arming variable.** Flip the repo variable to exactly `true`:
@@ -321,7 +321,7 @@ the GHA-hosted, headless agent-execution runtime that turns ONE selected work it
 into a working bot PR. `GitHubActionsDispatchSink` triggers it via
 `workflow_dispatch` with three inputs — `issue-id`, `issue-branch`, `repo` — each
 strict-pattern-validated on both sides (the sink before it posts, and the workflow
-before it uses them). It runs on `ubuntu-latest`; **NOTHING touches openclaw**.
+before it uses them). It runs on `ubuntu-latest`; **it touches no standing runner host**.
 
 Per tick, one item. The workflow, in order:
 
@@ -339,7 +339,7 @@ Per tick, one item. The workflow, in order:
    `kv-tc-agents`, masked the instant they are read and kept step-local (never an
    output). Same KV+WIF pattern as [`verify-and-close.yml`](verify-and-close.md).
 3. **Mints the bot App token** from the App id + private key ALSO in the vault
-   (via the [`github-app-token`](../../.github/actions/github-app-token/action.yml)
+   (via the [`github-app-token`](../../execution/pipelines/.github/actions/github-app-token/action.yml)
    composite), scoped to the TARGET repo — so every git/gh write is the
    `three-cubes-agent` App, never a human PAT, never GITHUB_TOKEN.
 4. **Checks out the target repo** on the issue branch and runs `claude -p`
@@ -389,15 +389,15 @@ may spend.
 
 - [`loop_runner.py`](loop_runner.py) · [`loop_governor.py`](loop_governor.py) ·
   [`loop_dispatcher.py`](loop_dispatcher.py) · [`loop_state_machine.py`](loop_state_machine.py)
-- [`../autonomous-loop.md`](../autonomous-loop.md) (the canonical spec + the
-  lights-out gate) · [`../decisions/ADR-LOOP-STATE-MACHINE.md`](../decisions/ADR-LOOP-STATE-MACHINE.md)
+- [`assurance/governance/autonomous-loop.md`](../../assurance/governance/autonomous-loop.md) (the canonical spec + the
+  lights-out gate) · [`ADR-0004-autonomous-loop-state-machine.md`](../../assurance/governance/decisions/ADR-0004-autonomous-loop-state-machine.md)
 - [`verify-and-close.md`](verify-and-close.md) (the close side + the KV+WIF
   secret-free Linear pattern this driver mirrors)
 - The driver workflow [`loop-dispatch.yml`](../../.github/workflows/loop-dispatch.yml)
   (selects the sink) and the executor
   [`loop-implement.yml`](../../.github/workflows/loop-implement.yml) (the GHA-hosted
   headless `claude -p` runtime) · the App-token composite
-  [`github-app-token`](../../.github/actions/github-app-token/action.yml).
+  [`github-app-token`](../../execution/pipelines/.github/actions/github-app-token/action.yml).
 - Durable cross-tick ledger: the `loop-state` git ref (`refs/loop-state/ledger`),
   materialised into `--state-file` by `loop-dispatch.yml`; the enforceability
   proofs live in [`tests/test_loop_hardening.py`](tests/test_loop_hardening.py),

@@ -17,8 +17,12 @@ import yaml
 
 pytestmark = pytest.mark.contract
 ROOT = Path(__file__).resolve().parents[3]
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = ROOT if (ROOT / ".github" / "workflows").is_dir() else ROOT.parents[1]
 CLI = ROOT / "actions/preparation-writeback/preparation_writeback.py"
-WRITER = ROOT / ".github/workflows/preparation-writeback.yml"
+WRITER = PLATFORM_ROOT / ".github/workflows/preparation-writeback.yml"
 ACTION = ROOT / "actions/preparation-writeback/action.yml"
 
 
@@ -426,7 +430,7 @@ def test_changed_and_push_use_real_git_without_persistent_credentials(
     git(tmp_path, "init", "-q", "--bare", bare)
     git(source, "remote", "add", "origin", str(bare))
     git(source, "push", "-q", "origin", f"{head}:refs/heads/feature/prepare")
-    environment = {**os.environ, "GITHUB_APP_TOKEN": "opaque-test-token"}
+    environment = {**os.environ, "GITHUB_APP_TOKEN": "opaque-test-token"}  # pragma: allowlist secret
     result = subprocess.run(
         [
             sys.executable,
@@ -558,7 +562,7 @@ def test_authenticated_fetch_uses_real_git_without_persistent_credentials(
     git(source, "push", "-q", "origin", f"{head}:refs/heads/feature/prepare")
     target = tmp_path / "target"
     git(tmp_path, "init", "-q", target)
-    environment = {**os.environ, "GITHUB_READ_TOKEN": "opaque-read-token"}
+    environment = {**os.environ, "GITHUB_READ_TOKEN": "opaque-read-token"}  # pragma: allowlist secret
     result = subprocess.run(
         [
             sys.executable,

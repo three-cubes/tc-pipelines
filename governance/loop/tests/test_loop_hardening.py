@@ -17,7 +17,7 @@ These tests PROVE the fail-open holes the adversarial verify found are closed:
 
 Stdlib only, no network — the discipline the loop enforces. Run from the repo root::
 
-    python3 -m unittest discover -s governance/loop/tests -v
+    python3 -m unittest discover -s orchestration/loops/tests -v
 """
 
 from __future__ import annotations
@@ -28,7 +28,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+pytestmark = pytest.mark.integration
+
 
 from loop_dispatcher import (
     CandidateIssue,

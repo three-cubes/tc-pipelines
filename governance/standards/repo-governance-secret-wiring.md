@@ -14,8 +14,7 @@ genuinely needs a different value still sets a repo-level override safely (the
 override wins, the org default is untouched).
 
 The toil this removes: today each repo (tc-agent-zone, kairix, tc-fitness,
-tc-pipelines) wires `SONAR_TOKEN` / `CODECOV_TOKEN` /
-`AZURE_*` by hand. That is N manual wirings per value and silent drift when one
+tc-pipelines) wires `CODECOV_TOKEN` / `AZURE_*` by hand. That is N manual wirings per value and silent drift when one
 rotates.
 
 ## What is shared (promote to org) vs repo-specific (keep local)
@@ -25,7 +24,6 @@ rotates.
 | `AZURE_CLIENT_ID` | variable | yes — all repos federate to the same WIF app | promote org-level (value readable from an existing repo) |
 | `AZURE_SUBSCRIPTION_ID` | variable | yes | promote org-level |
 | `AZURE_TENANT_ID` | variable | yes | promote org-level |
-| `SONAR_TOKEN` | secret | yes — one SonarCloud org token | promote org-level (value from KV / the platform owner, NOT readable from the repo) |
 | `CODECOV_TOKEN` | secret | yes — one Codecov org | promote org-level (value from KV / the platform owner) |
 | `PRIVATE_INFRA_PATTERNS` | var + secret | already org-level | none |
 | `ENGINEERING_HUB_TOKEN` | secret | already org-level (visibility private) | none |
@@ -33,23 +31,21 @@ rotates.
 
 Variable VALUES are readable via the API, so the AZURE_* trio can be promoted
 now by pulling each value from an existing repo. Secret VALUES are write-only, so
-`SONAR_TOKEN`/`CODECOV_TOKEN` need the plaintext from Azure Key Vault or the
-platform owner before org promotion.
+`CODECOV_TOKEN` needs the plaintext from Azure Key Vault or the platform owner
+before org promotion.
 
 ### KV gap to close first
 
-`kv-tc-agents` today holds the SonarCloud **API PATs** (`sonarcloud-pat` —
-stale/invalid; `sonarcloud-three-cubes-pat` — valid, used by the FP-marking
-scripts) but **not** the CI **analysis** token that CI's `SONAR_TOKEN` carries,
-and **no** Codecov upload token at all. Before the org-promotion of these two
-secrets, add the canonical KV entries (names the bootstrap script expects):
+`kv-tc-agents` holds **no** Codecov upload token. Before the org-promotion of
+that secret, add the canonical KV entry (the name the bootstrap script expects):
 
-- `sonarcloud-ci-analysis-token` — the SonarCloud project/global *analysis*
-  token used by `SonarSource/sonarqube-scan-action` (distinct from the API PAT).
 - `codecov-upload-token` — the Codecov repo/global upload token.
 
-These two values can only come from the platform owner / the SonarCloud + Codecov consoles —
-the operator cannot read them from any existing GitHub secret.
+The SonarCloud PATs in `kv-tc-agents` (`sonarcloud-pat`, `sonarcloud-three-cubes-pat`)
+are revocable: SonarCloud is decommissioned and no workflow consumes them.
+
+This value can only come from the platform owner / the Codecov console —
+the operator cannot read it from any existing GitHub secret.
 
 ## Promote — exact commands
 
@@ -62,12 +58,9 @@ for v in AZURE_CLIENT_ID AZURE_SUBSCRIPTION_ID AZURE_TENANT_ID; do
 done
 ```
 
-Secrets (values from KV once the entries above exist):
+Secrets (values from KV once the entry above exists):
 
 ```bash
-sonar="$(az keyvault secret show --vault-name kv-tc-agents --name sonarcloud-ci-analysis-token --query value -o tsv)"
-printf '%s' "$sonar" | gh secret set SONAR_TOKEN --org three-cubes --visibility all --body -
-
 codecov="$(az keyvault secret show --vault-name kv-tc-agents --name codecov-upload-token --query value -o tsv)"
 printf '%s' "$codecov" | gh secret set CODECOV_TOKEN --org three-cubes --visibility all --body -
 ```
@@ -83,7 +76,7 @@ instead, use `--visibility selected --repos tc-agent-zone,kairix,tc-fitness,...`
 3. Remove the now-redundant repo-level value **one repo at a time**, confirming
    green after each, so the repo falls back to the org value:
    `gh variable delete AZURE_CLIENT_ID --repo three-cubes/<name>` /
-   `gh secret delete SONAR_TOKEN --repo three-cubes/<name>`.
+   `gh secret delete CODECOV_TOKEN --repo three-cubes/<name>`.
 4. Leave repo-specific secrets (e.g. the LLM-judge CI credentials) repo-level.
 
 Do not skip step 3-per-repo: deleting all overrides in one sweep removes the

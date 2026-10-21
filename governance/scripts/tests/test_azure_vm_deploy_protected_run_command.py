@@ -11,13 +11,25 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "azure-vm-deploy.yml"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+# tc-pipelines governance/ lives in assurance/governance/ (ADR-0001 D4).
+GOVERNANCE_ROOT = next(
+    root
+    for root in (PLATFORM_ROOT / "assurance" / "governance", PLATFORM_ROOT / "governance")
+    if root.is_dir()
+)
+WORKFLOW = PLATFORM_ROOT / ".github" / "workflows" / "azure-vm-deploy.yml"
 IMPLEMENTATION = REPO_ROOT / "docs" / "IMPLEMENTATION.md"
 MIGRATION = REPO_ROOT / "docs" / "MIGRATION.md"
 README = REPO_ROOT / "README.md"
-SNAPSHOT_STANDARD = REPO_ROOT / "governance" / "standards" / "snapshot-before-apply.md"
-DEVELOPMENT_WORKFLOW = REPO_ROOT / "governance" / "standards" / "development-workflow.md"
+SNAPSHOT_STANDARD = GOVERNANCE_ROOT / "standards" / "snapshot-before-apply.md"
+DEVELOPMENT_WORKFLOW = GOVERNANCE_ROOT / "standards" / "development-workflow.md"
 
 
 class GithubActionsLoader(yaml.SafeLoader):
@@ -71,7 +83,12 @@ def test_ghcr_token_is_a_closed_optional_job_scoped_secret() -> None:
 
 
 def test_hermes_runtime_secret_is_caller_mapped_and_optional() -> None:
-    """The caller maps one repository secret without adding an Environment gate."""
+    """The caller maps one repository secret; the job joins an Environment only when the caller names one.
+
+    A job that calls a reusable workflow cannot set `environment` itself, so the
+    reusable takes `environment-name` as an optional input. Its empty default
+    leaves this secret's callers without an Environment gate, as before.
+    """
 
     workflow = _workflow()
     secrets = workflow["on"]["workflow_call"]["secrets"]
@@ -80,7 +97,8 @@ def test_hermes_runtime_secret_is_caller_mapped_and_optional() -> None:
     apply = _apply_step()
 
     assert secrets["hermes-runtime-secrets-b64"]["required"] in {False, "false"}
-    assert "environment" not in deploy
+    assert deploy["environment"] == "${{ inputs.environment-name }}"
+    assert workflow["on"]["workflow_call"]["inputs"]["environment-name"]["default"] == ""
     expected_secret = "${{ secrets.hermes-runtime-secrets-b64 }}"
     assert validation["env"]["HERMES_RUNTIME_SECRETS_B64"] == expected_secret
     assert apply["env"]["HERMES_RUNTIME_SECRETS_B64"] == expected_secret
@@ -637,7 +655,7 @@ def test_validation_rejects_malformed_protected_diagnostic_receipt_prefix_before
 
     result = _run_validation(
         tmp_path,
-        diagnostic_receipt_prefix="TC_HERMES_STAGE_DIAGNOSTIC=anything-goes-",
+        diagnostic_receipt_prefix="TC_HERMES_STAGE_DIAGNOSTIC=anything-goes-",  # pragma: allowlist secret
     )
 
     assert result.returncode != 0
@@ -649,7 +667,7 @@ def test_fake_azure_conflict_then_warning_keeps_json_and_token_private(
 ) -> None:
     """Retries succeed without argv, diagnostic, log, or output token exposure."""
 
-    token = "test-ghcr-token-value"
+    token = "test-ghcr-token-value"  # pragma: allowlist secret
     result = _run_apply(tmp_path, fake_apply_tools, token=token)
     _, state_dir = fake_apply_tools
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -687,7 +705,8 @@ def test_fake_azure_runtime_secret_alone_uses_managed_transport_without_exposure
 ) -> None:
     """The runtime bundle opts in without requiring a GHCR token."""
 
-    secret = "dGVzdC1ydW50aW1lLXNlY3JldA=="
+    # pragma: allowlist nextline secret
+    secret = "dGVzdC1ydW50aW1lLXNlY3JldA=="  # gitleaks:allow (base64 of a test value)
     result = _run_apply(
         tmp_path,
         fake_apply_tools,
@@ -716,7 +735,7 @@ def test_fake_azure_surfaces_only_a_validated_protected_diagnostic(
 ) -> None:
     """The explicit diagnostic is retained while the secret-bearing output is not."""
 
-    token = "test-ghcr-diagnostic-token"
+    token = "test-ghcr-diagnostic-token"  # pragma: allowlist secret
     result = _run_apply(
         tmp_path,
         fake_apply_tools,
@@ -725,7 +744,7 @@ def test_fake_azure_surfaces_only_a_validated_protected_diagnostic(
     )
 
     assert result.returncode == 0, result.stderr
-    assert "TC_HERMES_STAGE_DIAGNOSTIC=stage-input-invalid" in result.stdout
+    assert "TC_HERMES_STAGE_DIAGNOSTIC=stage-input-invalid" in result.stdout  # pragma: allowlist secret
     assert token not in result.stdout
     assert token not in result.stderr
 
@@ -739,7 +758,7 @@ def test_managed_remote_wrapper_discards_apply_output_without_a_diagnostic_opt_i
     result = _run_apply(
         tmp_path,
         fake_apply_tools,
-        token="test-ghcr-no-diagnostic-token",
+        token="test-ghcr-no-diagnostic-token",  # pragma: allowlist secret
         apply_script=f"printf '%s\\n' '{raw_output}'",
     )
     _, state_dir = fake_apply_tools
@@ -768,8 +787,8 @@ def test_fake_azure_surfaces_only_a_bounded_urlsafe_protected_receipt(
 ) -> None:
     """A compact receipt survives managed transport; token-bearing output does not."""
 
-    token = "test-ghcr-receipt-token"
-    receipt_prefix = "TC_HERMES_STAGE_DIAGNOSTIC=hermes-session-receipt-b64-"
+    token = "test-ghcr-receipt-token"  # pragma: allowlist secret
+    receipt_prefix = "TC_HERMES_STAGE_DIAGNOSTIC=hermes-session-receipt-b64-"  # pragma: allowlist secret
     receipt = "eyJzY2hlbWEiOiJoZXJtZXMtdGVzdC92MSJ9"
     result = _run_apply(
         tmp_path,
@@ -790,12 +809,12 @@ def test_fake_azure_rejects_an_oversized_protected_receipt(
 ) -> None:
     """The reusable refuses receipt payloads above the declared 2048-byte cap."""
 
-    receipt_prefix = "TC_HERMES_STAGE_DIAGNOSTIC=hermes-session-receipt-b64-"
+    receipt_prefix = "TC_HERMES_STAGE_DIAGNOSTIC=hermes-session-receipt-b64-"  # pragma: allowlist secret
     oversized_receipt = "a" * 2049
     result = _run_apply(
         tmp_path,
         fake_apply_tools,
-        token="test-ghcr-oversized-receipt-token",
+        token="test-ghcr-oversized-receipt-token",  # pragma: allowlist secret
         diagnostic_receipt_prefix=receipt_prefix,
         diagnostic_receipt=oversized_receipt,
     )
@@ -809,7 +828,7 @@ def test_failed_managed_apply_surfaces_validated_diagnostic_before_red_gate(
 ) -> None:
     """A protected remote failure is actionable without exposing arbitrary output."""
 
-    token = "test-ghcr-failed-diagnostic-token"
+    token = "test-ghcr-failed-diagnostic-token"  # pragma: allowlist secret
     result = _run_apply(
         tmp_path,
         fake_apply_tools,
@@ -819,7 +838,7 @@ def test_failed_managed_apply_surfaces_validated_diagnostic_before_red_gate(
     )
 
     assert result.returncode != 0
-    assert "TC_HERMES_STAGE_DIAGNOSTIC=stage-input-invalid" in result.stdout
+    assert "TC_HERMES_STAGE_DIAGNOSTIC=stage-input-invalid" in result.stdout  # pragma: allowlist secret
     assert "classified remote exit 20" in result.stderr
     assert "result-" not in result.stdout
     assert "result-" not in result.stderr
@@ -830,8 +849,9 @@ def test_failed_managed_apply_surfaces_validated_diagnostic_before_red_gate(
 def test_fake_azure_combines_both_protected_values_and_redacts_cleanup_output(
     tmp_path: Path, fake_apply_tools: tuple[Path, Path]
 ) -> None:
-    token = "test-ghcr-combined-token"
-    runtime_secret = "cnVudGltZS1jb21iaW5lZC1zZWNyZXQ="
+    token = "test-ghcr-combined-token"  # pragma: allowlist secret
+    # pragma: allowlist nextline secret
+    runtime_secret = "cnVudGltZS1jb21iaW5lZC1zZWNyZXQ="  # gitleaks:allow (base64 of a test value)
 
     result = _run_apply(
         tmp_path,
@@ -866,8 +886,11 @@ def test_truncated_secret_fragments_never_reach_logs_or_apply_output(
 ) -> None:
     """The last 4 KiB may start inside either secret, so managed output is suppressed."""
 
-    token = "token-prefix-unique-secret-suffix"
-    runtime_secret = "cnVudGltZS1wcmVmaXgtdW5pcXVlLXNlY3JldC1zdWZmaXg="
+    token = "token-prefix-unique-secret-suffix"  # pragma: allowlist secret
+    runtime_secret = (
+        # pragma: allowlist nextline secret
+        "cnVudGltZS1wcmVmaXgtdW5pcXVlLXNlY3JldC1zdWZmaXg="  # gitleaks:allow (base64 of a test value)
+    )
     result = _run_apply(
         tmp_path,
         fake_apply_tools,
@@ -995,33 +1018,6 @@ def test_forbidden_policy_skips_snapshot_action_and_runs_only_a_notice() -> None
     assert "snapshot" not in notice["run"].lower()
 
 
-def test_container_only_path_is_tied_to_canonical_governance() -> None:
-    workflow = _workflow()
-    snapshot_input = workflow["on"]["workflow_call"]["inputs"]["snapshot-policy"]
-    standard = " ".join(SNAPSHOT_STANDARD.read_text(encoding="utf-8").split())
-    development = " ".join(DEVELOPMENT_WORKFLOW.read_text(encoding="utf-8").split())
-    readme = " ".join(README.read_text(encoding="utf-8").split())
-
-    assert "container-only deployment path" in snapshot_input["description"].lower()
-    for required in (
-        "Container-only deployment path",
-        "`snapshot-policy=forbidden`",
-        "protected path and configuration backup",
-        "immutable predecessor container image",
-        "`container-rollback-receipt-digest`",
-        "archive and manifest digests",
-        "workflow skips the snapshot action and Azure storage operations",
-        "Host disaster recovery runs as a separate manual operation",
-        "Admission accepts `snapshot-policy=forbidden` with `skip-snapshot=true`",
-        "`snapshot-policy=allowed` with `skip-snapshot=true` provides",
-    ):
-        assert required in standard
-    assert "container-only path" in development.lower()
-    assert "snapshot-before-apply.md" in development
-    assert "container-only deployment path" in readme.lower()
-    assert "snapshot-before-apply.md" in readme
-
-
 @pytest.mark.parametrize("remote_exit", ["missing", "23", "-1", "256", "invalid"])
 def test_fake_azure_no_token_fails_without_exact_zero_remote_exit(
     tmp_path: Path,
@@ -1133,3 +1129,30 @@ def test_two_reusable_invocations_in_one_run_use_different_command_names(
     first_command = yaml.safe_load(Path(manifests[0]).read_text(encoding="utf-8"))["command"]
     second_command = yaml.safe_load(Path(manifests[1]).read_text(encoding="utf-8"))["command"]
     assert first_command != second_command
+
+
+def test_container_only_path_is_tied_to_canonical_governance() -> None:
+    workflow = _workflow()
+    snapshot_input = workflow["on"]["workflow_call"]["inputs"]["snapshot-policy"]
+    standard = " ".join(SNAPSHOT_STANDARD.read_text(encoding="utf-8").split())
+    development = " ".join(DEVELOPMENT_WORKFLOW.read_text(encoding="utf-8").split())
+    readme = " ".join(README.read_text(encoding="utf-8").split())
+
+    assert "container-only deployment path" in snapshot_input["description"].lower()
+    for required in (
+        "Container-only deployment path",
+        "`snapshot-policy=forbidden`",
+        "protected path and configuration backup",
+        "immutable predecessor container image",
+        "`container-rollback-receipt-digest`",
+        "archive and manifest digests",
+        "workflow skips the snapshot action and Azure storage operations",
+        "Host disaster recovery runs as a separate manual operation",
+        "Admission accepts `snapshot-policy=forbidden` with `skip-snapshot=true`",
+        "`snapshot-policy=allowed` with `skip-snapshot=true` provides",
+    ):
+        assert required in standard
+    assert "container-only path" in development.lower()
+    assert "snapshot-before-apply.md" in development
+    assert "container-only deployment path" in readme.lower()
+    assert "snapshot-before-apply.md" in readme

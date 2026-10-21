@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import Any
 
 try:  # Executable both as ``python assurance/...`` and as a package module.
-    from .github_evidence import archive_member, download
+    from .github_evidence import archive_member, download, executed_workflow
 except ImportError:  # pragma: no cover - exercised by the workflow entrypoint.
-    from github_evidence import archive_member, download
+    from github_evidence import archive_member, download, executed_workflow
 
 
 SCHEMA = "tc.sdlc/live-scanner-qualification/v1"
@@ -274,10 +274,19 @@ def _tool_identity(name: str) -> tuple[Path, str]:
     return path, digest(path.read_bytes())
 
 
+def _checkov_python(executable: Path) -> Path:
+    """The interpreter Checkov runs on: beside the executable (a venv), or in the uv tool environment."""
+    suffix = "python.exe" if os.name == "nt" else "python"
+    beside = executable.parent / suffix
+    tool_bin = "Scripts" if os.name == "nt" else "bin"
+    in_tool = executable.parent / "tools" / "checkov" / tool_bin / suffix
+    return beside if beside.exists() or not in_tool.exists() else in_tool
+
+
 def _rule_database(name: str, report: str, executable: Path) -> tuple[str, str, dict[str, Any]]:
     if name == "checkov":
         resolved_executable = executable.resolve(strict=True)
-        python = resolved_executable.parent / ("python.exe" if os.name == "nt" else "python")
+        python = _checkov_python(resolved_executable)
         module = _run(
             [str(python), "-c", "import checkov; print(checkov.__path__[0])"],
             Path.cwd(),
@@ -320,6 +329,10 @@ def scanner_outcome(returncode: int, report: str, finding: str | None) -> str:
         parsed = json.loads(report)
     except json.JSONDecodeError as error:
         raise ReceiptError("scanner did not produce JSON") from error
+    if returncode not in (0, 1):
+        raise ReceiptError(
+            f"scanner exited {returncode}, an operational error, not a clean or finding result"
+        )
     contains_expected = bool(finding and _contains(parsed, finding))
     actual = "clean" if returncode == 0 and not contains_expected else "finding"
     if actual == "finding" and not contains_expected:
@@ -435,7 +448,31 @@ def qualify(root: Path, destination: Path, candidate: str) -> None:
     )
 
 
-def admit(root: Path, directory: Path, candidate: str) -> None:
+def validate_run(run, repository, run_id, attempt, validator):
+    """The run is a successful attempt of the qualification workflow at the approved revision.
+
+    The workflow checks out its own trusted validator (``github.workflow_sha``), so a run of the
+    same path from any other revision could carry a validator that mints self-consistent receipts
+    for an arbitrary candidate. ``validator`` is the revision the release operator approved.
+    """
+    if (
+        run.get("id") != int(run_id)
+        or run.get("run_attempt") != attempt
+        or run.get("status") != "completed"
+        or run.get("conclusion") != "success"
+        or run.get("repository", {}).get("full_name") != repository
+    ):
+        raise ReceiptError("wrong or unsuccessful hosted scanner run")
+    if not executed_workflow(run, repository, WORKFLOW_PATH, validator):
+        raise ReceiptError("hosted scanner run did not execute the approved validator revision")
+
+
+def admit(
+    root: Path,
+    directory: Path,
+    candidate: str,
+    validator: str,
+) -> None:
     """Reject local/protocol artifacts before release code consults GitHub provenance."""
     receipts = {}
     for case_id in CASES:
@@ -464,16 +501,7 @@ def admit(root: Path, directory: Path, candidate: str) -> None:
     )
     if api.returncode != 0:
         raise ReceiptError("cannot verify hosted scanner run provenance")
-    run = json.loads(api.stdout)
-    if (
-        run.get("id") != int(run_id)
-        or run.get("run_attempt") != attempt
-        or run.get("status") != "completed"
-        or run.get("conclusion") != "success"
-        or run.get("path") != WORKFLOW_PATH
-        or run.get("repository", {}).get("full_name") != repository
-    ):
-        raise ReceiptError("wrong or unsuccessful hosted scanner run")
+    validate_run(json.loads(api.stdout), repository, run_id, attempt, validator)
     artifact_pages = json.loads(
         _run(
             [
@@ -519,12 +547,18 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--candidate", required=True)
+    parser.add_argument(
+        "--validator",
+        help="admit: the 40-hex validator revision the release operator approved",
+    )
     args = parser.parse_args()
+    if args.operation == "admit" and not args.validator:
+        parser.error("admit requires --validator")
     try:
         if args.operation == "qualify":
             qualify(args.root.resolve(), args.output, args.candidate)
         else:
-            admit(args.root.resolve(), args.output, args.candidate)
+            admit(args.root.resolve(), args.output, args.candidate, args.validator)
     except (ReceiptError, OSError, json.JSONDecodeError, TypeError) as error:
         print(f"assurance: {error}", file=sys.stderr)
         return 1

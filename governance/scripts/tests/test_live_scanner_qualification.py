@@ -22,6 +22,7 @@ from assurance.live_scanners import (
     TOOLS,
     WORKFLOW_PATH,
     ReceiptError,
+    _checkov_python,
     digest,
     scanner_outcome,
     validate_receipt,
@@ -93,6 +94,25 @@ def receipt(root: Path) -> dict[str, object]:
             ],
         },
     }
+
+
+@pytest.mark.parametrize(
+    ("present", "expected"),
+    [
+        (("python",), "python"),
+        (("tools/checkov/bin/python",), "tools/checkov/bin/python"),
+        (("python", "tools/checkov/bin/python"), "python"),
+        ((), "python"),
+    ],
+)
+def test_checkov_runs_on_the_interpreter_of_its_venv_or_its_uv_tool_environment(tmp_path, present, expected):
+    if os.name == "nt":
+        pytest.skip("the layouts below are the POSIX ones")
+    for relative in present:
+        (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relative).write_text("")
+
+    assert _checkov_python(tmp_path / "checkov") == tmp_path / expected
 
 
 def test_live_scanner_receipt_binds_native_fixture_tool_and_rule_database(tmp_path):
@@ -179,7 +199,7 @@ def test_receipt_rejects_an_unlisted_tc_fitness_ledger_even_with_matching_hashes
     value["evidence"]["outputs"].append(
         {"id": "fitness-ledger", "path": ledger_path, "digest": ledger_digest}
     )
-    with pytest.raises(ReceiptError, match="named scanner outputs|ledger"):
+    with pytest.raises(ReceiptError, match=r"named scanner outputs|ledger"):
         validate_receipt(value, tmp_path, candidate="a" * 40)
 
 
@@ -238,3 +258,16 @@ def test_live_scanner_writer_refuses_to_mint_a_local_success(tmp_path):
     )
     assert result.returncode == 1
     assert "requires GitHub Actions" in result.stderr
+
+
+@pytest.mark.parametrize("returncode", [2, 127, -9])
+def test_an_operational_scanner_exit_with_partial_json_is_not_qualification(returncode):
+    partial = json.dumps({"results": [{"check_id": "CKV_AWS_20"}]})
+    with pytest.raises(ReceiptError, match=r"operational error"):
+        scanner_outcome(returncode, partial, "CKV_AWS_20")
+
+
+def test_clean_and_finding_exits_still_classify():
+    report = json.dumps({"results": [{"check_id": "CKV_AWS_20"}]})
+    assert scanner_outcome(0, "{}", "CKV_AWS_20") == "clean"
+    assert scanner_outcome(1, report, "CKV_AWS_20") == "finding"

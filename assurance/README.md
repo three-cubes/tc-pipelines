@@ -1,23 +1,8 @@
-# Surface and consumer assurance
+# Surface assurance
 
-Run `make assurance`. It validates the exact public inventory and executes the
-Python, mixed Python/pnpm and freshly bootstrapped consumers. The command prints
-the retained evidence directory. Tools required: Python 3.12+, uv, Git, Make,
-Bash, Node and pnpm. Dependency installation can use the network; the lab has no
-hosted execution, production credentials or remote mutation.
-
-To test a candidate engine wheel:
-
-```sh
-make assurance ASSURANCE_ARGS='--fitness-wheel /absolute/candidate.whl --output /absolute/new-evidence-directory'
-```
-
-Without a candidate, consumers resolve the explicitly pinned compatibility
-engine from their fixture declaration and install with `uv sync --locked`.
-Each attempt retains the resolved `uv.lock`, installation/preparation/evaluation
-logs, test results and coverage. Existing evidence directories are never reused.
-The report declares `evidence_mode: compatibility-terminal`; it is **not** a
-`tc.sdlc/assurance/v1` admission receipt or proof of GitHub adapter execution.
+Run `python assurance/run.py inventory`. It validates the exact public inventory. The hosted lane
+(`assurance/hosted.py`) selects, plans and collects evidence for changed adapters. The lab has no production
+credentials or remote mutation.
 
 ## Published inventory
 
@@ -34,19 +19,23 @@ deployment. Empty evidence reference lists represent evidence still to be
 implemented, never an exemption or a passing execution. Existing references
 describe tests; their presence alone does not establish their execution level.
 The inventory command produces structural inventory validation only. The lab
-produces hermetic **consumer** evidence, not hermetic proof for all 54 adapters.
+produces hermetic **consumer** evidence, not hermetic proof for all 63 adapters.
 Admission must reject absent required adapter evidence.
 
 ## Hosted adapters and receipts
 
-`surfaces.yaml` also classifies execution boundaries. Twelve adapters are safe
-to exercise without production credentials: six reusable workflows and six
-composites. Twenty-four protected adapters require a consumer-authorised
-non-mutating status receipt at release admission. Eighteen callable example
-wrappers are structural documentation; two reusable assurance executors are
-internal harnesses. All remain in the exact structural inventory, so their
-call contracts cannot silently disappear. These classifications describe the
-case boundary, not a claim that it has executed.
+`surfaces.yaml` also classifies execution boundaries. The counts below are held to the inventory by a contract test.
+
+| Boundary | Surfaces | Meaning |
+|---|---|---|
+| `safe-hosted` | 13 | Safe to exercise without production credentials. |
+| `protected-live` | 26 | Needs a consumer-authorised non-mutating status receipt at release admission. |
+| `structural-example` | 21 | Callable example wrappers: structural documentation. |
+| `assurance-harness` | 3 | Internal reusable assurance executors. |
+| Total | 63 | |
+
+All remain in the exact structural inventory, so their call contracts cannot silently disappear. These
+classifications describe the case boundary, not a claim that it has executed.
 
 PR and merge-group CI call `hosted-assurance.yml`, which selects from exact Git
 base/head commits and invokes each changed safe adapter through real
@@ -79,6 +68,12 @@ qualify the workflow commit, not a new fitness wheel or a not-yet-existing SDLC
 package/image. Their task input digest binds the entire candidate Git tree and
 resolved case contract. Negative receipts need the exact declared finding in
 retained non-log evidence; a matching exit code is insufficient.
+
+Admission accepts a run only if it is a direct `workflow_dispatch` of `hosted-assurance.yml` at the tested
+commit. A run of another workflow that merely names `hosted-assurance.yml` in `referenced_workflows` is refused:
+the entry appears whether or not the called job ran, and the run's artifacts carry no producer identity, so a
+caller could upload imitation evidence beside a skipped call. A successful run of any other workflow, or of this
+one at another commit, is refused. Calls are accepted again once the producing workflows attest their artifacts.
 
 Hosted collection reads the real GitHub run-attempt jobs and complete job logs,
 requires every named case job and assertion step, and rejects skipped, missing
@@ -115,14 +110,18 @@ chosen by or copied from the runtime payload. It is keyed by protected case ID;
 `selection.json` enumerates all required policy fields. The operator supplies the
 canonical contract path, environment/target, expected image/host/user/deployment/
 configuration/run/attempt/checks/freshness, plus authorised producer repository,
-workflow path, actor ID, artifact name and independently approved artifact digest.
+workflow path, actor ID, the approved producer commit (`producer_commit`: the producer repository's
+commit, which is neither pipeline identity) and the artifact name and independently approved artifact
+digest.
 No endpoint or credential is inferred from these inputs.
 
 The released `tc-fitness-runtime-contract verify-evidence` executable at immutable
 v0.16.1 commit `8d39d7e2f5b5d9daae778ec8195e344b0e7cc396` validates the canonical
 runtime receipt; the compatibility-engine lock remains unchanged. Producer
 provenance must match the declared completed, successful `workflow_dispatch`
-run/attempt and actor. Its actual GitHub artifact must contain byte-identical
+run/attempt, actor and approved producer commit; the pipeline candidate is bound by the
+runtime receipt's expected source SHA, not by the producer run. The run's artifacts are read
+across every page, keeping those created inside the approved attempt's job window (a re-run leaves earlier attempts' artifacts beside it). Its actual GitHub artifact must contain byte-identical
 `runtime-evidence.json`, `status.json` (canonical `{valid: true, findings: []}`),
 and `execution.log`. Canonical deployment IDs retain their existing semantics;
 they are not assumed to be GitHub deployment object IDs. Policy digest and both
@@ -161,6 +160,10 @@ rejects a missing receipt, stale attempt, wrong tool pin, fixture replacement,
 or any tc-fitness `protocol-unit` ledger. A generic local adapter receipt cannot
 be substituted for this schema.
 
+`live_scanners.py admit` also takes `--validator`, the validator revision the release operator
+approved. The workflow checks out its own
+validator at `github.workflow_sha`, so admission refuses a run of the same file from any other revision.
+
 The workflow is a GitHub-hosted admission boundary and is not included in normal
 PR fan-in. The same repo-owned provision command also runs on macOS and Linux:
 
@@ -192,41 +195,8 @@ receipt; a local result cannot be relabelled or used as that receipt.
 
 ## Disposable consumers
 
-`consumers.yaml` is the command and expected-result manifest. It runs the real
-bootstrap renderer, compares all 16 rendered files (content and executable
-modes) with `fixtures/generated/rendered`, and only then executes that output.
-The render context fixes the consumer identity and released pins; the current
-checkout supplies the actual renderer and skeleton. The bootstrap command's
-`--render-only` mode performs no credential/API lookup and deterministically
-selects the skeleton's shipped empty secret configuration. No scanner result or
-executable is replaced.
-
-Consumers share the minimal Python product fixture. The mixed consumer adds an
-actual pnpm workspace and Node-generated output. The generated consumer merges
-its product declaration with the entire unmodified rendered fitness fragment,
-including all five CORE rules and the secret scan. All consumers run the
-rendered `make prepare`; mixed also runs its product generator. The
-second preparation must change no source, lock or generated file. The candidate
-wheel, when supplied, is installed through an explicit uv source override.
-
-Affected and complete evaluation invoke the same declared `tc-fitness run`
-entrypoint; affected evaluation adds `--changed-files-from`. The small fixture's
-entire source set is affected. Each compliant/sabotage variant uses identical
-commands and installed inputs. Sabotage changes arithmetic, corrupts the pnpm
-generated value, or removes a required generated harness entrypoint.
-
-The runner requires all declared terminal step and CORE results, rejects skips
-and unrelated failures, and checks fresh non-empty JUnit/coverage and mixed
-workspace TAP output. Every evaluation starts without the preceding evaluation's
-output directory. Missing outputs and wrong sabotage diagnostics fail the lab.
-
-`make prepare` refreshes the generated reference after changing the skeleton.
-To inspect a render without updating the reference:
-
-```sh
-uv run python assurance/run.py render --output /absolute/new-render-directory
-```
-
-Do not hand-edit the rendered fixture. Review the generated diff before commit.
-The existing compatibility commands will move to `bootstrap`, `prepare`,
-`check` and `check-all` when tc-sdlc lands; this fixture suite remains the same.
+The disposable-consumer lab (`consumers.yaml`, the python, mixed, generated and sdlc fixtures, and the
+`run.py` lab, render and prepare commands) is not carried. It exercised the v3 bootstrap renderer and
+`sdlc.yaml`. tc-sdlc v4 adopts a consumer with `nx g @three-cubes/tc-sdlc:init`, and its end-to-end
+fixtures (`consumers.e2e.test.ts`) run those consumers; see the migration ledger entry
+`consumer-lab-superseded`.

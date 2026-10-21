@@ -304,7 +304,7 @@ def test_wiring_render_resolves_every_token(tmp_path: Path) -> None:
         "Makefile",
         "scripts/checks/_core_catalogue.py",
         ".github/workflows/ci.yml",
-        ".github/workflows/auto-merge.yml",
+        ".github/workflows/preparation-writeback.yml",
     ):
         text = (out_dir / rel).read_text(encoding="utf-8")
         leftovers = TEMPLATE_TOKEN_RE.findall(text)
@@ -360,6 +360,24 @@ def test_wiring_ci_emits_every_required_ruleset_context(tmp_path: Path) -> None:
         )
 
 
+def _strict_policy(ruleset: Path) -> bool:
+    data = json.loads(ruleset.read_text(encoding="utf-8"))
+    rule = next(r for r in data["rules"] if r.get("type") == "required_status_checks")
+    return rule["parameters"]["strict_required_status_checks_policy"]
+
+
+def test_rendered_ruleset_is_strict_without_a_merge_queue_and_non_strict_with_one(tmp_path: Path) -> None:
+    """A queue-less repository has no queue to test the merge result, so it keeps the up-to-date base requirement."""
+
+    queue_less = tmp_path / "queue-less"
+    assert _render(queue_less).returncode == 0
+    assert _strict_policy(queue_less / ".github/rulesets/main-product.json") is True
+
+    queue = tmp_path / "queue"
+    assert _render(queue, "--merge-queue").returncode == 0
+    assert _strict_policy(queue / ".github/rulesets/main-product.json") is False
+
+
 def test_wiring_renders_the_validation_trigger_for_each_merge_profile(
     tmp_path: Path,
 ) -> None:
@@ -395,17 +413,21 @@ def test_queue_less_wiring_promotes_pr_evidence_instead_of_rerunning_the_gate(
     assert {"actions", "checks", "contents", "pull-requests"} <= set(workflow["permissions"])
 
 
-def test_wiring_auto_merge_listens_to_the_rendered_quality_workflow(
+def test_wiring_preparation_writeback_listens_to_the_rendered_quality_workflow_and_arms_no_merge(
     tmp_path: Path,
 ) -> None:
-    """A workflow_run listener must track the workflow name, not its old label."""
+    """A workflow_run listener must track the workflow name, and the writer arms no merge (native auto-merge does)."""
     out_dir = tmp_path / "wire"
     assert _render(out_dir).returncode == 0
 
     ci = yaml.safe_load((out_dir / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
-    auto_merge = yaml.safe_load((out_dir / ".github/workflows/auto-merge.yml").read_text(encoding="utf-8"))
-    triggers = auto_merge.get(True, auto_merge.get("on"))
+    writer = yaml.safe_load(
+        (out_dir / ".github/workflows/preparation-writeback.yml").read_text(encoding="utf-8")
+    )
+    triggers = writer.get(True, writer.get("on"))
     assert triggers["workflow_run"]["workflows"] == [ci["name"]]
+    assert set(writer["jobs"]) == {"preparation-writeback"}
+    assert not (out_dir / ".github/workflows/auto-merge.yml").exists()
 
 
 def test_verify_passes_on_a_clean_render(tmp_path: Path) -> None:

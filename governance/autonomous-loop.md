@@ -1,8 +1,8 @@
 # The autonomous delivery loop — canonical state-machine spec (SP-C-1)
 
 > Canonical, living spec for the **failure-driven next-action loop** (initiative pillar **SP-C**).
-> The **decision record** is [`decisions/ADR-LOOP-STATE-MACHINE.md`](decisions/ADR-LOOP-STATE-MACHINE.md);
-> the **machine-checkable gate** is [`loop/`](loop/) (`loop_state_machine.py` + the harness). This
+> The **decision record** is [`decisions/ADR-LOOP-STATE-MACHINE.md`](decisions/ADR-0004-autonomous-loop-state-machine.md);
+> the **machine-checkable gate** is [`loop/`](../../orchestration/loops/) (`loop_state_machine.py` + the harness). This
 > spec, that ADR, and that harness are one unit — they may not drift. Adopted 2026-07-02 (PLA-309).
 >
 > **SP-C is gated behind this validation spike:** the loop's best practice is not yet externally
@@ -75,12 +75,12 @@ delegation boundary (SP-C-5). Consequently:
 
 ## The lights-out gate
 
-**No auto-dispatch flag may flip to enabled until the guardrail harness in [`loop/`](loop/) is
+**No auto-dispatch flag may flip to enabled until the guardrail harness in [`loop/`](../../orchestration/loops/) is
 green.** The harness *is* the gate — it simulates the loop and asserts every guardrail above actually
 fires. `arm_auto_dispatch()` refuses to arm unless handed proof the guardrails validated.
 
 ```sh
-python3 -m unittest discover -s governance/loop/tests -v
+python3 -m unittest discover -s orchestration/loops/tests -v
 ```
 
 **Research-caveat closed:** each downstream SP-C issue (SP-C-2…SP-C-7 / PLA-310…PLA-315) MUST cite,
@@ -101,7 +101,7 @@ ships in that repo, cross-linked from here.
 
 ## References
 
-- [`decisions/ADR-LOOP-STATE-MACHINE.md`](decisions/ADR-LOOP-STATE-MACHINE.md) · [`loop/`](loop/) ·
+- [`decisions/ADR-LOOP-STATE-MACHINE.md`](decisions/ADR-0004-autonomous-loop-state-machine.md) · [`loop/`](../../orchestration/loops/) ·
   [`STANDARDS.md`](STANDARDS.md) §4 · [`AUTONOMOUS-DELIVERY-STANDARD.md`](AUTONOMOUS-DELIVERY-STANDARD.md).
 - Linear: Increment 3 (`d4b8c682-a2cf-40e6-be44-86960d1505cd`); PLA-309 (this); PLA-310–315
   (downstream SP-C); PLA-312 (loop governor); PLA-241 (rate-limit backoff / idempotency); SGO-123

@@ -13,7 +13,7 @@
   `actor=app` / delegate-not-assignee), ADR-038 (harvest-then-decay).
 - **Canonical spec (this decision's living detail):**
   [`governance/autonomous-loop.md`](../autonomous-loop.md) — the state-machine + 5-guardrail spec
-  table. **Harness (this ADR's gate):** [`governance/loop/`](../loop/) — `loop_state_machine.py` +
+  table. **Harness (this ADR's gate):** [`orchestration/loops/`](../../../orchestration/loops/) — `loop_state_machine.py` +
   `tests/test_loop_guardrails.py`. Spec, ADR, and harness are one unit and may not drift.
 
 ---
@@ -142,15 +142,15 @@ boundary (SP-C-5); the "no work without a linked work item" invariant is *also* 
 ## The lights-out gate (non-negotiable)
 
 > **No auto-dispatch flag may flip to enabled until the guardrail harness in
-> [`governance/loop/`](../loop/) is green.** The harness *is* the gate: it simulates the loop and
+> [`orchestration/loops/`](../../../orchestration/loops/) is green.** The harness *is* the gate: it simulates the loop and
 > asserts every stop-condition above actually fires. `arm_auto_dispatch()` refuses to arm unless it
 > is handed proof the guardrails validated (`guardrails_validated=True`), which is only true when
-> `python3 -m unittest discover -s governance/loop/tests` passes.
+> `python3 -m unittest discover -s orchestration/loops/tests` passes.
 
 Run it:
 
 ```sh
-python3 -m unittest discover -s governance/loop/tests -v
+python3 -m unittest discover -s orchestration/loops/tests -v
 ```
 
 **Research-caveat closed.** SP-C is gated behind this validation spike. Each downstream SP-C issue

@@ -1,8 +1,8 @@
-# governance/loop/ — the autonomous-delivery loop: guardrail harness (SP-C-1) + dispatcher (SP-C-3)
+# orchestration/loops/ — the autonomous-delivery loop: guardrail harness (SP-C-1) + dispatcher (SP-C-3)
 
 The machine-checkable half of the canonical spec
-[`../autonomous-loop.md`](../autonomous-loop.md) and its decision record
-[`../decisions/ADR-LOOP-STATE-MACHINE.md`](../decisions/ADR-LOOP-STATE-MACHINE.md).
+[`assurance/governance/autonomous-loop.md`](../../assurance/governance/autonomous-loop.md) and its decision record
+[`ADR-0004-autonomous-loop-state-machine.md`](../../assurance/governance/decisions/ADR-0004-autonomous-loop-state-machine.md).
 
 - [`loop_state_machine.py`](loop_state_machine.py) — the explicit loop state machine
   (`ready → dispatched → in_review → verifying → done | needs_fix → escalated`) as a
@@ -96,7 +96,7 @@ The machine-checkable half of the canonical spec
 ## Dispatcher CLI (`--dry-run` — the bootstrap-phase view)
 
 Print the READY queue + what WOULD be dispatched, with **zero side effects** — no agents spawned, no
-Linear writes. Run from `governance/loop/`:
+Linear writes. Run from `orchestration/loops/`:
 
 ```sh
 # against a Linear-adapter snapshot (a list, or {"issues": [...]})
@@ -122,8 +122,11 @@ per decision **D3** these files also take **n+1 human review** before merge.
 ## Run
 
 ```sh
-python3 -m unittest discover -s governance/loop/tests -v
+uv run --frozen pytest orchestration/loops/tests            # every loop test, with its tier marker
+python3 -m unittest discover -s orchestration/loops/tests -p test_loop_guardrails.py -v
 ```
 
-Stdlib only — no dependencies, no network (the transport + judgment seams are injected fakes),
-matching the determinism the loop itself enforces.
+The loop modules and the guardrail harness are stdlib only: no dependencies, no network (the
+transport + judgment seams are injected fakes), matching the determinism the loop itself enforces.
+The harness takes its tier marker through `tests/tier_marks.py`, so the lights-out gate still runs
+it under bare `unittest` on a runner without pytest. The other test modules import pytest.

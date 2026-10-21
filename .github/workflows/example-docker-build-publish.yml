@@ -12,10 +12,6 @@ name: example — docker-build-publish (reusable self-check)
 # authorization + real registry secrets wired, which this self-check deliberately
 # does not carry. The run-for-real gate MUST stay in place.
 #
-# De-serialised layout (parallel-dev friction fix): each reusable owns its OWN
-# `example-<reusable>.yml`; `example-callers.yml` is a thin dispatcher that fans
-# out to every file here — see its header for the "add your file" convention.
-#
 # NEVER runs the underlying work by default: `workflow_call` only and every job is
 # gated on `run-for-real` (default false); the call graph is validated statically
 # regardless of the gate, the bodies never execute under the default dispatch.
@@ -28,9 +24,8 @@ on:
       run-for-real:
         description: >-
           Leave false (default) for the static call-graph self-check — every job
-          stays gated off and only the input/secret SHAPES are validated. The
-          dispatcher (example-callers.yml) passes this through; flipping it true
-          would attempt a real build/push and needs explicit HITL authorization
+          stays gated off and only the input/secret SHAPES are validated. Flipping it
+          true would attempt a real build/push and needs explicit HITL authorization
           + real secrets — this self-check is not the place for that.
         type: boolean
         default: false
@@ -55,7 +50,7 @@ jobs:
       push: true
     secrets:
       registry-username: dummy-actor
-      registry-password: dummy-token-shape-check-only
+      registry-password: dummy-token-shape-check-only  # pragma: allowlist secret (a placeholder for the call shape)
 
   docker-taz:
     if: ${{ inputs.run-for-real }}

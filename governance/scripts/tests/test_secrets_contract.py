@@ -36,7 +36,11 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+WORKFLOW_DIR = PLATFORM_ROOT / ".github" / "workflows"
 ACTION_DIR = REPO_ROOT / "actions"
 
 EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
@@ -74,11 +78,6 @@ IMPLICIT_SECRETS = {
 # disappearing into a `with:` block.
 LANE_SECRET_EXEMPT: dict[tuple[str, str, str], str] = {}
 
-# Every job in an `example-*` workflow is an independent illustrative call
-# variant rather than one lane of a fan-out, so a secret passed by one variant
-# and omitted by the next is the file's purpose, not drift.
-ILLUSTRATIVE_PREFIX = "example-"
-
 
 def _load(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -111,7 +110,7 @@ def _scalars(node: object, path: tuple[str, ...] = ()) -> list[tuple[str, str]]:
     return [
         hit
         for key, value in items  # type: ignore[attr-defined]
-        for hit in _scalars(value, path + (str(key),))
+        for hit in _scalars(value, (*path, str(key)))
     ]
 
 
@@ -197,8 +196,6 @@ def _lane_cases() -> list[tuple[str, str, str, str, bool]]:
     """
     cases = []
     for path in sorted(WORKFLOW_DIR.glob("*.yml")):
-        if path.name.startswith(ILLUSTRATIVE_PREFIX):
-            continue
         for target, lanes in sorted(_repeated_targets(_load(path)).items()):
             carried = Counter(name for forwarded in lanes.values() for name in forwarded)
             for secret in sorted(name for name, seen in carried.items() if seen > 1):
@@ -235,21 +232,21 @@ def test_the_scan_found_a_secrets_contract_to_check() -> None:
     sites = sum(len(paths) for refs in REFERENCES.values() for paths in refs.values())
     gate_lanes = {lane for _, target, lane, _, _ in LANE_CASES if "python-gate-body" in target}
     conditions = sum(len(found) for found in CONDITIONS.values())
-    illustrative = [
-        path.name for path in WORKFLOW_DIR.glob("*.yml") if path.name.startswith(ILLUSTRATIVE_PREFIX)
-    ]
 
-    assert len(REUSABLES) >= 25, (
+    # Floors sit near 80% of the population imported from tc-pipelines (19
+    # reusables, 14 declared secrets across 10 of them, 20 references, 3 gate
+    # lanes, 72 conditions, 10 composite actions).
+    assert len(REUSABLES) >= 15, (
         f"only {len(REUSABLES)} reusable workflows discovered — the "
         f"`workflow_call` lookup has drifted, so most of the repo's product is "
         f"no longer being checked."
     )
-    assert len(DECLARED_PAIRS) >= 12 and len(declaring) >= 8, (
+    assert len(DECLARED_PAIRS) >= 11 and len(declaring) >= 8, (
         f"only {len(DECLARED_PAIRS)} declared secrets across {len(declaring)} "
         f"reusables — the `on.workflow_call.secrets` lookup has drifted, so the "
         f"declared-vs-referenced assertions cover almost nothing."
     )
-    assert sites >= 15, (
+    assert sites >= 16, (
         f"only {sites} `${{{{ }}}}` secret references found — the expression "
         f"pattern has drifted, so an undeclared secret would now go unseen."
     )
@@ -258,17 +255,12 @@ def test_the_scan_found_a_secrets_contract_to_check() -> None:
         f"least two lanes to compare, so the lane scan has drifted and a lane "
         f"dropping a secret would no longer be measured against its siblings."
     )
-    assert conditions >= 60, (
+    assert conditions >= 58, (
         f"only {conditions} `if:` conditions found — the condition walk has "
         f"drifted, so a secret read from an unresolvable context would go unseen."
     )
-    assert len(ACTIONS) >= 4, (
+    assert len(ACTIONS) >= 8, (
         f"only {len(ACTIONS)} composite actions found — the `actions/*/action.yml` glob has drifted."
-    )
-    assert illustrative, (
-        f"no workflow starts with {ILLUSTRATIVE_PREFIX!r}, so that exemption "
-        f"now excuses nothing and only obscures the lane scan's scope. "
-        f"fix: drop ILLUSTRATIVE_PREFIX, or point it at the current prefix."
     )
 
 

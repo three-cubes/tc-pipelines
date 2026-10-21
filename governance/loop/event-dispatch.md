@@ -21,7 +21,7 @@ issue, applies the `needs-redispatch` label, and moves the issue to a needs-fix
 (backlog-type) state. That label + state **is** the signal.
 
 It does **not** spawn an agent itself. The signal is consumed by the **backlog
-dispatcher** ([`governance/loop/loop_dispatcher.py`](./loop_dispatcher.py)), whose
+dispatcher** ([`orchestration/loops/loop_dispatcher.py`](./loop_dispatcher.py)), whose
 `CANDIDATE_STATE_TYPE` is `backlog` — it re-picks the labelled, backlog-state
 issue on its next pass and drives the fixing agent through
 [`loop_state_machine.py`](./loop_state_machine.py)'s guardrails. Agent dispatch

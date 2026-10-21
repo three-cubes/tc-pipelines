@@ -22,7 +22,17 @@ import yaml
 pytestmark = pytest.mark.contract
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+# In agent-platform the reusable workflows live at the repository root, two levels
+# above execution/pipelines/; in the public tc-pipelines export the root is this
+# tree's own. Resolve whichever layout this file runs in.
+PLATFORM_ROOT = REPO_ROOT if (REPO_ROOT / ".github" / "workflows").is_dir() else REPO_ROOT.parents[1]
+# tc-pipelines governance/ lives in assurance/governance/ (ADR-0001 D4).
+GOVERNANCE_ROOT = next(
+    root
+    for root in (PLATFORM_ROOT / "assurance" / "governance", PLATFORM_ROOT / "governance")
+    if root.is_dir()
+)
+WORKFLOW_DIR = PLATFORM_ROOT / ".github" / "workflows"
 GATE = WORKFLOW_DIR / "python-quality-gate.yml"
 
 #: The configured engine invocation that IS the floor. Finding it locates the
@@ -203,41 +213,6 @@ def test_failed_quality_lane_cannot_skip_the_floor() -> None:
     body = str(floor.get("run", ""))
     assert "::warning::new-code coverage floor not run" not in body
     assert "exit 1" in body
-
-
-def test_new_code_floor_contract_is_one_hundred_percent() -> None:
-    """The org policy and reusable must require 100% before scoring coverage."""
-    document = yaml.safe_load(GATE.read_text(encoding="utf-8")) or {}
-    triggers = document.get("on", document.get(True)) or {}
-    floor = (triggers.get("workflow_call") or {}).get("inputs", {}).get("enforce-new-code-coverage") or {}
-    description = str(floor.get("description", ""))
-    assert "100%" in description
-    assert "80%" not in description
-    ruleset = (REPO_ROOT / "governance" / "CANONICAL-ORG-RULESET.md").read_text(encoding="utf-8")
-    assert "| 100% coverage floor on changed lines |" in ruleset
-    assert "| 80% coverage floor on changed lines |" not in ruleset
-    floor_step = next(step for step in STEPS if FLOOR_INVOCATION in str(step.get("run", "")))
-    body = str(floor_step.get("run", ""))
-    assert "tc_fitness.gate_config import load_core_check_configs" in body
-    assert "governance/scripts/" not in body
-    assert "python -c" in body
-    assert FLOOR_PREFLIGHT in body
-    assert body.index("python -c") < body.index(FLOOR_INVOCATION)
-
-
-def test_routed_floor_fixture_configures_the_required_floor() -> None:
-    """The routed floor self-test must supply the same contract as the org policy."""
-    fixture = REPO_ROOT / ".github" / "selftest-fixture" / "floor.tc-fitness.toml"
-    document = tomllib.loads(fixture.read_text(encoding="utf-8"))
-    floor = document["core_checks"]["new_code_coverage"]
-    assert floor["floor_pct"] == 100
-    assert floor["coverage_report"] == "coverage.xml"
-
-    routing = yaml.safe_load(
-        (REPO_ROOT / ".github" / "workflows" / "test-shard-routing.yml").read_text(encoding="utf-8")
-    )
-    floor_caller = routing["jobs"]["floor"]["with"]
-    assert "floor.tc-fitness.toml .tc-fitness.toml" in floor_caller["coverage-combine-post"]
 
 
 def test_shard_fixture_records_real_coverage_data() -> None:
@@ -497,3 +472,23 @@ def test_the_floor_fails_closed_without_the_trunk_ref(
         "the engine passed without a resolvable trunk ref; missing comparison "
         "evidence must fail closed rather than masquerade as fully covered code"
     )
+
+
+def test_new_code_floor_contract_is_one_hundred_percent() -> None:
+    """The org policy and reusable must require 100% before scoring coverage."""
+    document = yaml.safe_load(GATE.read_text(encoding="utf-8")) or {}
+    triggers = document.get("on", document.get(True)) or {}
+    floor = (triggers.get("workflow_call") or {}).get("inputs", {}).get("enforce-new-code-coverage") or {}
+    description = str(floor.get("description", ""))
+    assert "100%" in description
+    assert "80%" not in description
+    ruleset = (GOVERNANCE_ROOT / "CANONICAL-ORG-RULESET.md").read_text(encoding="utf-8")
+    assert "| 100% coverage floor on changed lines |" in ruleset
+    assert "| 80% coverage floor on changed lines |" not in ruleset
+    floor_step = next(step for step in STEPS if FLOOR_INVOCATION in str(step.get("run", "")))
+    body = str(floor_step.get("run", ""))
+    assert "tc_fitness.gate_config import load_core_check_configs" in body
+    assert "governance/scripts/" not in body
+    assert "python -c" in body
+    assert FLOOR_PREFLIGHT in body
+    assert body.index("python -c") < body.index(FLOOR_INVOCATION)

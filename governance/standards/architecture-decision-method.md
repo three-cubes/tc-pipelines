@@ -2,7 +2,7 @@
 
 > This standard governs the **method**: how a design or architecture decision is researched,
 > shaped, and justified before it is recorded. The **mechanics** — where an ADR lives, its id,
-> filename, frontmatter, and namespacing — are the [ADR-POLICY](../decisions/ADR-POLICY.md), not
+> filename, frontmatter, and namespacing — are the [ADR-POLICY](../decisions/ADR-0002-adr-policy.md), not
 > here. A well-formatted ADR that skips the method is still a bad decision.
 
 ## When a decision needs a record
@@ -32,7 +32,7 @@ carry the history.
 6. **Decide, and state the consequences.** What becomes true, what becomes harder, what is now
    foreclosed. Name the fitness function or gate that will keep the decision true (a decision with
    no enforcement drifts back).
-7. **File it** per [ADR-POLICY](../decisions/ADR-POLICY.md): product decisions in the repo's
+7. **File it** per [ADR-POLICY](../decisions/ADR-0002-adr-policy.md): product decisions in the repo's
    `record_dir` with per-repo `ADR-###` numbering + a namespaced `alias:` (`TAZ-ADR-###`,
    `KAI-ADR-###`, `KATA-ADR-###`); org-wide cross-cutting decisions as a prefixed-id row in the
    central register.
